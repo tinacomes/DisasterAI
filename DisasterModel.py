@@ -1,3 +1,4 @@
+!pip install mesa
 #!/usr/bin/env python
 import random
 import math
@@ -10,7 +11,7 @@ import itertools
 
 from mesa import Agent, Model
 from mesa.space import MultiGrid
-from mesa.time import RandomActivation
+#from mesa.time import RandomActivation
 
 #########################################
 # Disaster Model Definition (Updated Trust and Accuracy Version)
@@ -54,7 +55,6 @@ class DisasterModel(Model):
         self.epsilon = epsilon
 
         self.grid = MultiGrid(width, height, torus=False)
-        self.schedule = RandomActivation(self)
         self.tick = 0
         self.tokens_this_tick = {}  
         self.global_variance_data = []  # variance tracking for seci 
@@ -95,9 +95,8 @@ class DisasterModel(Model):
         for i in range(self.num_humans):
             agent_type = "exploitative" if random.random() < self.share_exploitative else "exploratory"
             a = HumanAgent(unique_id=f"H_{i}", model=self, id_num=i, agent_type=agent_type, share_confirming=self.share_confirming, learning_rate=self.learning_rate, epsilon=self.epsilon)
-
             self.humans[f"H_{i}"] = a
-            self.schedule.add(a)
+            self.agents.add(a)  # Add to AgentSet instead of schedule
             x = random.randrange(width)
             y = random.randrange(height)
             self.grid.place_agent(a, (x, y))   
@@ -128,7 +127,7 @@ class DisasterModel(Model):
         for k in range(self.num_ai):
             a = AIAgent(unique_id=f"A_{k}", model=self)
             self.ais[f"A_{k}"] = a
-            self.schedule.add(a)
+            self.agents.add(a) 
             x = random.randrange(width)
             y = random.randrange(height)
             self.grid.place_agent(a, (x, y))
@@ -161,7 +160,7 @@ class DisasterModel(Model):
         self.tokens_this_tick = {}  #
         if self.disaster_dynamics:
             self.update_disaster()
-        self.schedule.step()  # Agents run their steps (sense, request, send_relief)
+        self.agents.shuffle_do("step") # Agents run their steps (sense, request, send_relief)
        
         # Track unmet needs
         height, width = self.disaster_grid.shape
