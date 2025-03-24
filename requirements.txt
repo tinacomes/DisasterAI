@@ -1,0 +1,7 @@
+mesa
+numpy
+matplotlib
+networkx
+mesa[viz]
+seaborn
+scipy
