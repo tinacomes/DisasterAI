@@ -6,7 +6,8 @@ import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
 import scipy.stats as stats
-import itertools       
+import itertools 
+import pickle      
 
 
 from mesa import Agent, Model
@@ -30,7 +31,7 @@ class DisasterModel(Model):
                  trust_update_mode="average", # (Not used further here)
                  ai_alignment_level=0.3,      # ai alignment
                  exploitative_correction_factor=1.0,  # (Not used further)
-                 width=50, height=50,
+                 width=30, height=30,
                  lambda_parameter=0.5,
                  learning_rate=0.05,
                  epsilon=0.2):
@@ -158,7 +159,7 @@ class DisasterModel(Model):
     def step(self):
         self.tick += 1
         self.tokens_this_tick = {}  #
-        if self.disaster_dynamics:
+        if self.disaster_dynamics and self.tick % 5 == 0:  # Every 5 ticks
             self.update_disaster()
         self.agents.shuffle_do("step") # Agents run their steps (sense, request, send_relief)
        
@@ -233,18 +234,20 @@ class DisasterModel(Model):
             np.mean(expl_trust_in),
             np.mean(expl_trust_out)
         ))
-
-        # SECI calculation
-        all_beliefs = []
-        for agent in self.humans.values():
-            all_beliefs.extend(agent.beliefs.values())
-        global_variance = np.var(all_beliefs) if all_beliefs else 1e-6  # Avoid division by zero
-
-        seci_exp = []
-        seci_expl = []
-        exp_friend_vars = []
-        expl_friend_vars = []
-        for agent in self.humans.values():
+        
+       
+        # SECI calculation (every 5 ticks)
+        if self.tick % 5 == 0:
+          all_beliefs = []
+          for agent in self.humans.values():
+             all_beliefs.extend(agent.beliefs.values())
+          global_variance = np.var(all_beliefs) if all_beliefs else 1e-6
+          
+          seci_exp = []
+          seci_expl = []
+          exp_friend_vars = []
+          expl_friend_vars = []
+          for agent in self.humans.values():
             friend_ids = agent.friends
             friend_beliefs = []
             for friend_id in friend_ids:
@@ -271,7 +274,7 @@ class DisasterModel(Model):
             np.mean(exp_friend_vars) if exp_friend_vars else 0,
             np.mean(expl_friend_vars) if expl_friend_vars else 0
         ))
-
+        
         # Debug output (optional)
         if self.tick % 50 == 0:
             print(f"Tick {self.tick}:")
@@ -280,10 +283,11 @@ class DisasterModel(Model):
             print(f"  Exploratory Friend Variance: {np.mean(expl_friend_vars) if expl_friend_vars else 0}")
             print(f"  SECI Exp: {np.mean(seci_exp) if seci_exp else 0}, SECI Expl: {np.mean(seci_expl) if seci_expl else 0}")
 
-        # AECI calculation
-        aeci_exp = []
-        aeci_expl = []
-        for agent in self.humans.values():
+    # AECI calculation (every 5 ticks)
+        if self.tick % 5 == 0:
+         aeci_exp = []
+         aeci_expl = []
+         for agent in self.humans.values():
             total_calls = (agent.calls_human + agent.calls_ai) or 1
             ai_contribution = 0
             for ai_id in [f"A_{k}" for k in range(self.num_ai)]:
@@ -298,47 +302,40 @@ class DisasterModel(Model):
                 aeci_expl.append(aeci)
         self.aeci_data.append((self.tick, np.mean(aeci_exp) if aeci_exp else 0, np.mean(aeci_expl) if aeci_expl else 0))
 
-        # Correlation calculation AECI / SECI
-        window = 50
-        if self.tick >= window:
-            seci_exp_window = [d[1] for d in self.seci_data[-window:]]
-            aeci_exp_window = [d[1] for d in self.aeci_data[-window:]]
-            seci_expl_window = [d[2] for d in self.seci_data[-window:]]
-            aeci_expl_window = [d[2] for d in self.aeci_data[-window:]]
-            corr_exp, p_exp = stats.pearsonr(seci_exp_window, aeci_exp_window) if len(seci_exp_window) > 1 else (0, 1)
-            corr_expl, p_expl = stats.pearsonr(seci_expl_window, aeci_expl_window) if len(seci_expl_window) > 1 else (0, 1)
-            self.correlation_data.append((self.tick, corr_exp, corr_expl, p_exp, p_expl))
-        
-        # Trust decay
+      # Correlation calculation (sampled, with adjusted window)
+        if self.tick % 5 == 0 and self.tick >= 50:
+          seci_exp_window = [d[1] for d in self.seci_data[-10:]]  # Last 10 entries (50 ticks)
+          aeci_exp_window = [d[1] for d in self.aeci_data[-10:]]
+          seci_expl_window = [d[2] for d in self.seci_data[-10:]]
+          aeci_expl_window = [d[2] for d in self.aeci_data[-10:]]
+          corr_exp, p_exp = stats.pearsonr(seci_exp_window, aeci_exp_window) if len(seci_exp_window) > 1 else (0, 1)
+          corr_expl, p_expl = stats.pearsonr(seci_expl_window, aeci_expl_window) if len(seci_expl_window) > 1 else (0, 1)
+          self.correlation_data.append((self.tick, corr_exp, corr_expl, p_exp, p_exp))
+          
+        # Trust decay (every tick for now)
         for agent in self.humans.values():
-            for source in agent.trust:
-                if source not in called_sources:
-                    if agent.agent_type == "exploitative":
-                        decay = 0.0005 if (source.startswith("H_") and source in agent.friends) else \
-                                0.02 if source.startswith("H_") else 0.05
-                    else:
-                        decay = 0.05
-                    agent.trust[source] = max(0, agent.trust[source] - decay)
+          for source in agent.trust:
+            if source not in called_sources:
+                if agent.agent_type == "exploitative":
+                    decay = 0.0005 if (source.startswith("H_") and source in agent.friends) else \
+                            0.02 if source.startswith("H_") else 0.05
+                else:
+                    decay = 0.05
+                agent.trust[source] = max(0, agent.trust[source] - decay)
 
-        # Store data
-        avg_exp_human_trust = np.mean(exp_human_trust) if exp_human_trust else 0
-        avg_exp_ai_trust = np.mean(exp_ai_trust) if exp_ai_trust else 0
-        avg_expl_human_trust = np.mean(expl_human_trust) if expl_human_trust else 0
-        avg_expl_ai_trust = np.mean(expl_ai_trust) if expl_ai_trust else 0
-       
+    # Store data
         self.trust_data.append((
-            self.tick,
-            np.mean(exp_ai_trust) if exp_ai_trust else 0,      # Exploitative AI trust
-            np.mean(expl_ai_trust) if expl_ai_trust else 0,    # Exploratory AI trust
-            np.mean(exp_trust_in) if exp_trust_in else 0,      # Exploitative friend trust
-            np.mean(exp_trust_out) if exp_trust_out else 0,    # Exploitative non-friend trust
-            np.mean(expl_trust_in) if expl_trust_in else 0,    # Exploratory friend trust
-            np.mean(expl_trust_out) if expl_trust_out else 0   # Exploratory non-friend trust
-            ))
-        
+          self.tick,
+          np.mean(exp_ai_trust) if exp_ai_trust else 0,
+          np.mean(expl_ai_trust) if expl_ai_trust else 0,
+          np.mean(exp_trust_in) if exp_trust_in else 0,
+          np.mean(exp_trust_out) if exp_trust_out else 0,
+          np.mean(expl_trust_in) if expl_trust_in else 0,
+          np.mean(expl_trust_out) if expl_trust_out else 0
+        ))
+
         self.calls_data.append((calls_exp_human, calls_exp_ai, calls_expl_human, calls_expl_ai))
         self.rewards_data.append((total_reward_exploit, total_reward_explor))
-        # Note: self.tick is incremented only once at the start
     
 #########################################
 # Agent Definitions
@@ -1037,7 +1034,7 @@ if __name__ == "__main__":
         "share_of_disaster": 0.2,
         "initial_trust": 0.5,
         "initial_ai_trust": 0.5,
-        "number_of_humans": 50,
+        "number_of_humans": 30,
         "share_confirming": 0.5,
         "disaster_dynamics": 2,  # default, to be varied in experiment (c)
         "shock_probability": 0.1,
@@ -1045,8 +1042,8 @@ if __name__ == "__main__":
         "trust_update_mode": "average",
         "ai_alignment_level": 0.3,  # default, to be varied in experiment (b)
         "exploitative_correction_factor": 1.0,
-        "width": 50,
-        "height": 50,
+        "width": 30,
+        "height": 30,
         "lambda_parameter": 0.5,
         "learning_rate": 0.05,  # default, to be varied in experiment (d)
         "epsilon": 0.2,         # default, to be varied in experiment (d)
@@ -1055,27 +1052,43 @@ if __name__ == "__main__":
     
     num_runs = 20  # simulations per parameter combination
 
+    # Save results
+    from google.colab import drive
+    drive.mount('/content/drive')
+
     ### Experiment (a): Vary share_exploitative
     share_values = [0.3, 0.5, 0.7]
     results_a = experiment_share_exploitative(base_params, share_values, num_runs)
     # (Now you can plot outcomes from results_a, e.g., final assistance delivered vs. share_exploitative)
-
+    with open('/content/drive/My Drive/results_a.pkl', 'wb') as f:
+        pickle.dump(results_a, f)
+    print("Experiment (a) completed and saved.")
+    
     ### Experiment (b): Vary AI alignment level
     alignment_values = [0.1, 0.3, 0.5]
     results_b = experiment_ai_alignment(base_params, alignment_values, num_runs)
     # (Plot outcomes vs. ai_alignment_level)
+    with open('/content/drive/My Drive/results_b.pkl', 'wb') as f:
+        pickle.dump(results_b, f)
+    print("Experiment (b) completed and saved.")
 
     ### Experiment (c): Vary disaster dynamics and shock magnitude
     dynamics_values = [1, 2, 3]
     shock_values = [1, 2, 3]
     results_c = experiment_disaster_dynamics(base_params, dynamics_values, shock_values, num_runs)
     # (Plot outcomes vs. disaster parameters; you might create a 3D plot or multiple subplots)
+    with open('/content/drive/My Drive/results_c.pkl', 'wb') as f:
+        pickle.dump(results_c, f)
+    print("Experiment (c) completed and saved.")
 
     ### Experiment (d): Vary learning_rate and epsilon
     learning_rate_values = [0.03, 0.05, 0.07]
     epsilon_values = [0.2, 0.3]
     results_d = experiment_learning_trust(base_params, learning_rate_values, epsilon_values, num_runs)
     # (Plot outcomes vs. learning/trust parameters)
+    with open('/content/drive/My Drive/results_d.pkl', 'wb') as f:
+        pickle.dump(results_d, f)
+    print("Experiment (d) completed and saved.")
 
     # For each experiment you can then extract and plot your time series (trust, SECI, AECI) and final assistance values.
     # For example, for experiment (a):
