@@ -158,11 +158,11 @@ class DisasterModel(Model):
 
     def step(self):
         self.tick += 1
-        self.tokens_this_tick = {}  #
-        if self.disaster_dynamics and self.tick % 5 == 0:  # Every 5 ticks
+        self.tokens_this_tick = {}
+        if self.disaster_dynamics:
             self.update_disaster()
-        self.agents.shuffle_do("step") # Agents run their steps (sense, request, send_relief)
-       
+        self.agents.shuffle_do("step")
+
         # Track unmet needs
         height, width = self.disaster_grid.shape
         token_array = np.zeros((height, width), dtype=int)
@@ -182,9 +182,6 @@ class DisasterModel(Model):
                 total_reward_exploit += agent.total_reward
             else:
                 total_reward_explor += agent.total_reward
-            # Debug pending_relief (uncomment for early ticks)
-            # if self.tick < 5:
-            #     print(f"Agent {agent.unique_id}: pending_relief = {agent.pending_relief}")
 
         # Trust and call tracking
         called_sources = set()
@@ -234,104 +231,102 @@ class DisasterModel(Model):
             np.mean(expl_trust_in),
             np.mean(expl_trust_out)
         ))
-        
-       
+
         # SECI calculation (every 5 ticks)
         if self.tick % 5 == 0:
-          all_beliefs = []
-          for agent in self.humans.values():
-             all_beliefs.extend(agent.beliefs.values())
-          global_variance = np.var(all_beliefs) if all_beliefs else 1e-6
-          
-          seci_exp = []
-          seci_expl = []
-          exp_friend_vars = []
-          expl_friend_vars = []
-          for agent in self.humans.values():
-            friend_ids = agent.friends
-            friend_beliefs = []
-            for friend_id in friend_ids:
-                friend = self.humans.get(friend_id)
-                if friend:
-                    friend_beliefs.extend(friend.beliefs.values())
-            friend_variance = np.var(friend_beliefs) if friend_beliefs else global_variance
-            seci = max(0, 1 - (friend_variance / global_variance)) if global_variance > 0 else 0
-            if agent.agent_type == "exploitative":
-                seci_exp.append(seci)
-                exp_friend_vars.append(friend_variance)
-            else:
-                seci_expl.append(seci)
-                expl_friend_vars.append(friend_variance)
+            all_beliefs = []
+            for agent in self.humans.values():
+                all_beliefs.extend(agent.beliefs.values())
+            global_variance = np.var(all_beliefs) if all_beliefs else 1e-6
 
-        self.seci_data.append((
-            self.tick,
-            np.mean(seci_exp) if seci_exp else 0,
-            np.mean(seci_expl) if seci_expl else 0
-        ))
-        self.global_variance_data.append((self.tick, global_variance))
-        self.friend_variance_data.append((
-            self.tick,
-            np.mean(exp_friend_vars) if exp_friend_vars else 0,
-            np.mean(expl_friend_vars) if expl_friend_vars else 0
-        ))
-        
-        # Debug output (optional)
-        if self.tick % 50 == 0:
-            print(f"Tick {self.tick}:")
-            print(f"  Global Variance: {global_variance}")
-            print(f"  Exploitative Friend Variance: {np.mean(exp_friend_vars) if exp_friend_vars else 0}")
-            print(f"  Exploratory Friend Variance: {np.mean(expl_friend_vars) if expl_friend_vars else 0}")
-            print(f"  SECI Exp: {np.mean(seci_exp) if seci_exp else 0}, SECI Expl: {np.mean(seci_expl) if seci_expl else 0}")
-
-    # AECI calculation (every 5 ticks)
-        if self.tick % 5 == 0:
-         aeci_exp = []
-         aeci_expl = []
-         for agent in self.humans.values():
-            total_calls = (agent.calls_human + agent.calls_ai) or 1
-            ai_contribution = 0
-            for ai_id in [f"A_{k}" for k in range(self.num_ai)]:
-                calls = sum(1 for entry in agent.pending_relief if len(entry) >= 2 and entry[1] == ai_id)
-                trust = agent.trust.get(ai_id, 0)
-                alignment = agent.ai_alignment_scores.get(ai_id, 0.5)
-                ai_contribution += calls * trust * alignment
-            aeci = ai_contribution / total_calls
-            if agent.agent_type == "exploitative":
-                aeci_exp.append(aeci)
-            else:
-                aeci_expl.append(aeci)
-        self.aeci_data.append((self.tick, np.mean(aeci_exp) if aeci_exp else 0, np.mean(aeci_expl) if aeci_expl else 0))
-
-      # Correlation calculation (sampled, with adjusted window)
-        if self.tick % 5 == 0 and self.tick >= 50:
-          seci_exp_window = [d[1] for d in self.seci_data[-10:]]  # Last 10 entries (50 ticks)
-          aeci_exp_window = [d[1] for d in self.aeci_data[-10:]]
-          seci_expl_window = [d[2] for d in self.seci_data[-10:]]
-          aeci_expl_window = [d[2] for d in self.aeci_data[-10:]]
-          corr_exp, p_exp = stats.pearsonr(seci_exp_window, aeci_exp_window) if len(seci_exp_window) > 1 else (0, 1)
-          corr_expl, p_expl = stats.pearsonr(seci_expl_window, aeci_expl_window) if len(seci_expl_window) > 1 else (0, 1)
-          self.correlation_data.append((self.tick, corr_exp, corr_expl, p_exp, p_exp))
-          
-        # Trust decay (every tick for now)
-        for agent in self.humans.values():
-          for source in agent.trust:
-            if source not in called_sources:
+            seci_exp = []
+            seci_expl = []
+            exp_friend_vars = []
+            expl_friend_vars = []
+            for agent in self.humans.values():
+                friend_ids = agent.friends
+                friend_beliefs = []
+                for friend_id in friend_ids:
+                    friend = self.humans.get(friend_id)
+                    if friend:
+                        friend_beliefs.extend(friend.beliefs.values())
+                friend_variance = np.var(friend_beliefs) if friend_beliefs else global_variance
+                seci = max(0, 1 - (friend_variance / global_variance)) if global_variance > 0 else 0
                 if agent.agent_type == "exploitative":
-                    decay = 0.0005 if (source.startswith("H_") and source in agent.friends) else \
-                            0.02 if source.startswith("H_") else 0.05
+                    seci_exp.append(seci)
+                    exp_friend_vars.append(friend_variance)
                 else:
-                    decay = 0.05
-                agent.trust[source] = max(0, agent.trust[source] - decay)
+                    seci_expl.append(seci)
+                    expl_friend_vars.append(friend_variance)
 
-    # Store data
+            self.seci_data.append((
+                self.tick,
+                np.mean(seci_exp) if seci_exp else 0,
+                np.mean(seci_expl) if seci_expl else 0
+            ))
+            self.global_variance_data.append((self.tick, global_variance))
+            self.friend_variance_data.append((
+                self.tick,
+                np.mean(exp_friend_vars) if exp_friend_vars else 0,
+                np.mean(expl_friend_vars) if expl_friend_vars else 0
+            ))
+
+            if self.tick % 50 == 0:
+                print(f"Tick {self.tick}:")
+                print(f"  Global Variance: {global_variance}")
+                print(f"  Exploitative Friend Variance: {np.mean(exp_friend_vars) if exp_friend_vars else 0}")
+                print(f"  Exploratory Friend Variance: {np.mean(expl_friend_vars) if expl_friend_vars else 0}")
+                print(f"  SECI Exp: {np.mean(seci_exp) if seci_exp else 0}, SECI Expl: {np.mean(seci_expl) if seci_expl else 0}")
+
+        # AECI calculation (every 5 ticks)
+        if self.tick % 5 == 0:
+            aeci_exp = []
+            aeci_expl = []
+            for agent in self.humans.values():
+                total_calls = (agent.calls_human + agent.calls_ai) or 1
+                ai_contribution = 0
+                for ai_id in [f"A_{k}" for k in range(self.num_ai)]:
+                    calls = sum(1 for entry in agent.pending_relief if len(entry) >= 2 and entry[1] == ai_id)
+                    trust = agent.trust.get(ai_id, 0)
+                    alignment = agent.ai_alignment_scores.get(ai_id, 0.5)
+                    ai_contribution += calls * trust * alignment
+                aeci = ai_contribution / total_calls
+                if agent.agent_type == "exploitative":
+                    aeci_exp.append(aeci)
+                else:
+                    aeci_expl.append(aeci)
+            self.aeci_data.append((self.tick, np.mean(aeci_exp) if aeci_exp else 0, np.mean(aeci_expl) if aeci_expl else 0))
+
+        # Correlation calculation
+        if self.tick >= 50:
+            seci_exp_window = [d[1] for d in self.seci_data[-10:]]
+            aeci_exp_window = [d[1] for d in self.aeci_data[-10:]]
+            seci_expl_window = [d[2] for d in self.seci_data[-10:]]
+            aeci_expl_window = [d[2] for d in self.aeci_data[-10:]]
+            corr_exp, p_exp = stats.pearsonr(seci_exp_window, aeci_exp_window) if len(seci_exp_window) > 1 else (0, 1)
+            corr_expl, p_expl = stats.pearsonr(seci_expl_window, aeci_expl_window) if len(seci_expl_window) > 1 else (0, 1)
+            self.correlation_data.append((self.tick, corr_exp, corr_expl, p_exp, p_exp))
+
+        # Trust decay
+        for agent in self.humans.values():
+            for source in agent.trust:
+                if source not in called_sources:
+                    if agent.agent_type == "exploitative":
+                        decay = 0.0005 if (source.startswith("H_") and source in agent.friends) else \
+                                0.02 if source.startswith("H_") else 0.05
+                    else:
+                        decay = 0.05
+                    agent.trust[source] = max(0, agent.trust[source] - decay)
+
+        # Store data
         self.trust_data.append((
-          self.tick,
-          np.mean(exp_ai_trust) if exp_ai_trust else 0,
-          np.mean(expl_ai_trust) if expl_ai_trust else 0,
-          np.mean(exp_trust_in) if exp_trust_in else 0,
-          np.mean(exp_trust_out) if exp_trust_out else 0,
-          np.mean(expl_trust_in) if expl_trust_in else 0,
-          np.mean(expl_trust_out) if expl_trust_out else 0
+            self.tick,
+            np.mean(exp_ai_trust) if exp_ai_trust else 0,
+            np.mean(expl_ai_trust) if expl_ai_trust else 0,
+            np.mean(exp_trust_in) if exp_trust_in else 0,
+            np.mean(exp_trust_out) if exp_trust_out else 0,
+            np.mean(expl_trust_in) if expl_trust_in else 0,
+            np.mean(expl_trust_out) if expl_trust_out else 0
         ))
 
         self.calls_data.append((calls_exp_human, calls_exp_ai, calls_expl_human, calls_expl_ai))
