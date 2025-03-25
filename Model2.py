@@ -18,23 +18,11 @@ from mesa.space import MultiGrid
 # Disaster Model Definition (Updated Trust and Accuracy Version)
 #########################################
 class DisasterModel(Model):
-    def __init__(self,
-                 share_exploitative,          # Fraction of humans that are exploitative.
-                 share_of_disaster,           # Fraction of grid cells affected initially.
-                 initial_trust,               # Baseline trust for human agents.
-                 initial_ai_trust,            # Baseline trust for AI agents.
-                 number_of_humans,
-                 share_confirming,            # Fraction of humans that are "confirming"
-                 disaster_dynamics=2,         # Maximum change in disaster per tick.
-                 shock_probability=0.1,       # Probability that a shock occurs.
-                 shock_magnitude=2,           # Maximum shock magnitude.
-                 trust_update_mode="average", # (Not used further here)
-                 ai_alignment_level=0.3,      # ai alignment
-                 exploitative_correction_factor=1.0,  # (Not used further)
-                 width=30, height=30,
-                 lambda_parameter=0.5,
-                 learning_rate=0.05,
-                 epsilon=0.2):
+    def __init__(self, share_exploitative, share_of_disaster, initial_trust, initial_ai_trust,
+                 number_of_humans, share_confirming, disaster_dynamics=2, shock_probability=0.1,
+                 shock_magnitude=2, trust_update_mode="average", ai_alignment_level=0.3,
+                 exploitative_correction_factor=1.0, width=30, height=30, lambda_parameter=0.5,
+                 learning_rate=0.05, epsilon=0.2):
         super().__init__()
         self.share_exploitative = share_exploitative
         self.share_of_disaster = share_of_disaster
@@ -57,59 +45,39 @@ class DisasterModel(Model):
 
         self.grid = MultiGrid(width, height, torus=False)
         self.tick = 0
-        self.tokens_this_tick = {}  
-        self.global_variance_data = []  # variance tracking for seci 
-        self.friend_variance_data = []  
-
-        # For tracking assistance:
+        self.tokens_this_tick = {}
+        self.global_variance_data = []
+        self.friend_variance_data = []
         self.assistance_exploit = {}
         self.assistance_explor = {}
         self.assistance_incorrect_exploit = {}
         self.assistance_incorrect_explor = {}
         self.unmet_needs_evolution = []
+        self.seci_data = []
+        self.aeci_data = []
+        self.correlation_data = []
 
-        #ECHO chamber effects for humans and AI: SECI and AECI
-        self.seci_data = []  # (tick, avg_seci_exp, avg_seci_expl) #add metric for social echo chamber
-        self.aeci_data = [] 
-        self.correlation_data = []  # (tick, corr_exp, corr_expl) track correlation
-        
-        # Disaster Grid as numpy arrays
-        self.disaster_grid = np.zeros((width, height), dtype=int)
-        self.baseline_grid = np.zeros((width, height), dtype=int)
-        self.epicenter = (random.randint(0, width - 1), random.randint(0, height - 1))
-        total_cells = width * height
-        self.disaster_radius = math.sqrt(self.share_of_disaster * total_cells / math.pi)
+        # Disaster Grid
+        self.disaster_grid = np.zeros((width, height), dtype=float)  # Now float for smoother growth/decay
+        self.active_disasters = []  # List of (epicenter, start_tick, phase, current_radius, max_impact)
 
-        # Precompute baseline levels based on distance from epicenter
-        x, y = np.indices((width, height))
-        distances = np.sqrt((x - self.epicenter[0])**2 + (y - self.epicenter[1])**2)
-        self.baseline_grid = np.where(distances < self.disaster_radius / 3, 5,
-                                     np.where(distances < 2 * self.disaster_radius / 3, 4,
-                                             np.where(distances < self.disaster_radius, 3, 0)))
-        self.disaster_grid[...] = self.baseline_grid
-
-        # Create a Watts–Strogatz network for friend selection.
+        # Social network and agents
         self.social_network = nx.watts_strogatz_graph(self.num_humans, 4, 0.1)
-
-        # Create human agents.
         self.humans = {}
         for i in range(self.num_humans):
             agent_type = "exploitative" if random.random() < self.share_exploitative else "exploratory"
-            a = HumanAgent(unique_id=f"H_{i}", model=self, id_num=i, agent_type=agent_type, share_confirming=self.share_confirming, learning_rate=self.learning_rate, epsilon=self.epsilon)
+            a = HumanAgent(unique_id=f"H_{i}", model=self, id_num=i, agent_type=agent_type,
+                           share_confirming=self.share_confirming, learning_rate=self.learning_rate, epsilon=self.epsilon)
             self.humans[f"H_{i}"] = a
-            self.agents.add(a)  # Add to AgentSet instead of schedule
+            self.agents.add(a)
             x = random.randrange(width)
             y = random.randrange(height)
-            self.grid.place_agent(a, (x, y))   
-            a.pos = (x, y)  # explicitly set the agent's position
+            self.grid.place_agent(a, (x, y))
+            a.pos = (x, y)
 
-        # Initialize trust and info_accuracy for each human.
-        self.network_trust_data = []  # (tick, avg_trust_in_friends, avg_trust_outside)
-        
         for i in range(self.num_humans):
             agent_id = f"H_{i}"
             agent = self.humans[agent_id]
-            # Set friends based on social network (Step 2)
             agent.friends = set(f"H_{j}" for j in self.social_network.neighbors(i) if f"H_{j}" in self.humans)
             for j in range(self.num_humans):
                 if agent_id == f"H_{j}":
@@ -119,48 +87,87 @@ class DisasterModel(Model):
             for friend_id in agent.friends:
                 agent.trust[friend_id] = min(1, agent.trust[friend_id] + 0.1)
             for k in range(self.num_ai):
-                ai_trust = initial_ai_trust if agent.agent_type == "exploitative" else initial_ai_trust - 0.1  # Lower initial AI trust for exploratory
+                ai_trust = initial_ai_trust if agent.agent_type == "exploitative" else initial_ai_trust - 0.1
                 agent.trust[f"A_{k}"] = random.uniform(self.base_ai_trust - 0.1, self.base_ai_trust + 0.1)
                 agent.info_accuracy[f"A_{k}"] = random.uniform(0.4, 0.7)
 
-        # Create AI agents.
         self.ais = {}
         for k in range(self.num_ai):
             a = AIAgent(unique_id=f"A_{k}", model=self)
             self.ais[f"A_{k}"] = a
-            self.agents.add(a) 
+            self.agents.add(a)
             x = random.randrange(width)
             y = random.randrange(height)
             self.grid.place_agent(a, (x, y))
-            a.pos = (x, y)  # explicitly set the agent's position
+            a.pos = (x, y)
 
-        # Data tracking.
+        self.network_trust_data = []
         self.trust_data = []
         self.calls_data = []
         self.rewards_data = []
-   
+
     def update_disaster(self):
-        # Calculate difference from baseline
-        diff = self.baseline_grid - self.disaster_grid
-    
-        # Compute gradual changes toward baseline
-        change = np.zeros_like(self.disaster_grid)
-        change[diff > 0] = np.random.randint(1, int(self.disaster_dynamics) + 1, size=np.sum(diff > 0))
-        change[diff < 0] = -np.random.randint(1, int(self.disaster_dynamics) + 1, size=np.sum(diff < 0))
-    
-        # Apply random shocks
-        shock_mask = np.random.random(self.disaster_grid.shape) < self.shock_probability
-        shocks = np.random.randint(-self.shock_magnitude, self.shock_magnitude + 1, size=self.disaster_grid.shape)
-        shocks[~shock_mask] = 0  # Zero out shocks where mask is False
-    
-        # Update grid in-place
-        self.disaster_grid = np.clip(self.disaster_grid + change + shocks, 0, 5)
+        # Reset disaster grid to 0 (we'll rebuild it based on active disasters)
+        self.disaster_grid.fill(0)
+
+        # Check for new main disaster
+        if random.random() < self.shock_probability:  # Using shock_probability as disaster frequency
+            epicenter = (random.randint(0, self.width - 1), random.randint(0, self.height - 1))
+            max_impact = self.shock_magnitude * 1.67  # Scale to map SM=3 to level 5 (3 * 1.67 ≈ 5)
+            self.active_disasters.append((epicenter, self.tick, "growth", 0, max_impact))
+
+        # Process active disasters
+        new_disasters = []
+        for disaster in self.active_disasters:
+            epicenter, start_tick, phase, current_radius, max_impact = disaster
+            ticks_since_start = self.tick - start_tick
+
+            # Determine growth/decay duration based on disaster_dynamics
+            growth_ticks = max(1, 4 - self.disaster_dynamics)  # DD=1: 3 ticks, DD=2: 2 ticks, DD=3: 1 tick
+            decay_ticks = growth_ticks
+            total_duration = growth_ticks + decay_ticks
+
+            # Update phase and radius
+            if phase == "growth" and ticks_since_start < growth_ticks:
+                # Growth phase: radius increases
+                current_radius = (ticks_since_start + 1) * (7.5 / growth_ticks)  # Reach radius 7.5 at end of growth
+                new_disaster = (epicenter, start_tick, "growth", current_radius, max_impact)
+            elif ticks_since_start < growth_ticks + decay_ticks:
+                # Decay phase: radius stays max, but impact decreases
+                current_radius = 7.5
+                phase = "decay"
+                new_disaster = (epicenter, start_tick, phase, current_radius, max_impact)
+            elif ticks_since_start == growth_ticks + decay_ticks:
+                # Start aftershocks based on disaster_dynamics
+                num_aftershocks = self.disaster_dynamics - 1  # DD=1: 0, DD=2: 1, DD=3: 2
+                for i in range(num_aftershocks):
+                    aftershock_tick = self.tick + (i + 1) * 2  # Aftershocks 2 ticks apart
+                    aftershock_impact = max_impact * (0.5 if i == 0 else 0.25)  # 50% then 25% of main impact
+                    self.active_disasters.append((epicenter, aftershock_tick, "growth", 0, aftershock_impact))
+                continue  # Main disaster ends
+            else:
+                continue  # Disaster has ended
+
+            # Apply disaster impact to grid
+            x, y = np.indices((self.width, self.height))
+            distances = np.sqrt((x - epicenter[0])**2 + (y - epicenter[1])**2)
+            if phase == "growth":
+                impact = max_impact * (1 - distances / current_radius)  # Linear decrease with distance
+            else:  # Decay
+                decay_progress = (ticks_since_start - growth_ticks) / decay_ticks
+                impact = max_impact * (1 - decay_progress) * (1 - distances / current_radius)
+            impact = np.clip(impact, 0, 5)
+            impact[distances > current_radius] = 0  # No impact beyond current radius
+            self.disaster_grid = np.maximum(self.disaster_grid, impact)  # Combine overlapping disasters
+
+            new_disasters.append(new_disaster)
+
+        self.active_disasters = new_disasters
 
     def step(self):
         self.tick += 1
         self.tokens_this_tick = {}
-        if self.disaster_dynamics:
-            self.update_disaster()
+        self.update_disaster()  # Update every tick now
         self.agents.shuffle_do("step")
 
         # Track unmet needs
@@ -271,6 +278,7 @@ class DisasterModel(Model):
                 np.mean(expl_friend_vars) if expl_friend_vars else 0
             ))
 
+            # Debug output (optional)
             if self.tick % 50 == 0:
                 print(f"Tick {self.tick}:")
                 print(f"  Global Variance: {global_variance}")
@@ -297,8 +305,8 @@ class DisasterModel(Model):
                     aeci_expl.append(aeci)
             self.aeci_data.append((self.tick, np.mean(aeci_exp) if aeci_exp else 0, np.mean(aeci_expl) if aeci_expl else 0))
 
-        # Correlation calculation
-        if self.tick >= 50:
+        # Correlation calculation (sampled, with adjusted window)
+        if self.tick % 5 == 0 and self.tick >= 50:
             seci_exp_window = [d[1] for d in self.seci_data[-10:]]
             aeci_exp_window = [d[1] for d in self.aeci_data[-10:]]
             seci_expl_window = [d[2] for d in self.seci_data[-10:]]
@@ -307,7 +315,7 @@ class DisasterModel(Model):
             corr_expl, p_expl = stats.pearsonr(seci_expl_window, aeci_expl_window) if len(seci_expl_window) > 1 else (0, 1)
             self.correlation_data.append((self.tick, corr_exp, corr_expl, p_exp, p_exp))
 
-        # Trust decay
+        # Trust decay (every tick for now)
         for agent in self.humans.values():
             for source in agent.trust:
                 if source not in called_sources:
@@ -330,8 +338,7 @@ class DisasterModel(Model):
         ))
 
         self.calls_data.append((calls_exp_human, calls_exp_ai, calls_expl_human, calls_expl_ai))
-        self.rewards_data.append((total_reward_exploit, total_reward_explor))
-    
+        self.rewards_data.append((total_reward_exploit, total_reward_explor))  
 #########################################
 # Agent Definitions
 #########################################
