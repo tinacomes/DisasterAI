@@ -814,28 +814,20 @@ class AIAgent(Agent):
     def provide_information_full(self, human_beliefs, trust, agent_type=None):
         if not self.sensed:
             return {}
-        cells = list(self.sensed.keys())  # List of tuples
+        cells = list(self.sensed.keys())
         sensed_vals = np.array([self.sensed[cell] for cell in cells])
         human_vals = np.array([human_beliefs.get(cell, sensed_vals[i]) for i, cell in enumerate(cells)])
         diff = np.abs(sensed_vals - human_vals)
-        
+    
+        # New alignment factor: same for both agent types, more impactful
         trust_factor = 1 - min(1, trust)
-        if agent_type == "exploitative":
-            alignment_factor = self.model.ai_alignment_level * (1.5 + trust_factor * 2)
-            alignment_factor = min(1.5, alignment_factor)  # Allow more shift
-        else:
-            alignment_factor = self.model.ai_alignment_level * trust_factor
-       
-        alignment_factor = min(1, alignment_factor) if agent_type != "exploitative" else alignment_factor
-   
-        
-        corrected = np.where(
-            diff > 1,
-            np.round(sensed_vals + alignment_factor * (human_vals - sensed_vals)),
-            sensed_vals
-        )
+        alignment_factor = self.model.ai_alignment_level * (1 + trust_factor)
+    
+        # Nonlinear adjustment: amplify alignment when differences are large
+        adjustment = alignment_factor * (human_vals - sensed_vals) * (1 + diff / 5)
+        corrected = np.round(sensed_vals + adjustment)
         corrected = np.clip(corrected, 0, 5)
-        
+    
         return {cell: int(corrected[i]) for i, cell in enumerate(cells)}
 
     def step(self):
