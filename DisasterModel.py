@@ -715,10 +715,9 @@ class HumanAgent(Agent):
             self.model.tokens_this_tick[cell] = self.model.tokens_this_tick.get(cell, 0) + 1
         self.tokens -= num_cells_to_send
     
+    
     def process_relief_actions(self, current_tick, disaster_grid):
-        
         new_pending = []
-     
         for entry in self.pending_relief:
             if len(entry) == 5:
                 t, source_id, accepted_count, confirmations, target_cell = entry
@@ -732,30 +731,30 @@ class HumanAgent(Agent):
                 if level >= 4 and (self.model.assistance_exploit.get(target_cell, 0) + self.model.assistance_explor.get(target_cell, 0)) == 0:
                     reward = 10
                 if level <= 2:
-                    reward = -0.2 * accepted_count #penalty for wrong tokens
+                    reward = -0.2 * accepted_count
                     if source_id:
-                        penalty = 0.1 if self.agent_type == "exploitative" else 0.15  # Higher for exploratory
+                        penalty = 0.1 if self.agent_type == "exploitative" else 0.15
                         self.trust[source_id] = max(0, self.trust[source_id] - penalty)
                         self.Q[source_id] = max(0, self.Q[source_id] - penalty * self.q_parameter)
                 self.total_reward += reward
-               
-                if source_id and self.agent_type == "exploratory":  # Update accuracy
+
+                if source_id and self.agent_type == "exploratory":
                     actual_diff = abs(self.beliefs[target_cell] - level)
                     self.info_accuracy[source_id] = max(0, min(1, self.info_accuracy.get(source_id, 0.5) - 0.05 * actual_diff))
-        
+
+                # Update per-agent token counts
+                agent_type_key = "exploit" if self.agent_type == "exploitative" else "explor"
                 if level >= 4:
-                    if self.agent_type == "exploitative":
-                        self.model.assistance_exploit[target_cell] = self.model.assistance_exploit.get(target_cell, 0) + 1
-                    else:
-                        self.model.assistance_explor[target_cell] = self.model.assistance_explor.get(target_cell, 0) + 1
-                    self.model.tokens_this_tick[target_cell] = self.model.tokens_this_tick.get(target_cell, 0) + 1
+                    self.model.per_agent_tokens[agent_type_key][self.unique_id]["correct"] += 1
+                    self.model.per_agent_tokens[agent_type_key][self.unique_id]["positions"].append(target_cell)
+                    self.model.assistance_exploit[target_cell] = self.model.assistance_exploit.get(target_cell, 0) + 1 if self.agent_type == "exploitative" else self.model.assistance_exploit.get(target_cell, 0)
+                    self.model.assistance_explor[target_cell] = self.model.assistance_explor.get(target_cell, 0) + 1 if self.agent_type == "exploratory" else self.model.assistance_explor.get(target_cell, 0)
                 elif level <= 2:
-                    if self.agent_type == "exploitative":
-                        self.model.assistance_incorrect_exploit[target_cell] = self.model.assistance_incorrect_exploit.get(target_cell, 0) + 1
-                    else:
-                        self.model.assistance_incorrect_explor[target_cell] = self.model.assistance_incorrect_explor.get(target_cell, 0) + 1
-                    self.model.tokens_this_tick[target_cell] = self.model.tokens_this_tick.get(target_cell, 0) + 1
-            # ... Q-value and accuracy updates remain unchanged for now ...
+                    self.model.per_agent_tokens[agent_type_key][self.unique_id]["incorrect"] += 1
+                    self.model.per_agent_tokens[agent_type_key][self.unique_id]["positions"].append(target_cell)
+                    self.model.assistance_incorrect_exploit[target_cell] = self.model.assistance_incorrect_exploit.get(target_cell, 0) + 1 if self.agent_type == "exploitative" else self.model.assistance_incorrect_exploit.get(target_cell, 0)
+                    self.model.assistance_incorrect_explor[target_cell] = self.model.assistance_incorrect_explor.get(target_cell, 0) + 1 if self.agent_type == "exploratory" else self.model.assistance_incorrect_explor.get(target_cell, 0)
+                self.model.tokens_this_tick[target_cell] = self.model.tokens_this_tick.get(target_cell, 0) + 1
             else:
                 new_pending.append(entry)
         self.pending_relief = new_pending
