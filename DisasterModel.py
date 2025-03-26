@@ -562,6 +562,7 @@ class HumanAgent(Agent):
         else:
             # AI branch
             candidate_pool = ai_candidates.copy()
+          
             if candidate_pool:
                 if random.random() >= lambda_param:
                     selected = [max(candidate_pool, key=lambda x: x[1])]
@@ -588,25 +589,27 @@ class HumanAgent(Agent):
                                 accepted += 1
                                 if reported_value == old_belief and self.agent_type == "exploitative":
                                     confirmations += 1
-                                    # Slightly bigger boost for exploitative if confirming
-                                    trust_boost = 0.15 if self.is_confirming else 0.1
+                                    # Increased trust boost for exploitative agents
+                                    trust_boost = 0.25 if self.is_confirming else 0.15
                                     self.trust[candidate] = min(1, self.trust[candidate] + trust_boost)
                                 elif self.agent_type == "exploitative":
-                                    self.trust[candidate] = min(1, self.trust[candidate] + 0.05)
+                                    self.trust[candidate] = min(1, self.trust[candidate] + 0.15)
                                 else:
-                                    self.trust[candidate] = min(1, self.trust[candidate] + 0.03)
+                                    # Increased trust boost for exploratory agents
+                                    self.trust[candidate] = min(1, self.trust[candidate] + 0.10)
                             else:
-                                # Negative update if exploitative
+                                # Increased trust penalty
                                 if self.agent_type == "exploitative":
-                                    self.trust[candidate] = max(0, self.trust[candidate] - 0.01)
+                                    self.trust[candidate] = max(0, self.trust[candidate] - 0.05)
                                 else:
-                                    self.trust[candidate] = max(0, self.trust[candidate] - 0.03)
+                                    self.trust[candidate] = max(0, self.trust[candidate] - 0.10)
 
                 # Store acceptance info
                 accepted_counts[candidate] = (accepted, confirmations)
                 # Lower learning rate for AI Q-values
                 learning_rate_ai = 0.02
                 self.Q[candidate] = (1 - learning_rate_ai) * self.Q[candidate] + learning_rate_ai * accepted
+            
 
         # --- Belief Update (using aggregated_reports) ---
         if aggregated_reports:
