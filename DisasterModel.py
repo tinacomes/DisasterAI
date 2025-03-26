@@ -661,35 +661,25 @@ class HumanAgent(Agent):
             # Force each cell into a tuple of ints and remove duplicates manually.
             cells = []
             for cell in raw_cells:
-                # Convert each coordinate to an int and form a tuple.
                 cell_t = tuple(int(v) for v in cell)
                 if cell_t not in cells:
                     cells.append(cell_t)
         else:
             height, width = self.model.disaster_grid.shape
             cells = [(x, y) for x in range(width) for y in range(height)]
-        
 
         friend_positions = {self.model.humans[friend_id].pos for friend_id in self.friends if friend_id in self.model.humans}
 
         def cell_score(cell):
-        # Force cell to be a standard tuple (optional, if needed)
-            x, y = cell  # cell is assumed to be a tuple (x, y)
+            x, y = cell
             belief = self.beliefs.get(cell, 0)
-            score = belief  # initialize score with the belief
+            score = belief  # Base score on belief
             if self.agent_type == "exploitative":
-                sigma = 80.0  # adjust sigma as needed / smoothing 'ring' effect around epicenter
-                dist_to_epicenter = np.sqrt((x - self.model.epicenter[0])**2 + (y - self.model.epicenter[1])**2)
-                epicenter_weight = np.exp(-((dist_to_epicenter)**2) / (2 * sigma**2)) * 5
-                score += epicenter_weight
-                friend_positions = {self.model.humans[friend_id].pos for friend_id in self.friends if friend_id in self.model.humans}
                 if cell in friend_positions:
-                    score += 0.5
+                    score += 0.5  # Bonus for friend positions
             else:
-                score += 0.1
-                friend_positions = {self.model.humans[friend_id].pos for friend_id in self.friends if friend_id in self.model.humans}
                 if cell in friend_positions:
-                    score += 0.2
+                    score += 0.2  # Smaller bonus for exploratory agents
             # Subtract diversity penalty
             existing_tokens = self.model.tokens_this_tick.get(cell, 0)
             diversity_penalty = existing_tokens * 0.5
@@ -706,22 +696,13 @@ class HumanAgent(Agent):
         total_score = sum(adjusted_scores)
         probabilities = [score / total_score for score in adjusted_scores]
 
-        # Create a candidate list of standard Python tuples.
         candidate_list = [tuple(cell) for cell, _ in candidate_scores]
-
-        # Manually build a 1D numpy array of objects.
         candidate_cells = np.empty(len(candidate_list), dtype=object)
         for i, cell in enumerate(candidate_list):
             candidate_cells[i] = cell
 
         num_cells_to_send = min(int(tokens_to_send), len(candidate_scores))
-
         probabilities = np.array(probabilities)
-
-   #     debugging code
-#print("Candidate cells shape:", candidate_cells.shape)
-    #    print("Probabilities shape:", probabilities.shape)
-     #   assert candidate_cells.shape[0] == probabilities.shape[0], "Mismatch between candidate cells and probabilities lengths"
 
         selected = np.random.choice(
             candidate_cells,
@@ -729,7 +710,6 @@ class HumanAgent(Agent):
             replace=False,
             p=probabilities
         )
-
 
         for cell in selected:
             self.pending_relief.append((self.model.tick, None, 0, 0, cell))
