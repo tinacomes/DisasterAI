@@ -872,9 +872,10 @@ def simulation_generator(num_runs, base_params):
             "assist_exploit": sum(model.assistance_exploit.values()),
             "assist_explor": sum(model.assistance_explor.values()),
             "assist_incorrect_exploit": sum(model.assistance_incorrect_exploit.values()),
-            "assist_incorrect_explor": sum(model.assistance_incorrect_explor.values())
+            "assist_incorrect_explor": sum(model.assistance_incorrect_explor.values()),
+            "per_agent_tokens": model.per_agent_tokens 
         }
-        yield result
+        yield result, model
         del model
         gc.collect()
 
@@ -896,6 +897,7 @@ def aggregate_simulation_results(num_runs, base_params):
         assist_explor_list.append(result["assist_explor"])
         assist_incorrect_exploit_list.append(result["assist_incorrect_exploit"])
         assist_incorrect_explor_list.append(result["assist_incorrect_explor"])
+        per_agent_tokens_list.append(result["per_agent_tokens"])
     
     trust_array = np.stack(trust_list, axis=0)
     seci_array = np.stack(seci_list, axis=0)
@@ -912,6 +914,20 @@ def aggregate_simulation_results(num_runs, base_params):
     aeci_mean = np.mean(aeci_array, axis=0)
     aeci_lower = np.percentile(aeci_array, 25, axis=0)
     aeci_upper = np.percentile(aeci_array, 75, axis=0)
+
+    # Compute per-agent averages
+    exploit_correct = []
+    exploit_incorrect = []
+    explor_correct = []
+    explor_incorrect = []
+    for per_agent_tokens in per_agent_tokens_list:
+        num_exploit = len(per_agent_tokens["exploit"])
+        num_explor = len(per_agent_tokens["explor"])
+        exploit_correct.append(np.mean([data["correct"] for data in per_agent_tokens["exploit"].values()]) if num_exploit > 0 else 0)
+        exploit_incorrect.append(np.mean([data["incorrect"] for data in per_agent_tokens["exploit"].values()]) if num_exploit > 0 else 0)
+        explor_correct.append(np.mean([data["correct"] for data in per_agent_tokens["explor"].values()]) if num_explor > 0 else 0)
+        explor_incorrect.append(np.mean([data["incorrect"] for data in per_agent_tokens["explor"].values()]) if num_explor > 0 else 0)
+    
     
     assist_stats = {
         "exploit": {
@@ -933,6 +949,12 @@ def aggregate_simulation_results(num_runs, base_params):
             "mean": np.mean(assist_incorrect_explor_list),
             "lower": np.percentile(assist_incorrect_explor_list, 25),
             "upper": np.percentile(assist_incorrect_explor_list, 75)
+        },
+        "per_agent": {
+            "exploit_correct": {"mean": np.mean(exploit_correct), "lower": np.percentile(exploit_correct, 25), "upper": np.percentile(exploit_correct, 75)},
+            "exploit_incorrect": {"mean": np.mean(exploit_incorrect), "lower": np.percentile(exploit_incorrect, 25), "upper": np.percentile(exploit_incorrect, 75)},
+            "explor_correct": {"mean": np.mean(explor_correct), "lower": np.percentile(explor_correct, 25), "upper": np.percentile(explor_correct, 75)},
+            "explor_incorrect": {"mean": np.mean(explor_incorrect), "lower": np.percentile(explor_incorrect, 25), "upper": np.percentile(explor_incorrect, 75)}
         }
     }
     
