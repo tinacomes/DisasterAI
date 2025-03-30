@@ -214,6 +214,7 @@ class DisasterModel(Model):
 class HumanAgent(Agent):
     def __init__(self, unique_id, model, id_num, agent_type, share_confirming, learning_rate=0.05, epsilon=0.2):
         super().__init__(model)
+
         self.unique_id = unique_id
         self.id_num = id_num
         self.agent_type = agent_type
@@ -221,16 +222,17 @@ class HumanAgent(Agent):
         self.learning_rate = learning_rate      # Q-learning update parameter.
         self.epsilon = epsilon                  # Exploration probability.
         self.q_parameter = 0.95                 # Scaling factor for initial Q-values.
-        self.human_call_probability = 0.3       # Extra chance to force a human call.
+        self.human_call_probability = 0.3       # (No forced human call based on tick now.)
 
-        # Trust parameters (exposed for sensitivity analysis).
-        self.trust_decay_friends = 0.0005
+        # --- ADJUSTED TRUST PARAMETERS ---
+        # Increase friend trust decay so it doesn't remain constantly high.
+        self.trust_decay_friends = 0.01         # Was 0.0005, now 0.01
         self.trust_decay_nonfriends = 0.02
         self.trust_decay_ai = 0.05
         self.trust_boost_confirmation = 0.3
         self.trust_boost_acceptance = 0.1
 
-        self.Q = {}                           # Q-values for each candidate.
+        self.Q = {}                           # Q-value dictionary.
         self.trust = {}                       # Trust levels for each candidate.
         self.info_accuracy = {}               # Estimated info–accuracy.
         self.friends = set()
@@ -241,7 +243,7 @@ class HumanAgent(Agent):
         width, height = self.model.grid.width, self.model.grid.height
         self.beliefs = {(x, y): 0 for x in range(width) for y in range(height)}
 
-        # Parameters for belief update.
+        # Set belief update parameters.
         if self.agent_type == "exploitative":
             self.D = 1.0
             self.delta = 3
@@ -252,32 +254,92 @@ class HumanAgent(Agent):
         self.pending_relief = []
         self.total_reward = 0
 
+    # ------------------- Q-LEARNING UPDATE (unchanged) -------------------
     def update_q_value(self, candidate, reward):
         old_q = self.Q.get(candidate, 0)
         new_q = old_q + self.learning_rate * (reward - old_q)
         self.Q[candidate] = new_q
 
+    # ------------------- NEW MODE CHOICE FUNCTION -------------------
     def choose_information_mode(self, best_human, best_ai, lambda_param, multiplier):
-        if self.model.tick - self.last_human_call_tick > 10:
-            return "human"
-        if random.random() < self.human_call_probability:
-            return "human"
-        if random.random() >= lambda_param and best_human * multiplier > best_ai:
-            return "human"
-        else:
+        """
+        Instead of forcing human mode based on ticks,
+        compute the probability of choosing AI mode proportional to its Q-value.
+        """
+        total = best_human + best_ai + 1e-6  # Prevent division by zero.
+        prob_ai = best_ai / total
+        # With probability equal to the AI fraction, choose AI.
+        if random.random() < prob_ai:
             return "ai"
-
-    def update_trust(self, candidate, accepted, is_confirmation=False):
-        if accepted:
-            boost = self.trust_boost_confirmation if is_confirmation else self.trust_boost_acceptance
-            self.trust[candidate] = min(1, self.trust[candidate] + boost)
-
-    def decay_trust(self, candidate):
-        if candidate.startswith("H_"):
-            decay = self.trust_decay_friends if candidate in self.friends else self.trust_decay_nonfriends
         else:
-            decay = self.trust_decay_ai
-        self.trust[candidate] = max(0, self.trust[candidate] - decay)
+            return "human"
+
+    # ------------------- UPDATED REQUEST INFORMATION -------------------
+    def request_information(self):
+        human_candidates = []
+        ai_candidates = []
+        for candidate in self.trust:
+            if candidate.startswith("H_"):
+                # --- REDUCED FRIEND BONUS ---
+                bonus = 0.2 if candidate in self.friends else 0.0  # Was 1.0 before.
+                base_q = ((self.info_accuracy.get(candidate, 0.5) * 0.2) +
+                          (self.trust[candidate] * 0.8) + bonus)
+                noise = random.uniform(0, 0.1)
+                if candidate not in self.Q:
+                    self.Q[candidate] = (base_q + noise) * self.q_parameter
+                human_candidates.append((candidate, self.Q[candidate]))
+            elif candidate.startswith("A_"):
+                # --- INCREASED COVERAGE BONUS FOR AI ---
+                if candidate not in self.Q:
+                    coverage_bonus = 0.8  # Increased from 0.3.
+                    self.Q[candidate] = ((self.info_accuracy.get(candidate, 0.5) * 0.6) +
+                                         (self.trust[candidate] * 0.4)) * self.q_parameter * coverage_bonus
+                ai_candidates.append((candidate, self.Q[candidate]))
+        best_human = max([q for _, q in human_candidates]) if human_candidates else 0
+        best_ai = max([q for _, q in ai_candidates]) if ai_candidates else 0
+        multiplier = 4.0 if self.agent_type == "exploitative" else 1.5
+        lambda_param = 0.15 if self.agent_type == "exploitative" else 0.4
+
+        mode_choice = self.choose_information_mode(best_human, best_ai, lambda_param, multiplier)
+
+        if mode_choice == "human":
+            self.last_human_call_tick = self.model.tick
+            num_calls = 5 if self.agent_type == "exploitative" else 7
+            selected_candidates = self.select_candidates(human_candidates, num_calls)
+            for candidate, q_val in selected_candidates:
+                self.calls_human += 1
+                accepted = 0
+                other = self.model.humans.get(candidate)
+                if other is not None:
+                    rep = other.provide_information_full()
+                    if rep is not None:
+                        for cell, reported_value in rep.items():
+                            old_belief = self.beliefs[cell]
+                            d = abs(reported_value - old_belief)
+                            P_accept = 1.0 if d == 0 else (self.D ** self.delta) / ((d ** self.delta) + (self.D ** self.delta))
+                            if random.random() < P_accept:
+                                accepted += 1
+                                self.update_trust(candidate, accepted=True, is_confirmation=(reported_value == old_belief))
+                self.update_q_value(candidate, accepted)
+        else:
+            selected_candidates = self.select_candidates(ai_candidates, num_calls=1)
+            for candidate, q_val in selected_candidates:
+                self.calls_ai += 1
+                accepted = 0
+                other = self.model.ais.get(candidate)
+                if other is not None:
+                    rep = other.provide_information_full(self.beliefs, trust=self.trust[candidate], agent_type=self.agent_type)
+                    if rep is not None:
+                        for cell, reported_value in rep.items():
+                            old_belief = self.beliefs[cell]
+                            d = abs(reported_value - old_belief)
+                            P_accept = 1.0 if d == 0 else (self.D ** self.delta) / ((d ** self.delta) + (self.D ** self.delta))
+                            if random.random() < P_accept:
+                                accepted += 1
+                                self.update_trust(candidate, accepted=True, is_confirmation=(reported_value == old_belief))
+                            else:
+                                self.update_trust(candidate, accepted=False)
+                self.update_q_value(candidate, accepted)
 
     def select_candidates(self, candidates, num_calls):
         selected = []
