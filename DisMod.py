@@ -97,22 +97,7 @@ class HumanAgent(Agent):
                 level = max(0, min(5, level + random.choice([-1, 1])))
             info[cell] = level
         return info
-
-    def sense_environment(self):
-        pos = self.pos
-        cells = self.model.grid.get_neighborhood(pos, moore=True, radius=1, include_center=True)
-        for cell in cells:
-            self.beliefs[cell] = self.model.disaster_grid[cell]
             
-    def send_relief(self):
-        tokens_to_send = int(self.tokens * 0.7)
-        if self.agent_type == "exploitative":
-            raw_cells = self.model.grid.get_neighborhood(self.pos, moore=True, radius=2, include_center=True)
-            cells = list(set(tuple(int(v) for v in cell) for cell in raw_cells))
-        else:
-            height, width = self.model.disaster_grid.shape
-            cells = [(x, y) for x in range(width) for y in range(height)]
-        friend_positions = {self.model.humans[friend_id].pos for friend_id in self.friends if friend_id in self.model.humans}
 
         def cell_score(cell):
             x, y = cell
@@ -188,6 +173,9 @@ class HumanAgent(Agent):
             else:
                 new_pending.append(entry)
         self.pending_relief = new_pending
+
+    def decay_trust(self, candidate):
+        self.trust[candidate] = max(0, self.trust[candidate] - 0.01)
 
     def request_information(self):
         human_candidates = []
@@ -988,14 +976,6 @@ class DisasterModel(Model):
             for agent in self.humans.values():
                 agent.accum_calls_ai = 0
                 agent.accum_calls_total = 0
-
-    def step(self):
-        self.tick += 1
-        self.tokens_this_tick = {}
-        self.update_disaster()
-        random.shuffle(self.agent_list)
-        for agent in self.agent_list:
-            agent.step()
 
 #########################################
 # Simulation & Experiment Functions
