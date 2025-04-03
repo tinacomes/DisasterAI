@@ -175,7 +175,8 @@ class HumanAgent(Agent):
         self.pending_relief = new_pending
 
     def decay_trust(self, candidate):
-        self.trust[candidate] = max(0, self.trust[candidate] - 0.01)
+        decay_rate = 0.01 if candidate not in self.friends else 0.002  # Slower trust decay for friends
+        self.trust[candidate] = max(0, self.trust[candidate] - decay_rate)
 
     def request_information(self):
         human_candidates = []
@@ -298,7 +299,8 @@ class HumanAgent(Agent):
             friend_values = [self.trust[f] for f in self.friends]
             avg_friend = sum(friend_values) / len(friend_values)
             for friend in self.friends:
-                self.trust[friend] = 0.5 * self.trust[friend] + 0.5 * avg_friend
+                self.trust[friend] = 0.7 * self.trust[friend] + 0.3 * avg_friend
+                def smooth_friend_trust(self):
 
     def sense_environment(self):
         pos = self.pos
@@ -531,7 +533,10 @@ def aggregate_simulation_results(num_runs, base_params):
         "assist": assist_stats,
         "assist_ratio": ratio_stats,
         "per_agent_tokens": per_agent_tokens_list
+        "raw_exploit_correct": exploit_correct,  #  raw data for box plots
+        "raw_explor_correct": explor_correct     #  raw data for box plots
     }
+
 
 def experiment_share_exploitative(base_params, share_values, num_runs=20):
     results = {}
@@ -1457,6 +1462,8 @@ if __name__ == "__main__":
         plot_retainment_comparison(results_a[share]["seci"], results_a[share]["aeci"],
                                    results_a[share]["retain_seci"], results_a[share]["retain_aeci"],
                                    f"(Share={share})")
+        plot_assistance(results_a[share]["assist"], results_a[share]["raw_exploit_correct"],
+                    results_a[share]["raw_explor_correct"], f"(Share={share})")
     
     # Experiment B: Vary AI Alignment Level
     alignment_values = [0.1, 0.5, 0.9]
