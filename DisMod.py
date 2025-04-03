@@ -67,6 +67,16 @@ class HumanAgent(Agent):
         self.accepted_ai = 0
         self.accepted_friend = 0
 
+    def update_trust(self, candidate, accepted, is_confirmation=False):
+        if accepted:
+            if self.agent_type == "exploitative":
+                boost = 0.4 if is_confirmation else 0.05
+            else:
+                boost = 0.1 if is_confirmation else 0.2
+            self.trust[candidate] = min(1, self.trust.get(candidate, 0) + boost)
+        else:
+            self.trust[candidate] = max(0, self.trust.get(candidate, 0) - 0.05)
+
     def choose_information_mode(self, best_human, best_ai, lambda_param, multiplier):
         total = best_human + best_ai + 1e-6
         prob_ai = (best_ai / total) * multiplier
