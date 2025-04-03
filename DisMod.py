@@ -618,16 +618,29 @@ def plot_trust_evolution(trust_stats):
     plt.show()
 
 def plot_seci_aeci_evolution(seci_array, aeci_array):
+    # Ensure arrays are at least 3D
+    seci_array = np.atleast_3d(seci_array)
+    aeci_array = np.atleast_3d(aeci_array)
+    # Now assume shape is (num_runs, T, 3) so we take the first run for ticks
     ticks = seci_array[0, :, 0]
+    
+    # Compute means across runs for exploitative and exploratory values
+    seci_exp = seci_array[:, :, 1]
+    seci_expl = seci_array[:, :, 2]
+    aeci_exp = aeci_array[:, :, 1]
+    aeci_expl = aeci_array[:, :, 2]
+    
+    # Compute mean, lower (25th percentile), and upper (75th percentile) across runs
     def compute_stats(arr):
         mean = np.mean(arr, axis=0)
         lower = np.percentile(arr, 25, axis=0)
         upper = np.percentile(arr, 75, axis=0)
         return mean, lower, upper
-    seci_exp_mean, seci_exp_lower, seci_exp_upper = compute_stats(seci_array[:, :, 1])
-    seci_expl_mean, seci_expl_lower, seci_expl_upper = compute_stats(seci_array[:, :, 2])
-    aeci_exp_mean, aeci_exp_lower, aeci_exp_upper = compute_stats(aeci_array[:, :, 1])
-    aeci_expl_mean, aeci_expl_lower, aeci_expl_upper = compute_stats(aeci_array[:, :, 2])
+
+    seci_exp_mean, seci_exp_lower, seci_exp_upper = compute_stats(seci_exp)
+    seci_expl_mean, seci_expl_lower, seci_expl_upper = compute_stats(seci_expl)
+    aeci_exp_mean, aeci_exp_lower, aeci_exp_upper = compute_stats(aeci_exp)
+    aeci_expl_mean, aeci_expl_lower, aeci_expl_upper = compute_stats(aeci_expl)
 
     fig, axes = plt.subplots(1, 2, figsize=(12, 5), sharex=True)
     axes[0].plot(ticks, seci_exp_mean, label="Exploitative", color="blue")
@@ -650,6 +663,7 @@ def plot_seci_aeci_evolution(seci_array, aeci_array):
 
     plt.tight_layout()
     plt.show()
+
 
 def plot_assistance(assist_stats, title_suffix=""):
     labels = ['Exploitative', 'Exploratory']
