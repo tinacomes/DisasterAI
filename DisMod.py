@@ -197,7 +197,7 @@ class HumanAgent(Agent):
                                              (self.trust[candidate] * 0.8)) * self.q_parameter * coverage_bonus
                     ai_candidates.append((candidate, self.Q[candidate]))
             num_calls = 5
-            multiplier = 4.0
+            multiplier = 1.0 #AI preference
             lambda_param = 0.15
         else:
             for candidate in self.trust:
@@ -236,7 +236,12 @@ class HumanAgent(Agent):
                         for cell, reported_value in rep.items():
                             old_belief = self.beliefs[cell]
                             d = abs(reported_value - old_belief)
-                            P_accept = 1.0 if d == 0 else (self.D ** self.delta) / ((d ** self.delta) + (self.D ** self.delta))
+                            if self.agent_type == "exploitative":
+                                friend_bonus = 2 if candidate in self.friends else 1.0  # Boost for friends
+                            else # exploratory
+                                friend_bonus = 1.2 if candidate in self.friends else 1.0  # Boost for friends
+                            P_accept = 1.0 if d == 0 else (self.D ** self.delta) / ((d ** self.delta) + (self.D ** self.delta)) * friend_bonus
+                            P_accept = min(1.0, P_accept)  # Cap at 1
                             if random.random() < P_accept:
                                 accepted += 1
                                 self.accepted_human += 1
