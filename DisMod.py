@@ -57,6 +57,9 @@ class HumanAgent(Agent):
         self.accepted_human = 0
         self.accepted_friend = 0
         self.accepted_ai = 0
+
+        self.correct_targets = 0
+        self.incorrect_targets = 0
         
         self.tokens_this_tick = {}
         self.pending_rewards = []  # List of tuples: (tick_due, mode, list_of_cells)
@@ -67,33 +70,68 @@ class HumanAgent(Agent):
         height, width = self.model.disaster_grid.shape
         for x in range(width):
             for y in range(height):
-                self.beliefs[(x, y)] = 0
+                self.beliefs[(x, y)] = {'level': 0, 'confidence': 0.1}  # Initialize with level 0 and low confidence
         self.sense_environment()
+
+      
 
     def sense_environment(self):
         pos = self.pos
         radius = 1 if self.agent_type == "exploitative" else 5
         cells = self.model.grid.get_neighborhood(pos, moore=True, radius=radius, include_center=True)
         for cell in cells:
-            x, y = cell
-            actual = self.model.disaster_grid[x, y]
-            if random.random() < 0.3:
-                self.beliefs[cell] = max(0, min(5, actual + random.choice([-1, 1])))
-            else:
-                self.beliefs[cell] = actual
+            if 0 <= cell[0] < self.model.width and 0 <= cell[1] < self.model.height:
+                actual = self.model.disaster_grid[cell[0], cell[1]] # Use (x,y)
+                noise_roll = random.random()
+                if noise_roll < 0.1: # 10% chance slight error
+                    belief_level = max(0, min(5, actual + random.choice([-1, 1])))
+                    belief_conf = 0.7 # Lower confidence if noisy read
+                elif noise_roll < 0.3: # 20% chance larger error (original logic) - REMOVED, simplified noise
+                    # Let's simplify: 80% accurate read, 20% noisy read by +/- 1
+                    belief_level = max(0, min(5, actual + random.choice([-1, 1])))
+                    belief_conf = 0.7 # Lower confidence if noisy read
+                else: # 70% Accurate read
+                    belief_level = actual
+                    belief_conf = 0.95 # High confidence for direct sensing
+
+            # Update belief with level and confidence
+            self.beliefs[cell] = {'level': belief_level, 'confidence': belief_conf}
+        # else: cell is outside grid, ignore
+           
+
 
     def report_beliefs(self, caller_pos):
-        if self.model.disaster_grid[self.pos] >= 4 and random.random() < 0.1: #10% chance of not reporting if on a disaster affected grid cell
+        # Ensure self.pos access is correct if it's a tuple
+        try:
+            current_pos_level = self.model.disaster_grid[self.pos[0], self.pos[1]]
+        except IndexError:
+            # Handle cases where pos might be invalid temporarily (e.g., during setup)
+            current_pos_level = 0 # Assume safe if position is invalid
+
+        # Check disaster level at the agent's own position
+        if current_pos_level >= 4 and random.random() < 0.1: # 10% chance of not reporting if on a disaster affected grid cell
             return {}
+
         radius = 1 if self.agent_type == "exploitative" else 5
         cells = self.model.grid.get_neighborhood(caller_pos, moore=True, radius=radius, include_center=True)
         report = {}
         for cell in cells:
-            value = self.beliefs.get(cell, 0)
-            if random.random() < 0.1:
-                value = max(0, min(5, value + random.choice([-1, 1])))
-            report[cell] = value
-        return report
+            # Retrieve the belief dictionary for the cell, provide default dict if unknown
+            belief_info = self.beliefs.get(cell, {'level': 0, 'confidence': 0.1})
+
+            # Ensure belief_info is a dictionary before accessing 'level'
+            current_level = belief_info.get('level', 0) if isinstance(belief_info, dict) else belief_info # Handles default or potential old int format
+
+            # Apply noise to the level (not the dictionary)
+            if random.random() < 0.1: # 10% chance to report noisy value
+                noisy_level = max(0, min(5, current_level + random.choice([-1, 1])))
+                # Store the integer level in the report
+                report[cell] = noisy_level
+            else:
+                # Store the current believed integer level in the report
+                report[cell] = current_level
+
+        return report # Report dictionary contains integer levels as values
 
     def choose_information_mode(self):
         if random.random() < self.epsilon:
@@ -103,6 +141,7 @@ class HumanAgent(Agent):
     def request_information(self):
         mode_choice = self.choose_information_mode()
         reports = {}
+        
         if mode_choice.startswith("A_"):
             ai_id = mode_choice
             chosen_ai = self.model.ais[ai_id]
@@ -125,26 +164,61 @@ class HumanAgent(Agent):
         self.tokens_this_tick[mode_choice] = self.tokens_this_tick.get(mode_choice, 0) + 1
 
         trust_reward = 0
-        for cell, reported_value in reports.items():
-            old_belief = self.beliefs.get(cell, 0)
-            d = abs(reported_value - old_belief)
-            friend_weight = 1.5 if (mode_choice == "human" and any(c.unique_id in self.friends for c in top_candidates)) else 1.0
+
+        for cell, reported_value in reports.items(): # reported_value is an INT level
+            # Retrieve the agent's own belief *dictionary* for the cell
+            belief_info = self.beliefs.get(cell, {'level': 0, 'confidence': 0.1})
+            # Extract the agent's own believed *level* (int)
+            old_belief_level = belief_info.get('level', 0) if isinstance(belief_info, dict) else belief_info
+
+            # Calculate difference between reported level (int) and own believed level (int)
+            d = abs(reported_value - old_belief_level) # Now compares int vs int
+
+            # Friend weight logic might need checking based on 'top_candidates' if source was human
+            is_human_source = (mode_choice == "human")
+            friend_weight = 1.0
+            source_agent_id = None # Keep track of the specific source
+            if is_human_source and top_candidates: # Ensure top_candidates is not empty
+                source_agent_id = top_candidates[0].unique_id # Simplified: assume top candidate is the source
+                if source_agent_id in self.friends:
+                    friend_weight = 1.5
+            # If AI source, use mode_choice as ID for trust updates later
+            elif not is_human_source:
+                 source_agent_id = mode_choice
+
+
+            # Acceptance probability calculation (uses 'd')
             P_accept = 1.0 if d == 0 else (self.D ** self.delta) / ((d ** self.delta) + (self.D ** self.delta)) * friend_weight
-            
+
+            # --- Acceptance logic (stores dict) ---
             if random.random() < P_accept:
-                self.beliefs[cell] = reported_value
-                if self.agent_type == "exploitative":
-                    delta = 0.075 if self.trust_update_mode == "average" else 0.25
-                    target = mode_choice if mode_choice.startswith("A_") else top_candidates[0].unique_id
-                    if target not in self.trust: self.trust[target] = self.model.base_ai_trust if target.startswith("A_") else self.model.base_trust
-                    trust_reward += delta * friend_weight
-                    self.trust[target] = min(1.0, self.trust.get(target, 0) + delta * friend_weight)
-                if mode_choice == "human":
-                    self.accepted_human += 1
-                    if any(c.unique_id in self.friends for c in top_candidates):
-                        self.accepted_friend += 1
+                 # Ensure source_agent_id is defined before using it for confidence/trust update
+                if source_agent_id:
+                    if source_agent_id not in self.trust: # Safety check
+                        base = self.model.base_ai_trust if source_agent_id.startswith("A_") else self.model.base_trust
+                        self.trust[source_agent_id] = base
+
+                    new_confidence = self.trust.get(source_agent_id, 0.5) * 0.9
+                    # Store belief as dict (already corrected in previous step)
+                    self.beliefs[cell] = {'level': reported_value, 'confidence': new_confidence}
+
+                    # Trust update logic using source_agent_id
+                    if self.agent_type == "exploitative":
+                        delta = 0.075 if self.trust_update_mode == "average" else 0.25
+                        trust_reward += delta * friend_weight
+                        self.trust[source_agent_id] = min(1.0, self.trust.get(source_agent_id, 0) + delta * friend_weight)
+
+                    # Update acceptance counters
+                    if is_human_source:
+                        self.accepted_human += 1
+                        if source_agent_id in self.friends: # Check specific source
+                            self.accepted_friend += 1
+                    else: # AI source
+                        self.accepted_ai += 1
                 else:
-                    self.accepted_ai += 1
+                    # Handle case where source_agent_id couldn't be determined (shouldn't happen ideally)
+                    print(f"Warning: Could not determine source for accepted info at cell {cell}")
+
 
         if self.agent_type == "exploitative" and trust_reward > 0:
             old_q = self.q_table[mode_choice]
@@ -165,54 +239,97 @@ class HumanAgent(Agent):
             self.pending_rewards.append((self.model.tick + 2, list(self.tokens_this_tick.keys())[0], need_cells))
 
     def send_relief(self):
-        max_target_cells = 5 # <-- Clearer name
+        max_target_cells = 5 # <-- Max cells to target
         height, width = self.model.disaster_grid.shape
         cells = [(x, y) for x in range(width) for y in range(height)]
-        # Find up to max_target_cells cells with highest perceived need (>=4)
-        need_cells = sorted(
-            [(cell, self.beliefs.get(cell, 0)) for cell in cells if self.beliefs.get(cell, 0) >= 4],
-            key=lambda x: x[1], reverse=True
-        )[:max_target_cells] # <-- Use new name
-        if need_cells:
-            # Record which cells were targeted this tick in the model's central tracker
-            for cell, _ in need_cells:
-                self.model.tokens_this_tick[cell] = self.model.tokens_this_tick.get(cell, 0) + 1
 
-            # Append pending reward: (due tick, mode, cells targeted)
-            # Requires knowing which information mode led to this relief decision.
-            # The agent's self.tokens_this_tick stores modes used *in this step*.
+        # Calculate expected need score for cells believed to be potentially needy
+        cell_scores = []
+        for cell, belief_info in self.beliefs.items():
+            # Ensure belief_info is a dictionary before accessing
+            if isinstance(belief_info, dict):
+                level = belief_info.get('level', 0)
+                confidence = belief_info.get('confidence', 0.1) # Use default if confidence missing
+
+                # Filter: Consider cells believed to be level 4 or 5
+                if level >= 4:
+                    # Calculate score = level * confidence (adjust level weight if needed, e.g., level^2 * conf)
+                    score = level * confidence
+                    cell_scores.append({'cell': cell, 'score': score, 'level': level}) # Store level too
+            # else: belief_info might be old format (int) or invalid, ignore
+
+        # Sort potential target cells by descending score
+        need_cells_sorted_by_score = sorted(cell_scores, key=lambda x: x['score'], reverse=True)
+
+        # Select the top 'max_target_cells' based on the score
+        top_cells_info = need_cells_sorted_by_score[:max_target_cells]
+        # Extract just the cell coordinates for the model's tracking
+        targeted_cells_coords = [item['cell'] for item in top_cells_info]
+
+        if targeted_cells_coords:
+            # Record which cells were targeted this tick in the model's central tracker
+            for cell in targeted_cells_coords:
+                # Ensure cell is valid before adding to model tracker
+                if 0 <= cell[0] < self.model.width and 0 <= cell[1] < self.model.height:
+                    self.model.tokens_this_tick[cell] = self.model.tokens_this_tick.get(cell, 0) + 1
+                # else: ignore invalid cell target
+
+            # Prepare data for pending reward: needs list of (cell, level) tuples
+            # The reward logic needs the belief level at the time of sending relief
+            need_cells_for_reward = [(item['cell'], item['level']) for item in top_cells_info]
+
+            # Append pending reward: (due tick, mode, list_of_cells_with_level)
             if self.tokens_this_tick: # Check if any info was requested this tick
-                # If multiple modes used due to epsilon, which one gets credit/blame?
-                # Original logic takes the first key: list(self.tokens_this_tick.keys())[0].
-                # Let's assume this simplistic credit assignment is acceptable for now.
-             responsible_mode = list(self.tokens_this_tick.keys())[0]
-             self.pending_rewards.append((self.model.tick + 2, responsible_mode, need_cells))
+                responsible_mode = list(self.tokens_this_tick.keys())[0] # Still using simple credit assignment
+                self.pending_rewards.append((self.model.tick + 2, responsible_mode, need_cells_for_reward)) # Pass list of (cell, level) tuples
 
             # Reset the agent's record of modes used for info this tick, ready for next step.
-            self.tokens_this_tick = {} # Moved reset here
+            self.tokens_this_tick = {}
 
     def process_reward(self):
+
         """Compute and return numeric reward for expired pending rewards."""
         current_tick = self.model.tick
         expired = [r for r in self.pending_rewards if r[0] <= current_tick]
         self.pending_rewards = [r for r in self.pending_rewards if r[0] > current_tick]
         total_agent_reward = 0
-        for tick, mode, cells in expired:
+
+        # Outer loop unpacks: (tick, mode, list_of_tuples)
+        # The list_of_tuples is assigned to the variable 'cells'
+        for tick, mode, cells in expired: # 'cells' holds [(cell, belief_level), ...]
             reward = 0
-            for cell, _ in cells:
-                # Ensure cell is valid before accessing grid
+            # --- Temporary counters for this reward batch ---
+            correct_in_batch = 0
+            incorrect_in_batch = 0
+
+            # --- FIX 1: Use the correct variable 'cells' from the outer loop ---
+            for cell, belief_level in cells: # belief_level is belief at time of sending
+                # Check cell validity
                 if 0 <= cell[0] < self.model.width and 0 <= cell[1] < self.model.height:
-                    level = self.model.disaster_grid[cell[0], cell[1]] # Use (x, y) indexing
-                    if level == 5:
+                   # This is the TRUE level at the time reward is processed
+                   actual_level = self.model.disaster_grid[cell[0], cell[1]]
+                   
+                   # --- Correctness Counting (using actual_level) ---
+                   if actual_level >= 4:
+                      correct_in_batch += 1
+                   else: # actual_level is 0, 1, 2, or 3
+                        incorrect_in_batch += 1 
+                   if actual_level == 5:       # Use actual_level here
                         reward += 5
-                    elif level == 4:
+                   elif actual_level == 4:     # Use actual_level here
                         reward += 2
-                    elif level <= 2:
+                   elif actual_level <= 2:     # Use actual_level here (Level 3 gives 0 reward)
                         reward -= 2
+                   # --- End Reward Calculation ---
+
                 else:
-                    # Handle invalid cell if needed, e.g., print warning or skip
-                    # print(f"Warning: Agent {self.unique_id} pending reward for invalid cell {cell}")
-                    pass # Skipping reward calculation for invalid cells for now
+                   # Handle invalid cell if needed
+                   pass # Skipping reward calculation for invalid cells
+
+           # --- Accumulate totals for the agent ---
+            self.correct_targets += correct_in_batch
+            self.incorrect_targets += incorrect_in_batch
+            # --- End Accumulate ---
 
             total_agent_reward += reward
 
@@ -318,8 +435,30 @@ class AIAgent(Agent):
         if not self.sensed:
             return {}
         cells = list(self.sensed.keys())
-        sensed_vals = np.array([self.sensed[cell] for cell in cells])
-        human_vals = np.array([human_beliefs.get(cell, sensed_vals[i]) for i, cell in enumerate(cells)])
+        # sensed_vals is an array of integer levels sensed by the AI
+        sensed_vals = np.array([self.sensed.get(cell, 0) for cell in cells]) # Ensure default 0 if key somehow missing
+        
+        human_levels_list = []
+        for i, cell in enumerate(cells):
+            # Get the human's belief about the cell (might be dict or None/default)
+            belief_info = human_beliefs.get(cell)
+
+            # Extract the level if it's a dictionary, otherwise use default
+            if isinstance(belief_info, dict):
+                # Get level from dict, default to AI's sensed value if level key missing (unlikely)
+                human_level = belief_info.get('level', sensed_vals[i])
+            # elif belief_info is not None: # Fallback: If belief is somehow still int?
+            #     human_level = belief_info
+            else:
+                # Default: If human has no belief OR belief_info wasn't a dict, use AI's sensed value
+                human_level = sensed_vals[i]
+
+            human_levels_list.append(human_level)
+        
+        # human_vals is now an array of integer levels from human beliefs (or defaults)
+        human_vals = np.array(human_levels_list)
+    
+
         diff = np.abs(sensed_vals - human_vals)
         trust_factor = 1 - min(1, trust)
 
@@ -490,10 +629,15 @@ class DisasterModel(Model):
         # Every 5 ticks, compute additional metrics.
         if self.tick % 5 == 0:
             # --- SECI Calculation ---
-            all_beliefs = []
+            all_belief_levels = [] 
             for agent in self.humans.values():
-                all_beliefs.extend(list(agent.beliefs.values()))
-            global_var = np.var(all_beliefs) if all_beliefs else 1e-6
+                friend_belief_levels = [] # Initialize HERE
+
+                for belief_info in agent.beliefs.values():
+                    if isinstance(belief_info, dict):
+                        all_belief_levels.append(belief_info.get('level', 0))
+                
+            global_var = np.var(all_belief_levels) if all_belief_levels else 1e-6
             seci_exp_list = []
             seci_expl_list = []
             for agent in self.humans.values():
@@ -501,9 +645,20 @@ class DisasterModel(Model):
                 for fid in agent.friends:
                     friend = self.humans.get(fid)
                     if friend:
-                        friend_beliefs.extend(list(friend.beliefs.values()))
-                friend_var = np.var(friend_beliefs) if friend_beliefs else global_var
-                seci_val = max(0, 1 - (friend_var / global_var))
+                        for belief_info in friend.beliefs.values():
+                             # Ensure it's a dictionary and get the level, default 0
+                            if isinstance(belief_info, dict):
+                                friend_belief_levels.append(belief_info.get('level', 0))
+                        
+                friend_var = np.var(friend_belief_levels) if friend_belief_levels else global_var
+
+                # Add safety check for division by (near) zero
+                if global_var < 1e-9:
+                     seci_val = 0 # Assign 0 if global variance is effectively zero
+                else:
+                     seci_val = max(0, 1 - (friend_var / global_var))
+
+
                 if agent.agent_type == "exploitative":
                     seci_exp_list.append(seci_val)
                 else:
@@ -615,51 +770,104 @@ def aggregate_simulation_results(num_runs, base_params):
     aeci_list = []
     retain_aeci_list = []
     retain_seci_list = []
-    per_agent_tokens_list = []
-    # Placeholders for assistance metrics:
-    exploit_correct = []
-    exploit_incorrect = []
-    explor_correct = []
-    explor_incorrect = []
+    unmet_needs_evolution_list = []
+
+    # --- Lists to store TOTAL correct/incorrect targets PER RUN ---
+    exploit_correct_per_run = []
+    exploit_incorrect_per_run = []
+    explor_correct_per_run = []
+    explor_incorrect_per_run = []
+    # ---
+
+    # Ensure simulation_generator yields the model object
     
-    for result, _ in simulation_generator(num_runs, base_params):
+    for result, model in simulation_generator(num_runs, base_params):
         trust_list.append(result["trust_stats"])
         seci_list.append(result["seci"])
         aeci_list.append(result["aeci"])
         retain_aeci_list.append(result["retain_aeci"])
         retain_seci_list.append(result["retain_seci"])
-        per_agent_tokens_list.append(result["per_agent_tokens"])
-        exploit_correct.append(0)
-        exploit_incorrect.append(0)
-        explor_correct.append(0)
-        explor_incorrect.append(0)
-    
-    trust_array = np.stack(trust_list, axis=0)
-    seci_array = np.stack(seci_list, axis=0)
-    aeci_array = np.stack(aeci_list, axis=0)
-    retain_aeci_array = np.stack(retain_aeci_list, axis=0)
-    retain_seci_array = np.stack(retain_seci_list, axis=0)
-    
+        unmet_needs_evolution_list.append(result.get("unmet_needs_evolution", [])) # Use .get for safety
+
+         # --- Aggregate correct/incorrect targets for THIS run ---
+        run_exploit_correct = 0
+        run_exploit_incorrect = 0
+        run_explor_correct = 0
+        run_explor_incorrect = 0
+
+        # Iterate through agents in the completed model run
+        for agent in model.humans.values():
+            if agent.agent_type == "exploitative":
+                run_exploit_correct += agent.correct_targets
+                run_exploit_incorrect += agent.incorrect_targets
+            else: # Exploratory
+                run_explor_correct += agent.correct_targets
+                run_explor_incorrect += agent.incorrect_targets
+
+        # Append the totals for THIS run to the overall lists
+        exploit_correct_per_run.append(run_exploit_correct)
+        exploit_incorrect_per_run.append(run_exploit_incorrect)
+        explor_correct_per_run.append(run_explor_correct)
+        explor_incorrect_per_run.append(run_explor_incorrect)
+        # --- End Aggregation for Run ---
+
+        # Clean up memory
+        del model
+        gc.collect()
+
+
+       # --- Calculate Stats based on aggregated data ---
+    # Stack arrays for metrics that evolve over time (add empty checks)
+    trust_array = np.stack(trust_list, axis=0) if trust_list else np.array([])
+    seci_array = np.stack(seci_list, axis=0) if seci_list else np.array([])
+    aeci_array = np.stack(aeci_list, axis=0) if aeci_list else np.array([])
+    retain_aeci_array = np.stack(retain_aeci_list, axis=0) if retain_aeci_list else np.array([])
+    retain_seci_array = np.stack(retain_seci_list, axis=0) if retain_seci_list else np.array([])
+
+    # Helper function for calculating mean/percentiles
+    def calculate_metric_stats(data_list):
+        # Handle case where simulation fails or produces no data
+        valid_data = [d for d in data_list if d is not None]
+        if not valid_data: return {"mean": 0, "lower": 0, "upper": 0}
+        return {
+            "mean": np.mean(valid_data),
+            "lower": np.percentile(valid_data, 25),
+            "upper": np.percentile(valid_data, 75)
+        }
+
+    # Calculate stats for assistance (using the lists populated with actual run totals)
     assist_stats = {
-        "exploit_correct": {"mean": np.mean(exploit_correct), "lower": np.percentile(exploit_correct, 25), "upper": np.percentile(exploit_correct, 75)},
-        "exploit_incorrect": {"mean": np.mean(exploit_incorrect), "lower": np.percentile(exploit_incorrect, 25), "upper": np.percentile(exploit_incorrect, 75)},
-        "explor_correct": {"mean": np.mean(explor_correct), "lower": np.percentile(explor_correct, 25), "upper": np.percentile(explor_correct, 75)},
-        "explor_incorrect": {"mean": np.mean(explor_incorrect), "lower": np.percentile(explor_incorrect, 25), "upper": np.percentile(explor_incorrect, 75)}
+        "exploit_correct": calculate_metric_stats(exploit_correct_per_run),
+        "exploit_incorrect": calculate_metric_stats(exploit_incorrect_per_run),
+        "explor_correct": calculate_metric_stats(explor_correct_per_run),
+        "explor_incorrect": calculate_metric_stats(explor_incorrect_per_run)
     }
+
+    # Calculate ratio stats (Share of Correct Tokens) based on the *means*
+    total_exploit_mean = assist_stats["exploit_correct"]["mean"] + assist_stats["exploit_incorrect"]["mean"]
+    total_explor_mean = assist_stats["explor_correct"]["mean"] + assist_stats["explor_incorrect"]["mean"]
     ratio_stats = {
-        "exploit_ratio": {"mean": 0, "lower": 0, "upper": 0},
-        "explor_ratio": {"mean": 0, "lower": 0, "upper": 0}
+        "exploit_ratio": {
+            "mean": assist_stats["exploit_correct"]["mean"] / total_exploit_mean if total_exploit_mean > 0 else 0,
+            # Calculating percentiles for ratios is complex; report mean ratio for now.
+            "lower": 0, "upper": 0
+        },
+        "explor_ratio": {
+            "mean": assist_stats["explor_correct"]["mean"] / total_explor_mean if total_explor_mean > 0 else 0,
+            "lower": 0, "upper": 0
+        }
     }
-    
+    # --- End Calculate Stats ---
+
     return {
         "trust_stats": trust_array,
         "seci": seci_array,
         "aeci": aeci_array,
         "retain_aeci": retain_aeci_array,
         "retain_seci": retain_seci_array,
-        "assist": assist_stats,
-        "assist_ratio": ratio_stats,
-        "per_agent_tokens": per_agent_tokens_list
+        "assist": assist_stats,         # Contains mean/percentiles of raw counts
+        "assist_ratio": ratio_stats,   # Contains mean share of correct tokens
+        "unmet_needs_evol": unmet_needs_evolution_list # Pass the list of lists
     }
 
 def experiment_share_exploitative(base_params, share_values, num_runs=20):
