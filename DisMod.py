@@ -1,5 +1,5 @@
 # Install mesa if not already installed
-# !pip install mesa
+!pip install mesa
 
 import os
 import random
@@ -30,7 +30,7 @@ class HumanAgent(Agent):
     def __init__(self, unique_id, model, id_num, agent_type, share_confirming, learning_rate=0.05, epsilon=0.2):
         # Use workaround: call parent initializer with model only, then set attributes.
         super(HumanAgent, self).__init__(model)
-        self.unique_id = unique_id  
+        self.unique_id = unique_id
         self.model = model
 
         self.id_num = id_num
@@ -48,7 +48,7 @@ class HumanAgent(Agent):
         self.delta = 4 if agent_type == "exploitative" else 2
         self.trust_update_mode = model.trust_update_mode
         self.multiplier = 2.0 if agent_type == "exploitative" else 1.0
-        
+
         # Counters for calls:
         self.accum_calls_total = 0
         self.accum_calls_ai = 0
@@ -60,7 +60,7 @@ class HumanAgent(Agent):
 
         self.correct_targets = 0
         self.incorrect_targets = 0
-        
+
         self.tokens_this_tick = {}
         self.pending_rewards = []  # List of tuples: (tick_due, mode, list_of_cells)
         self.q_table = {f"A_{k}": 0.0 for k in range(5)}
@@ -73,7 +73,7 @@ class HumanAgent(Agent):
                 self.beliefs[(x, y)] = {'level': 0, 'confidence': 0.1}  # Initialize with level 0 and low confidence
         self.sense_environment()
 
-      
+
 
     def sense_environment(self):
         pos = self.pos
@@ -97,7 +97,7 @@ class HumanAgent(Agent):
             # Update belief with level and confidence
             self.beliefs[cell] = {'level': belief_level, 'confidence': belief_conf}
         # else: cell is outside grid, ignore
-           
+
 
 
     def report_beliefs(self, caller_pos):
@@ -133,6 +133,15 @@ class HumanAgent(Agent):
 
         return report # Report dictionary contains integer levels as values
 
+    def apply_trust_decay(self):
+         """Applies a slow decay to all trust relationships."""
+         decay_rate = 0.01 # Slow general decay rate per step
+         friend_decay_rate = 0.001 # Slower decay for friends
+         # Iterate over a copy of keys because dictionary size might change (though unlikely here)
+         for source_id in list(self.trust.keys()):
+              rate = friend_decay_rate if source_id in self.friends else decay_rate
+              self.trust[source_id] = max(0, self.trust[source_id] - rate)
+
     def choose_information_mode(self):
         if random.random() < self.epsilon:
             return random.choice(list(self.q_table.keys()))
@@ -141,7 +150,11 @@ class HumanAgent(Agent):
     def request_information(self):
         mode_choice = self.choose_information_mode()
         reports = {}
-        
+
+        top_candidates = [] # Define scope for potential use later if needed
+        source_agent_id_for_credit = None # Define scope, used for trust/Q updates later
+
+
         if mode_choice.startswith("A_"):
             ai_id = mode_choice
             chosen_ai = self.model.ais[ai_id]
@@ -149,80 +162,122 @@ class HumanAgent(Agent):
             # Weight AI call as 1
             self.accum_calls_ai += 1
             self.accum_calls_total += 1
-        else:
-            candidates = [agent for agent in self.model.humans.values() if agent.unique_id != self.unique_id]
-            top_candidates = sorted(candidates, key=lambda x: self.trust.get(x.unique_id, 0), reverse=True)[:5]
-            for candidate in top_candidates:
-                rep = candidate.report_beliefs(self.pos)
-                for cell, value in rep.items():
-                    if cell not in reports or (candidate.unique_id in self.friends and random.random() < 0.7):
-                        reports[cell] = value
-            # Weight human call as 5
-            self.accum_calls_human += 5
-            self.accum_calls_total += 5
+            source_agent_id_for_credit = mode_choice # AI is the source for credit assignment
+
+        else: #Human
+            # --- Modified Human Source Selection Logic ---
+            all_humans = [agent for agent in self.model.humans.values() if agent.unique_id != self.unique_id]
+            if not all_humans: # Skip if no other humans
+                return # Or handle appropriately
+
+            # Sort all potential human sources by current trust
+            sorted_humans = sorted(all_humans, key=lambda x: self.trust.get(x.unique_id, 0), reverse=True)
+
+            humans_to_query = set() # Use a set to avoid duplicates easily
+
+            if self.agent_type == "exploitative":
+                 # Query top N trusted + chance for 1 random non-friend
+                 num_trusted = 4
+                 # Add top trusted agents to query set
+                 for agent in sorted_humans[:num_trusted]:
+                     humans_to_query.add(agent)
+                 # Small chance to query a non-friend
+                 if random.random() < 0.15: # e.g., 15% chance (tune this)
+                     non_friends = [h for h in all_humans if h.unique_id not in self.friends]
+                     if non_friends:
+                         humans_to_query.add(random.choice(non_friends))
+
+            else: # Exploratory agent - query a diverse set
+                 num_trusted = 2
+                 num_random_others = 2
+                 num_least_trusted = 1
+                 # Add top trusted
+                 for agent in sorted_humans[:num_trusted]:
+                     humans_to_query.add(agent)
+                 # Add some random others (not in top trusted)
+                 others = [h for h in sorted_humans[num_trusted:] if h not in humans_to_query]
+                 random.shuffle(others)
+                 for agent in others[:num_random_others]:
+                      humans_to_query.add(agent)
+                 # Add some least trusted (if list long enough and not already included)
+                 if len(sorted_humans) > num_trusted + num_random_others:
+                      least_trusted_candidates = sorted_humans[-num_least_trusted:]
+                      for agent in least_trusted_candidates:
+                           humans_to_query.add(agent)
+
+            # Convert set back to list for querying
+            query_list = list(humans_to_query)
+            random.shuffle(query_list) # Query in random order
+
+            # Query selected humans
+            for candidate in query_list:
+                 rep = candidate.report_beliefs(self.pos)
+                 # Take first report received for a cell (simplest)
+                 for cell, value in rep.items():
+                     if cell not in reports:
+                         reports[cell] = value
+
+            # Determine source ID for credit assignment (Crucial for updates below)
+            # Simplification: Assign credit to the *most trusted* agent that was in the query list.
+            if query_list: # Check if any humans were queried
+                  query_list_sorted_by_trust = sorted(query_list, key=lambda x: self.trust.get(x.unique_id, 0), reverse=True)
+                  source_agent_id_for_credit = query_list_sorted_by_trust[0].unique_id
+            # --- End Modified Human Source Selection ---
+
+            # Weight human call -> moved to 1 even though calling 5
+
+            self.accum_calls_human += 1
+            self.accum_calls_total += 1
 
         self.tokens_this_tick[mode_choice] = self.tokens_this_tick.get(mode_choice, 0) + 1
 
         trust_reward = 0
 
-        for cell, reported_value in reports.items(): # reported_value is an INT level
-            # Retrieve the agent's own belief *dictionary* for the cell
-            belief_info = self.beliefs.get(cell, {'level': 0, 'confidence': 0.1})
-            # Extract the agent's own believed *level* (int)
-            old_belief_level = belief_info.get('level', 0) if isinstance(belief_info, dict) else belief_info
+        # Acceptance Logic
+        for cell, reported_value in reports.items():
+             belief_info = self.beliefs.get(cell, {'level': 0, 'confidence': 0.1})
+             old_belief_level = belief_info.get('level', 0) if isinstance(belief_info, dict) else belief_info
+             d = abs(reported_value - old_belief_level)
 
-            # Calculate difference between reported level (int) and own believed level (int)
-            d = abs(reported_value - old_belief_level) # Now compares int vs int
+             # Use source_agent_id_for_credit to check if the 'responsible' source is a friend
+             friend_weight = 1.5 if (source_agent_id_for_credit and source_agent_id_for_credit in self.friends) else 1.0
+             P_accept = 1.0 if d == 0 else (self.D ** self.delta) / ((d ** self.delta) + (self.D ** self.delta)) * friend_weight
 
-            # Friend weight logic might need checking based on 'top_candidates' if source was human
-            is_human_source = (mode_choice == "human")
-            friend_weight = 1.0
-            source_agent_id = None # Keep track of the specific source
-            if is_human_source and top_candidates: # Ensure top_candidates is not empty
-                source_agent_id = top_candidates[0].unique_id # Simplified: assume top candidate is the source
-                if source_agent_id in self.friends:
-                    friend_weight = 1.5
-            # If AI source, use mode_choice as ID for trust updates later
-            elif not is_human_source:
-                 source_agent_id = mode_choice
+             if random.random() < P_accept:
+                  # Check if we determined a source for credit assignment
+                 if source_agent_id_for_credit:
+                     if source_agent_id_for_credit not in self.trust: # Safety check
+                         base = self.model.base_ai_trust if source_agent_id_for_credit.startswith("A_") else self.model.base_trust
+                         self.trust[source_agent_id_for_credit] = base
 
+                     new_confidence = self.trust.get(source_agent_id_for_credit, 0.5) * 0.9
+                     self.beliefs[cell] = {'level': reported_value, 'confidence': new_confidence}
 
-            # Acceptance probability calculation (uses 'd')
-            P_accept = 1.0 if d == 0 else (self.D ** self.delta) / ((d ** self.delta) + (self.D ** self.delta)) * friend_weight
+                     # Trust update logic using source_agent_id_for_credit
+                     if self.agent_type == "exploitative":
+                         delta = 0.075 if self.trust_update_mode == "average" else 0.25
+                         trust_reward += delta * friend_weight
+                         self.trust[source_agent_id_for_credit] = min(1.0, self.trust.get(source_agent_id_for_credit, 0) + delta * friend_weight)
 
-            # --- Acceptance logic (stores dict) ---
-            if random.random() < P_accept:
-                 # Ensure source_agent_id is defined before using it for confidence/trust update
-                if source_agent_id:
-                    if source_agent_id not in self.trust: # Safety check
-                        base = self.model.base_ai_trust if source_agent_id.startswith("A_") else self.model.base_trust
-                        self.trust[source_agent_id] = base
-
-                    new_confidence = self.trust.get(source_agent_id, 0.5) * 0.9
-                    # Store belief as dict (already corrected in previous step)
-                    self.beliefs[cell] = {'level': reported_value, 'confidence': new_confidence}
-
-                    # Trust update logic using source_agent_id
-                    if self.agent_type == "exploitative":
-                        delta = 0.075 if self.trust_update_mode == "average" else 0.25
-                        trust_reward += delta * friend_weight
-                        self.trust[source_agent_id] = min(1.0, self.trust.get(source_agent_id, 0) + delta * friend_weight)
-
-                    # Update acceptance counters
-                    if is_human_source:
-                        self.accepted_human += 1
-                        if source_agent_id in self.friends: # Check specific source
-                            self.accepted_friend += 1
-                    else: # AI source
-                        self.accepted_ai += 1
-                else:
-                    # Handle case where source_agent_id couldn't be determined (shouldn't happen ideally)
-                    print(f"Warning: Could not determine source for accepted info at cell {cell}")
+                     # Update acceptance counters (check if source was human or AI)
+                     if source_agent_id_for_credit.startswith("H_"):
+                         self.accepted_human += 1
+                         if source_agent_id_for_credit in self.friends:
+                             self.accepted_friend += 1
+                     else: # AI source
+                         self.accepted_ai += 1
+                 else:
+                     # This case should ideally not happen if mode_choice was valid
+                     print(f"Warning: Could not determine source for credit for accepted info at cell {cell}")
 
 
+        # Q-Update based on trust_reward for exploitative agents
         if self.agent_type == "exploitative" and trust_reward > 0:
-            old_q = self.q_table[mode_choice]
-            self.q_table[mode_choice] = old_q + self.learning_rate * (trust_reward - old_q)
+              if mode_choice not in self.q_table: self.q_table[mode_choice] = 0.0 # Safety
+              old_q = self.q_table[mode_choice]
+              if isinstance(trust_reward, (int, float)): # Safety
+                  self.q_table[mode_choice] = old_q + self.learning_rate * (trust_reward - old_q)
+
 
     def send_relief(self):
         tokens_to_send = 5
@@ -308,12 +363,12 @@ class HumanAgent(Agent):
                 if 0 <= cell[0] < self.model.width and 0 <= cell[1] < self.model.height:
                    # This is the TRUE level at the time reward is processed
                    actual_level = self.model.disaster_grid[cell[0], cell[1]]
-                   
+
                    # --- Correctness Counting (using actual_level) ---
                    if actual_level >= 4:
                       correct_in_batch += 1
                    else: # actual_level is 0, 1, 2, or 3
-                        incorrect_in_batch += 1 
+                        incorrect_in_batch += 1
                    if actual_level == 5:       # Use actual_level here
                         reward += 5
                    elif actual_level == 4:     # Use actual_level here
@@ -389,6 +444,9 @@ class HumanAgent(Agent):
         reward = self.process_reward()
         if self.agent_type == "exploitative":
             self.smooth_friend_trust()
+
+        self.apply_trust_decay() # Apply slow decay to all relationships
+
         return reward
 
     def smooth_friend_trust(self):
@@ -437,7 +495,7 @@ class AIAgent(Agent):
         cells = list(self.sensed.keys())
         # sensed_vals is an array of integer levels sensed by the AI
         sensed_vals = np.array([self.sensed.get(cell, 0) for cell in cells]) # Ensure default 0 if key somehow missing
-        
+
         human_levels_list = []
         for i, cell in enumerate(cells):
             # Get the human's belief about the cell (might be dict or None/default)
@@ -454,17 +512,17 @@ class AIAgent(Agent):
                 human_level = sensed_vals[i]
 
             human_levels_list.append(human_level)
-        
+
         # human_vals is now an array of integer levels from human beliefs (or defaults)
         human_vals = np.array(human_levels_list)
-    
+
 
         diff = np.abs(sensed_vals - human_vals)
         trust_factor = 1 - min(1, trust)
 
         alignment_factor = self.model.ai_alignment_level * (1 + trust_factor)
         # Increase sensitivity to difference for alignment adjustment
-    
+
         adjustment = alignment_factor * (human_vals - sensed_vals) * (1 + diff)
         corrected = np.round(sensed_vals + adjustment)
         corrected = np.clip(corrected, 0, 5)
@@ -606,7 +664,7 @@ class DisasterModel(Model):
         self.tokens_this_tick = {}
         self.update_disaster()
         random.shuffle(self.agent_list)
-        
+
         total_reward_exploit = 0
         total_reward_explor = 0
         for agent in self.agent_list:
@@ -617,7 +675,7 @@ class DisasterModel(Model):
                 else:
                     total_reward_explor += r
         self.rewards_data.append((total_reward_exploit, total_reward_explor))
-        
+
         token_array = np.zeros((self.height, self.width), dtype=int)
         for pos, count in self.tokens_this_tick.items():
             x, y = pos
@@ -625,18 +683,22 @@ class DisasterModel(Model):
         need_mask = self.disaster_grid >= 4
         unmet = np.sum(need_mask & (token_array == 0))
         self.unmet_needs_evolution.append(unmet)
-        
+
+        # Call mapping function periodically and/or at the end
+        if self.tick == 1 or self.tick % 25 == 0 or self.tick == self.ticks:
+              plot_grid_state(self, self.tick, save_dir="agent_model_results/grid_plots") # Save to subfolder
+
         # Every 5 ticks, compute additional metrics.
         if self.tick % 5 == 0:
             # --- SECI Calculation ---
-            all_belief_levels = [] 
+            all_belief_levels = []
             for agent in self.humans.values():
                 friend_belief_levels = [] # Initialize HERE
 
                 for belief_info in agent.beliefs.values():
                     if isinstance(belief_info, dict):
                         all_belief_levels.append(belief_info.get('level', 0))
-                
+
             global_var = np.var(all_belief_levels) if all_belief_levels else 1e-6
             seci_exp_list = []
             seci_expl_list = []
@@ -649,7 +711,7 @@ class DisasterModel(Model):
                              # Ensure it's a dictionary and get the level, default 0
                             if isinstance(belief_info, dict):
                                 friend_belief_levels.append(belief_info.get('level', 0))
-                        
+
                 friend_var = np.var(friend_belief_levels) if friend_belief_levels else global_var
 
                 # Add safety check for division by (near) zero
@@ -666,7 +728,7 @@ class DisasterModel(Model):
             self.seci_data.append((self.tick,
                                    np.mean(seci_exp_list) if seci_exp_list else 0,
                                    np.mean(seci_expl_list) if seci_expl_list else 0))
-            
+
             # --- AECI Calculation ---
             aeci_exp = [agent.accum_calls_ai / agent.accum_calls_total for agent in self.humans.values()
                         if agent.agent_type == "exploitative" and agent.accum_calls_total > 0]
@@ -675,7 +737,7 @@ class DisasterModel(Model):
             self.aeci_data.append((self.tick,
                                    np.mean(aeci_exp) if aeci_exp else 0,
                                    np.mean(aeci_expl) if aeci_expl else 0))
-            
+
             # --- Retainment Metrics ---
             retain_aeci_exp_list = []
             retain_aeci_expl_list = []
@@ -698,7 +760,7 @@ class DisasterModel(Model):
             self.retain_seci_data.append((self.tick,
                                           np.mean(retain_seci_exp_list) if retain_seci_exp_list else 0,
                                           np.mean(retain_seci_expl_list) if retain_seci_expl_list else 0))
-            
+
             # --- Trust Statistics ---
             trust_exp = []
             trust_expl = []
@@ -727,7 +789,7 @@ class DisasterModel(Model):
                 ai_expl_mean, friend_expl_mean, nonfriend_expl_mean = 0, 0, 0
             self.trust_stats.append((self.tick, ai_exp_mean, friend_exp_mean, nonfriend_exp_mean,
                                      ai_expl_mean, friend_expl_mean, nonfriend_expl_mean))
-            
+
             # Reset call counters after computing AECI metrics.
             for agent in self.humans.values():
                 agent.accum_calls_ai = 0
@@ -780,7 +842,7 @@ def aggregate_simulation_results(num_runs, base_params):
     # ---
 
     # Ensure simulation_generator yields the model object
-    
+
     for result, model in simulation_generator(num_runs, base_params):
         trust_list.append(result["trust_stats"])
         seci_list.append(result["seci"])
@@ -912,6 +974,65 @@ def experiment_learning_trust(base_params, learning_rate_values, epsilon_values,
 # Plotting Functions
 #########################################
 
+def plot_grid_state(model, tick, save_dir="grid_plots"):
+    """Plots the disaster grid state, agent locations, and tokens sent."""
+    os.makedirs(save_dir, exist_ok=True) # Create directory if it doesn't exist
+    fig, ax = plt.subplots(1, 2, figsize=(14, 6)) # Slightly wider figure
+
+    # --- Plot 1: Disaster Grid ---
+    # Transpose grid if needed for imshow orientation (depends on grid creation)
+    # Assuming model.disaster_grid shape is (width, height) -> needs transpose for imshow
+    grid_display = model.disaster_grid.T
+    im = ax[0].imshow(grid_display, cmap='viridis', origin='lower', vmin=0, vmax=5, interpolation='nearest')
+    ax[0].set_title(f"Disaster Level (Tick {tick})")
+    ax[0].set_xticks(np.arange(model.width))
+    ax[0].set_yticks(np.arange(model.height))
+    ax[0].set_xticklabels([])
+    ax[0].set_yticklabels([])
+    fig.colorbar(im, ax=ax[0], label="Disaster Level", shrink=0.8)
+
+    # --- Plot 2: Tokens Sent & Agent Locations ---
+    token_grid = np.zeros((model.width, model.height))
+    for pos, count in model.tokens_this_tick.items():
+         if 0 <= pos[0] < model.width and 0 <= pos[1] < model.height:
+              token_grid[pos[0], pos[1]] = count
+
+    # Display token grid (transpose if needed)
+    im_tok = ax[1].imshow(token_grid.T, cmap='Reds', origin='lower', vmin=0, interpolation='nearest')
+    ax[1].set_title(f"Tokens Sent This Tick ({tick})")
+    ax[1].set_xticks(np.arange(model.width))
+    ax[1].set_yticks(np.arange(model.height))
+    ax[1].set_xticklabels([])
+    ax[1].set_yticklabels([])
+    fig.colorbar(im_tok, ax=ax[1], label="# Tokens Sent", shrink=0.8)
+
+    # Overlay agent positions
+    exploit_x, exploit_y = [], []
+    explor_x, explor_y = [], []
+    for agent in model.humans.values():
+        if agent.pos: # Ensure agent has a position
+            x, y = agent.pos
+            if agent.agent_type == "exploitative":
+                exploit_x.append(x)
+                exploit_y.append(y)
+            else:
+                explor_x.append(x)
+                explor_y.append(y)
+
+    # Scatter plot agents on the second axes
+    ax[1].scatter(exploit_x, exploit_y, color='blue', marker='o', label='Exploitative', s=40, alpha=0.8, edgecolors='w')
+    ax[1].scatter(explor_x, explor_y, color='orange', marker='s', label='Exploratory', s=40, alpha=0.8, edgecolors='w')
+    ax[1].legend(fontsize='small', loc='upper right')
+    ax[1].set_xlim(-0.5, model.width - 0.5)
+    ax[1].set_ylim(-0.5, model.height - 0.5)
+
+
+    plt.tight_layout()
+    # Save the figure
+    filepath = os.path.join(save_dir, f"grid_state_tick_{tick:04d}.png")
+    plt.savefig(filepath)
+    # plt.show() # Comment out if running many steps/simulations
+    plt.close(fig) # Close figure to free memory
 def plot_trust_evolution(trust_stats):
     num_runs, T, _ = trust_stats.shape
     ticks = trust_stats[0, :, 0]
@@ -989,7 +1110,7 @@ def plot_seci_aeci_evolution(seci_array, aeci_array):
         return
 
     ticks = seci_array[0, :, 0]
-    
+
     def compute_stats(arr):
         mean = np.mean(arr, axis=0)
         lower = np.percentile(arr, 25, axis=0)
@@ -1147,7 +1268,7 @@ if __name__ == "__main__":
     share_values = [0.2, 0.4, 0.6, 0.8]
     file_a_pkl = os.path.join(save_dir, "results_experiment_A.pkl")
     file_a_csv = os.path.join(save_dir, "results_experiment_A.csv")
-    
+
     print("Running Experiment A...")
     results_a = experiment_share_exploitative(base_params, share_values, num_runs)
     with open(file_a_pkl, "wb") as f:
