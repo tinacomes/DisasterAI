@@ -30,16 +30,17 @@ class Candidate:
 
 class HumanAgent(Agent):
     def __init__(self, unique_id, model, id_num, agent_type, share_confirming,
-                 learning_rate=0.05, epsilon=0.2,
+                 learning_rate=0.1, epsilon=0.3,
                  # --- Q-learning & Behavior Tuning Parameters ---
-                 exploit_trust_weight=0.7,    # Q-target: For 'human' mode, weight for avg FRIEND trust (exploiter)
+                 #exploit_trust_weight=0.7,    # Q-target: For 'human' mode, weight for avg FRIEND trust (exploiter)
                  self_confirm_weight=0.9,     # Q-target: For 'self_action', weight for confirmation value (exploiter)
                  self_confirm_boost=1.5,      # Multiplier for avg confidence to get confirmation value V_C (tune)
                  confirmation_q_lr=0.2,       # Learning rate for Q-boost on confirmation
-                 exploit_ai_trust_weight=0.95,# Q-target: For 'A_k' modes, trust weight (exploiter) - very high
+                 #exploit_ai_trust_weight=0.95,# Q-target: For 'A_k' modes, trust weight (exploiter) - very high
                  explore_reward_weight=0.8,   # Q-target: For all modes, reward weight (exploratory)
                  exploit_friend_bias=1.0,     # Action Selection: Bias added to 'human' score (exploiter) (tune)
-                 exploit_self_bias=0.5):      # Action Selection: Bias added to 'self_action' score (exploiter) (tune)
+                 exploit_self_bias=0.4,
+                 exploiter_trust_lr=0.1):      # Action Selection: Bias added to 'self_action' score (exploiter) (tune)
 
         # Use workaround: call parent initializer with model only, then set attributes.
         super(HumanAgent, self).__init__(model)
@@ -55,14 +56,15 @@ class HumanAgent(Agent):
         # self.tokens = 5
 
         # --- Store Q-learning & Behavior Parameters ---
-        self.exploit_trust_weight = exploit_trust_weight
+        # self.exploit_trust_weight = exploit_trust_weight
         self.self_confirm_weight = self_confirm_weight
         self.self_confirm_boost = self_confirm_boost
         self.confirmation_q_lr = confirmation_q_lr
-        self.exploit_ai_trust_weight = exploit_ai_trust_weight
+        # self.exploit_ai_trust_weight = exploit_ai_trust_weight
         self.explore_reward_weight = explore_reward_weight
         self.exploit_friend_bias = exploit_friend_bias
         self.exploit_self_bias = exploit_self_bias
+        self.exploiter_trust_lr = exploiter_trust_lr 
 
 
         # --- Agent State ---
@@ -103,9 +105,54 @@ class HumanAgent(Agent):
 
     def initialize_beliefs(self):
         height, width = self.model.disaster_grid.shape
+        # Get rumor parameters from the model safely using getattr
+        rumor_prob = getattr(self.model, 'rumor_probability', 0.0)
+        rumor_intensity = getattr(self.model, 'rumor_intensity', 0.0)
+        rumor_conf = getattr(self.model, 'rumor_confidence', 0.6)
+        rumor_radius = self.model.disaster_radius * getattr(self.model, 'rumor_radius_factor', 0.5)
+        min_sep_dist_sq = (self.model.disaster_radius * getattr(self.model, 'min_rumor_separation_factor', 0.7))**2
+
+        has_rumor = random.random() < rumor_prob
+        rumor_epicenter = None
+
+        # Determine rumor epicenter if agent gets a rumor
+        if has_rumor and rumor_intensity > 0 and rumor_radius > 0:
+            attempts = 0
+            max_attempts = 100 # Prevent infinite loop if grid is small/crowded
+            while attempts < max_attempts:
+                 # Pick a random potential epicenter
+                 potential_rumor_epicenter = (random.randrange(width), random.randrange(height))
+                 # Calculate distance squared from true epicenter
+                 dist_sq = (potential_rumor_epicenter[0] - self.model.epicenter[0])**2 + \
+                           (potential_rumor_epicenter[1] - self.model.epicenter[1])**2
+                 # Check if it's far enough away
+                 if dist_sq >= min_sep_dist_sq:
+                     rumor_epicenter = potential_rumor_epicenter
+                     break # Found a suitable location
+                 attempts += 1
+            # if attempts == max_attempts:
+            #     print(f"Warning: Agent {self.unique_id} couldn't find distant rumor epicenter after {max_attempts} attempts.")
+            #     # Agent will proceed without a specific rumor map if no location found
+
+        # Initialize all beliefs first
         for x in range(width):
             for y in range(height):
-                self.beliefs[(x, y)] = {'level': 0, 'confidence': 0.1}  # Initialize with level 0 and low confidence
+                initial_level = 0
+                initial_conf = 0.1 # Default low confidence
+
+                # If this agent has a rumor epicenter, calculate belief based on it
+                if rumor_epicenter:
+                    dist_from_rumor = math.sqrt((x - rumor_epicenter[0])**2 + (y - rumor_epicenter[1])**2)
+                    # Simple circular rumor area
+                    if dist_from_rumor < rumor_radius:
+                        # Set belief level based on intensity (e.g., peak L3 + intensity)
+                        initial_level = min(5, int(round(3 + rumor_intensity)))
+                        # Set specified rumor confidence
+                        initial_conf = rumor_conf
+
+                self.beliefs[(x, y)] = {'level': initial_level, 'confidence': initial_conf}
+
+        # This overwrites the initial belief in the sensing radius with potentially conflicting info
         self.sense_environment()
 
 
@@ -381,39 +428,33 @@ class HumanAgent(Agent):
 
 
                      # --- Trust Update Based on Acceptance ---
-                     trust_increment = 0.0
+                     #trust_increment = 0.0
+                     
                      if self.agent_type == "exploitative":
-                     # --- Exploiter-Specific Updates on Acceptance ---
+                        # Calculate confirmation score based on belief difference 'd'
+                        # d = abs(reported_level_int - old_belief_level) was calculated earlier
                         confirmation_score = 1.0 / (1.0 + d) # Score = 1 if d=0, decreases as d increases
 
-                        # 1. Immediate Q-Value Boost based on Confirmation (for AI sources)
+                        # --- 1. Immediate Q-Value Boost for AI Confirmation ---
+                        # Apply ONLY if the source was an AI
                         if responsible_source_id.startswith("A_"):
                             current_q = self.q_table.get(responsible_source_id, 0.0)
                             # Target for this update is the confirmation score itself
                             q_target_confirm = confirmation_score
+                            # Use confirmation_q_lr (ensure it's defined in __init__, e.g., 0.05)
                             q_boost = self.confirmation_q_lr * (q_target_confirm - current_q)
                             self.q_table[responsible_source_id] = current_q + q_boost
-                            # print(f"  Ag {self.unique_id} (Exp) Q-Boost AI {responsible_source_id}: d={d}, score={confirmation_score:.2f}, boost={q_boost:.3f}") # Debug
 
-                        # 2. Trust Increment based on Confirmation (Both Human & AI)
-                        # Base increment size depends on trust_update_mode (as before)
-                        delta = 0.075 if self.trust_update_mode == "average" else 0.25
-                        # Apply friend weight ONLY if source is human friend
-                        friend_weight_accept = 1.0
-                        if responsible_source_id.startswith("H_") and responsible_source_id in self.friends:
-                             friend_weight_accept = 2.5 # Use original friend weight logic here
-                        # Scale increment by confirmation score
-                        trust_increment = delta * friend_weight_accept * (confirmation_score ** 2)
-
-                     else: # Exploratory
-                         delta = 0.04 if self.trust_update_mode == "average" else 0.05
-                         trust_increment = delta # No friend weight boost for explorers
-
-                     if trust_increment > 0: # Only update if there's a positive increment to mimic trust inertia
-                        new_trust_target = min(1.0, self.trust.get(responsible_source_id, 0.5) + trust_increment) # Default 0.5
-                        self.trust[responsible_source_id] = 0.9 * self.trust.get(responsible_source_id, 0.5) + 0.1 * new_trust_target
-
-
+                        # --- 2. Trust Update based ONLY on Confirmation Score ---
+                        # This is the ONLY trust update for Exploiters in this method
+                        current_trust = self.trust.get(responsible_source_id, 0.5) # Default 0.5 if missing
+                        # Calculate change needed to move trust towards the confirmation score
+                        trust_change = self.exploiter_trust_lr * (confirmation_score - current_trust) # Needs exploiter_trust_lr in init (e.g., 0.1)
+                        # Apply the change directly
+                        new_trust = current_trust + trust_change
+                        # Apply bounds 0.0 to 1.0
+                        self.trust[responsible_source_id] = max(0.0, min(1.0, new_trust))
+                  
                      # Update acceptance counters
                      if responsible_source_id.startswith("H_"):
                          self.accepted_human += 1
@@ -570,31 +611,35 @@ class HumanAgent(Agent):
                     # Calculate current average confidence as proxy for confirmation value
                     confidences = [b.get('confidence', 0.1) for b in self.beliefs.values() if isinstance(b, dict)]
                     avg_confidence = np.mean(confidences) if confidences else 0.1
-                    confirmation_value = self.self_confirm_boost * avg_confidence # Scale avg confidence
-                    # Target heavily weights confirmation, lightly weights reward
-                    target_q_value = (self.self_confirm_weight * confirmation_value +
-                                      (1 - self.self_confirm_weight) * batch_reward)
+                    # confirmation_value = self.self_confirm_boost * avg_confidence # Scale avg confidence
+                    # Target based on confirmation
+                    target_q_value = self.self_confirm_boost * avg_confidence
+                    new_q = old_q + self.learning_rate * (target_q_value - old_q)
+                    self.q_table[mode] = new_q
 
                 elif mode == "human":
                     # Calculate average trust in current friends
                     friend_trusts = [self.trust.get(f_id, 0.1) for f_id in self.friends if f_id in self.trust]
                     avg_friend_trust = np.mean(friend_trusts) if friend_trusts else 0.1 # Default low
-                    # Target weights average friend trust + reward
-                    target_q_value = (self.exploit_trust_weight * avg_friend_trust +
-                                      (1 - self.exploit_trust_weight) * batch_reward)
+                    # Target IS average friend trust
+                    target_q_value = avg_friend_trust
+                    # Q-Update happens using this target (no batch_reward component)
+                    new_q = old_q + self.learning_rate * (target_q_value - old_q)
+                    self.q_table[mode] = new_q
 
-                elif mode.startswith("A_"): # AI source
-                     trust = self.trust.get(mode, 0.3) # Default lowish trust if missing
-                     # Target very heavily weights trust, minimal reward influence
-                     adjusted_ai_trust_weight = 0.70 # NEW - Tune this (e.g., 0.7 to 0.9)
-                     target_q_value = (adjusted_ai_trust_weight * trust +
-                                       (1 - adjusted_ai_trust_weight) * batch_reward)
+                elif mode.startswith("A_"):
+                    # Explicitly DO NOTHING here for Q-update based on reward/trust outcome.
+                    # The Q-update for AI for exploiters now happens ONLY
+                    # upon acceptance in request_information based on confirmation.
+                    apply_q_update = False # Don't apply the standard Q-update below
+                    pass # Explicitly do nothing for AI modes here
 
-                else: # Fallback for unexpected modes
-                      trust = self.trust.get(mode, 0.3)
-                      # Default to trust-weighted target
-                      target_q_value = (self.exploit_trust_weight * trust + (1 - self.exploit_trust_weight) * batch_reward)
+                else: # Fallback for truly unexpected modes
+                     print(f"Warning: Agent {self.unique_id} (Exploitative) encountered truly unexpected mode '{mode}' in Q-update. No Q-change applied.")
+                     # target_q_value remains old_q (no change), apply_q_update remains True but does nothing
+                     target_q_value = old_q
 
+               
             else: # Exploratory Agent
                  # Target weights environmental reward heavily, trust lightly
                  trust = self.trust.get(mode, 0.5) # Default neutral trust
@@ -608,7 +653,7 @@ class HumanAgent(Agent):
 
             # --- Trust Update Based on Reward Outcome ---
             # Update trust in the specific AI or the generic 'human' mode based on reward
-            if mode != "self_action":
+            if mode != "self_action" and self.agent_type == "exploratory":
                  # Normalize reward
                  avg_reward_per_cell = batch_reward / len(cells_and_beliefs) # Avoid div by zero checked earlier
                  max_reward = 5; min_reward = -1.5 # Define reward range
@@ -619,13 +664,9 @@ class HumanAgent(Agent):
 
                  current_trust = self.trust.get(mode, 0.5) # Default neutral if missing
 
-                 # Determine trust change factor based on agent type
-                 if self.agent_type == "exploitative":
-                    trust_change_factor_pos = 0.05 # For positive reward
-                    trust_change_factor_neg = 0.1 # Example: MUCH larger for negative reward
-                 else: #exploratory
-                    trust_change_factor_pos = 0.05 # For positive reward
-                    trust_change_factor_neg = 0.25 # Example: larger for negative reward
+                 
+                 trust_change_factor_pos = 0.05 # For positive reward
+                 trust_change_factor_neg = 0.4 # Example: larger for negative reward
                  if scaled_norm >= 0:
                     trust_change = trust_change_factor_pos * scaled_norm
                  else:
@@ -677,8 +718,8 @@ class AIAgent(Agent):
         self.model = model
         self.memory = {}
         self.sensed = {}
-        self.total_cells = model.width * model.height
-        self.cells_to_sense = int(0.15 * self.total_cells)
+        self.total_cells = self.model.width * self.model.height        
+        self.cells_to_sense = int(0.1 * self.total_cells)
 
     def sense_environment(self):
         height, width = self.model.disaster_grid.shape
@@ -693,7 +734,7 @@ class AIAgent(Agent):
                 self.sensed[cell] = self.memory[memory_key]
             else:
                 value = self.model.disaster_grid[x, y]
-                if random.random() < 0.05: # 5% chance of AI sensing noise
+                if random.random() < 0.15: # 15% chance of AI sensing noise
                     value = max(0, min(5, value + random.choice([-1, 1])))
                 self.sensed[cell] = value
                 self.memory[(current_tick, cell)] = value
@@ -722,25 +763,37 @@ class AIAgent(Agent):
             human_levels_list.append(int(human_level)) # Ensure integer
         human_vals = np.array(human_levels_list)
 
-        # --- Simplified AI Alignment Logic ---
+        # --- AI Alignment Logic ---
         alignment_strength = self.model.ai_alignment_level # Base alignment (0 to 1)
+
+        low_trust_amplification = getattr(self.model, 'low_trust_amplification_factor', 0.3) # Default if missing
 
         # Factor in trust: Less alignment adjustment if trust is high
         clipped_trust = max(0.0, min(1.0, trust_in_ai)) # Ensure trust is [0, 1]
+        
         trust_influence = (1.0 - clipped_trust) # Scales adjustment (0=no adjust, 1=full align)
+
+        # Calculate the low-trust amplification bonus
+        # This bonus is MAX when trust is 0, and 0 when trust is 1
+        amplification_bonus = low_trust_amplification * (1.0 - clipped_trust)
+
+        # Calculate the EFFECTIVE alignment strength for this interaction
+        effective_alignment_strength = alignment_strength + amplification_bonus
+
+        # Ensure effective strength doesn't go wild 
+        effective_alignment_strength = max(0.0, min(1.5, effective_alignment_strength)) # Cap if needed
 
         # Calculate difference between human belief and AI sensing
         belief_difference = human_vals - sensed_vals
 
-        # Calculate adjustment, scaled by alignment strength and inverse trust
-        adjustment = alignment_strength * trust_influence * belief_difference
+        # Calculate the final adjustment using the effective strength
+        adjustment = effective_alignment_strength * belief_difference
 
         # Apply adjustment to AI's sensed values
         corrected = np.round(sensed_vals + adjustment)
         # Clip results to valid belief range [0, 5]
         corrected = np.clip(corrected, 0, 5)
 
-        # Return adjusted beliefs as dictionary {cell: adjusted_level}
         return {cell: int(corrected[i]) for i, cell in enumerate(cells)}
 
     def step(self):
@@ -764,12 +817,18 @@ class DisasterModel(Model):
                  shock_magnitude=2,
                  trust_update_mode="average",
                  ai_alignment_level=0.3,
+                 low_trust_amplification_factor=0.3,
                  exploitative_correction_factor=1.0,
                  width=30, height=30,
                  lambda_parameter=0.5,
                  learning_rate=0.05,
                  epsilon=0.3, #q-learning / exploration rate
-                 ticks=150):
+                 ticks=150, 
+                 rumor_probability=0.3, # 30%
+                 rumor_intensity=1.0,   # Default peak ~L4 if active
+                 rumor_confidence=0.6,  # Default moderate confidence
+                 rumor_radius_factor=0.5, # Default half radius of real disaster
+                 min_rumor_separation_factor=0.7):
         super(DisasterModel, self).__init__()
         self.share_exploitative = share_exploitative
         self.share_of_disaster = share_of_disaster
@@ -790,13 +849,19 @@ class DisasterModel(Model):
         self.learning_rate = learning_rate
         self.epsilon = epsilon
         self.ticks = ticks
+        self.low_trust_amplification_factor = low_trust_amplification_factor
 
         self.grid = MultiGrid(width, height, torus=False)
         self.tick = 0
         self.tokens_this_tick = {}
         self.unmet_needs_evolution = []
         self.trust_stats = []       # (tick, AI_trust_exploit, Friend_trust_exploit, Nonfriend_trust_exploit,
-                                   #         AI_trust_explor, Friend_trust_explor, Nonfriend_trust_explor)
+        self.rumor_probability = rumor_probability
+        self.rumor_intensity = rumor_intensity
+        self.rumor_confidence = rumor_confidence
+        self.rumor_radius_factor = rumor_radius_factor
+        self.min_rumor_separation_factor = min_rumor_separation_factor
+         #         AI_trust_explor, Friend_trust_explor, Nonfriend_trust_explor)
         self.calls_data = []
         self.rewards_data = []
         self.seci_data = []         # (tick, avg_SECI_exploit, avg_SECI_explor)
@@ -1282,7 +1347,7 @@ def plot_grid_state(model, tick, save_dir="grid_plots"):
     """Plots the disaster grid state, agent locations, and tokens sent."""
     os.makedirs(save_dir, exist_ok=True) # Create directory if it doesn't exist
     # ---2x3 subplots ---
-    fig, ax = plt.subplots(2, 3, figsize=(21, 12)) # Increased width for 3 columns
+    fig, ax = plt.subplots(2, 3, figsize=(21, 12), constrained_layout=True)# Increased width for 3 columns
     fig.suptitle(f"Model State at Tick {tick}", fontsize=16)
 
     # --- Plot 1: Disaster Grid ---
@@ -1439,7 +1504,7 @@ def plot_grid_state(model, tick, save_dir="grid_plots"):
 
 
     # --- Final Touches for Layout ---
-    plt.tight_layout(rect=[0, 0.03, 1, 0.95]) # Adjust layout to make room for suptitle
+    # plt.tight_layout(rect=[0, 0.03, 1, 0.95]) # Adjust layout to make room for suptitle
     filepath = os.path.join(save_dir, f"grid_state_tick_{tick:04d}.png")
     plt.savefig(filepath)
     plt.close(fig) # Close figure to free memory
@@ -2084,7 +2149,7 @@ if __name__ == "__main__":
         "share_exploitative": 0.5,
         "share_of_disaster": 0.2,
         "initial_trust": 0.5,
-        "initial_ai_trust": 0.5,
+        "initial_ai_trust": 0.1,
         "number_of_humans": 30,
         "share_confirming": 0.5,
         "disaster_dynamics": 2,
@@ -2098,7 +2163,10 @@ if __name__ == "__main__":
         "lambda_parameter": 0.5,
         "learning_rate": 0.05,
         "epsilon": 0.2,
-        "ticks": 150
+        "ticks": 150,
+        "rumor_probability": 0.4, 
+        "rumor_intensity": 1.0,
+        "rumor_confidence": 0.6
     }
     num_runs = 10
     save_dir = "agent_model_results"
@@ -2428,7 +2496,7 @@ if __name__ == "__main__":
     # Use ax.bar(...) to plot grouped bars
     # Set appropriate labels and titles
     # ... (code structure similar to SECI plot) ...
-    # plt.show()
+    # plt.show()mode != "self_action"
 
     # --- (Delete or comment out the old line plot code for Exp D) ---
     # plt.figure(figsize=(8,6))
