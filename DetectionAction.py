@@ -35,12 +35,13 @@ class HumanAgent(Agent):
                  #exploit_trust_weight=0.7,    # Q-target: For 'human' mode, weight for avg FRIEND trust (exploiter)
                  self_confirm_weight=0.9,     # Q-target: For 'self_action', weight for confirmation value (exploiter)
                  self_confirm_boost=1.5,      # Multiplier for avg confidence to get confirmation value V_C (tune)
-                 confirmation_q_lr=0.2,       # Learning rate for Q-boost on confirmation
+                 confirmation_q_lr=0.05,       # Learning rate for Q-boost on confirmation
                  #exploit_ai_trust_weight=0.95,# Q-target: For 'A_k' modes, trust weight (exploiter) - very high
                  explore_reward_weight=0.8,   # Q-target: For all modes, reward weight (exploratory)
-                 exploit_friend_bias=1.0,     # Action Selection: Bias added to 'human' score (exploiter) (tune)
-                 exploit_self_bias=0.4,
-                 exploiter_trust_lr=0.1):      # Action Selection: Bias added to 'self_action' score (exploiter) (tune)
+                 exploit_friend_bias=0.2,     # Action Selection: Bias added to 'human' score (exploiter) (tune)
+                 exploit_self_bias=0.1,
+                 exploiter_trust_lr=0.1,
+                 min_accept_chance=0.05):      # Action Selection: Bias added to 'self_action' score (exploiter) (tune)
 
         # Use workaround: call parent initializer with model only, then set attributes.
         super(HumanAgent, self).__init__(model)
@@ -65,6 +66,7 @@ class HumanAgent(Agent):
         self.exploit_friend_bias = exploit_friend_bias
         self.exploit_self_bias = exploit_self_bias
         self.exploiter_trust_lr = exploiter_trust_lr 
+        self.min_accept_chance = min_accept_chance
 
 
         # --- Agent State ---
@@ -103,79 +105,64 @@ class HumanAgent(Agent):
         self.correct_targets = 0
         self.incorrect_targets = 0
 
-    def initialize_beliefs(self):
+    
+    def initialize_beliefs(self, assigned_rumor=None): # Accept assigned rumor
+        """
+        Initializes agent beliefs based on assigned rumor (if any) or defaults,
+        then senses the local environment.
+        """
         height, width = self.model.disaster_grid.shape
-        # Get rumor parameters from the model safely using getattr
-        rumor_prob = getattr(self.model, 'rumor_probability', 0.0)
-        rumor_intensity = getattr(self.model, 'rumor_intensity', 0.0)
-        rumor_conf = getattr(self.model, 'rumor_confidence', 0.6)
-        rumor_radius = self.model.disaster_radius * getattr(self.model, 'rumor_radius_factor', 0.5)
-        min_sep_dist_sq = (self.model.disaster_radius * getattr(self.model, 'min_rumor_separation_factor', 0.7))**2
-
-        has_rumor = random.random() < rumor_prob
         rumor_epicenter = None
+        rumor_intensity = 0
+        rumor_conf = 0.6 # Default confidence if using rumor
+        rumor_radius = 0 # Default radius
 
-        # Determine rumor epicenter if agent gets a rumor
-        if has_rumor and rumor_intensity > 0 and rumor_radius > 0:
-            attempts = 0
-            max_attempts = 100 # Prevent infinite loop if grid is small/crowded
-            while attempts < max_attempts:
-                 # Pick a random potential epicenter
-                 potential_rumor_epicenter = (random.randrange(width), random.randrange(height))
-                 # Calculate distance squared from true epicenter
-                 dist_sq = (potential_rumor_epicenter[0] - self.model.epicenter[0])**2 + \
-                           (potential_rumor_epicenter[1] - self.model.epicenter[1])**2
-                 # Check if it's far enough away
-                 if dist_sq >= min_sep_dist_sq:
-                     rumor_epicenter = potential_rumor_epicenter
-                     break # Found a suitable location
-                 attempts += 1
-            # if attempts == max_attempts:
-            #     print(f"Warning: Agent {self.unique_id} couldn't find distant rumor epicenter after {max_attempts} attempts.")
-            #     # Agent will proceed without a specific rumor map if no location found
+        # Unpack details if a rumor was assigned by the model
+        if assigned_rumor:
+            rumor_epicenter, rumor_intensity, rumor_conf, rumor_radius = assigned_rumor
 
-        # Initialize all beliefs first
+        # Initialize belief grid
         for x in range(width):
             for y in range(height):
                 initial_level = 0
                 initial_conf = 0.1 # Default low confidence
 
-                # If this agent has a rumor epicenter, calculate belief based on it
+                # If this agent has an assigned rumor epicenter...
                 if rumor_epicenter:
                     dist_from_rumor = math.sqrt((x - rumor_epicenter[0])**2 + (y - rumor_epicenter[1])**2)
-                    # Simple circular rumor area
+                    # If within the rumor radius...
                     if dist_from_rumor < rumor_radius:
-                        # Set belief level based on intensity (e.g., peak L3 + intensity)
+                        # Set belief based on rumor details
                         initial_level = min(5, int(round(3 + rumor_intensity)))
-                        # Set specified rumor confidence
                         initial_conf = rumor_conf
 
                 self.beliefs[(x, y)] = {'level': initial_level, 'confidence': initial_conf}
 
-        # This overwrites the initial belief in the sensing radius with potentially conflicting info
+        # Sense the actual local environment (overwrites local beliefs)
         self.sense_environment()
 
 
     def sense_environment(self):
         pos = self.pos
-        radius = 2 if self.agent_type == "exploitative" else 3 #exploratory agents 'look' further
+        radius = 1 if self.agent_type == "exploitative" else 3 #exploratory agents 'look' further
         cells = self.model.grid.get_neighborhood(pos, moore=True, radius=radius, include_center=True)
         for cell in cells:
             if 0 <= cell[0] < self.model.width and 0 <= cell[1] < self.model.height:
                 actual = self.model.disaster_grid[cell[0], cell[1]] # Use (x,y)
                 noise_roll = random.random()
-                if noise_roll < 0.1: # 10% chance slight error
+                noise_threshold = 0.1 # <<< 10% chance of noise >>>
+                if noise_roll < noise_threshold:
+                    # Apply +/- 1 error
                     belief_level = max(0, min(5, actual + random.choice([-1, 1])))
-                    belief_conf = 0.7 # Lower confidence if noisy read
-                elif noise_roll < 0.3: # 20% chance larger error (original logic) - REMOVED, simplified noise
-                    # Let's simplify: 80% accurate read, 20% noisy read by +/- 1
-                    belief_level = max(0, min(5, actual + random.choice([-1, 1])))
-                    belief_conf = 0.7 # Lower confidence if noisy read
+                    # Assign lower confidence for noisy reads
+                    belief_conf = 0.6 # <<< confidence >>
                 else: # 70% Accurate read
                     belief_level = actual
-                    belief_conf = 0.99 # High confidence for direct sensing
-
-            # Update belief with level and confidence
+                    if self.agent_type == "exploitative":
+                        belief_conf = 0.75 # Lower confidence for exploiters' own sensing
+                    else:
+                        belief_conf = 0.95 # Explorers still highly confident
+               # Update belief with level and confidence
             self.beliefs[cell] = {'level': belief_level, 'confidence': belief_conf}
         # else: cell is outside grid, ignore
 
@@ -193,23 +180,26 @@ class HumanAgent(Agent):
         if current_pos_level >= 4 and random.random() < 0.1: # 10% chance of not reporting if on a disaster affected grid cell
             return {}
 
-        radius = 2 if self.agent_type == "exploitative" else 3
-        cells = self.model.grid.get_neighborhood(caller_pos, moore=True, radius=radius, include_center=True)
+        radius = 1 if self.agent_type == "exploitative" else 3
+        
+        cells_to_report_on = self.model.grid.get_neighborhood(
+            self.pos, # Use own position
+            moore=True,
+            radius=radius,
+            include_center=True
+        )
+
         report = {}
-        for cell in cells:
-            # Retrieve the belief dictionary for the cell, provide default dict if unknown
-            belief_info = self.beliefs.get(cell, {'level': 0, 'confidence': 0.1})
+        for cell in cells_to_report_on:
+            # Report OWN belief about cells in OWN neighborhood
+            belief_info = self.beliefs.get(cell, {'level': 0, 'confidence': 0.1}) # Get own belief
+            current_level = belief_info.get('level', 0)
 
-            # Ensure belief_info is a dictionary before accessing 'level'
-            current_level = belief_info.get('level', 0) if isinstance(belief_info, dict) else belief_info # Handles default or potential old int format
-
-            # Apply noise to the level (not the dictionary)
-            if random.random() < 0.1: # 10% chance to report noisy value
+            # Apply reporting noise
+            if random.random() < 0.05: # 5% chance to report noisy value
                 noisy_level = max(0, min(5, current_level + random.choice([-1, 1])))
-                # Store the integer level in the report
                 report[cell] = noisy_level
             else:
-                # Store the current believed integer level in the report
                 report[cell] = current_level
 
         return report # Report dictionary contains integer levels as values
@@ -374,7 +364,18 @@ class HumanAgent(Agent):
              if self.agent_type == "exploitative" and responsible_source_id and responsible_source_id in self.friends:
                  friend_weight = 2.5 # Friend boost for acceptance
 
-             P_accept = 1.0 if d == 0 else (self.D ** self.delta) / ((d ** self.delta) + (self.D ** self.delta)) * friend_weight
+             base_P_accept = 1.0 if d == 0 else (self.D ** self.delta) / ((d ** self.delta) + (self.D ** self.delta)) * friend_weight
+             base_P_accept = max(0.0, min(1.0, base_P_accept)) # Clip base probability
+             
+             responsible_source_id = report_sources.get(cell, source_agent_id_for_credit)
+             current_trust_in_source = self.trust.get(responsible_source_id, 0.5) # Default 0.5 if missing
+             # Calculate trust-scaled acceptance
+             trust_scaled_P = base_P_accept * current_trust_in_source
+
+             # Apply minimum acceptance chance
+             P_accept = self.min_accept_chance + (1.0 - self.min_accept_chance) * trust_scaled_P
+
+             # P_accept = 1.0 if d == 0 else (self.D ** self.delta) / ((d ** self.delta) + (self.D ** self.delta)) * friend_weight
              P_accept = max(0.0, min(1.0, P_accept)) # Ensure probability is valid
 
              if random.random() < P_accept:
@@ -435,26 +436,17 @@ class HumanAgent(Agent):
                         # d = abs(reported_level_int - old_belief_level) was calculated earlier
                         confirmation_score = 1.0 / (1.0 + d) # Score = 1 if d=0, decreases as d increases
 
-                        # --- 1. Immediate Q-Value Boost for AI Confirmation ---
-                        # Apply ONLY if the source was an AI
                         if responsible_source_id.startswith("A_"):
-                            current_q = self.q_table.get(responsible_source_id, 0.0)
-                            # Target for this update is the confirmation score itself
-                            q_target_confirm = confirmation_score
-                            # Use confirmation_q_lr (ensure it's defined in __init__, e.g., 0.05)
-                            q_boost = self.confirmation_q_lr * (q_target_confirm - current_q)
-                            self.q_table[responsible_source_id] = current_q + q_boost
+                             current_q = self.q_table.get(responsible_source_id, 0.0)
+                             q_target_confirm = confirmation_score
+                             q_boost = self.confirmation_q_lr * (q_target_confirm - current_q) # Uses new low LR
+                             self.q_table[responsible_source_id] = current_q + q_boost
 
-                        # --- 2. Trust Update based ONLY on Confirmation Score ---
-                        # This is the ONLY trust update for Exploiters in this method
-                        current_trust = self.trust.get(responsible_source_id, 0.5) # Default 0.5 if missing
-                        # Calculate change needed to move trust towards the confirmation score
-                        trust_change = self.exploiter_trust_lr * (confirmation_score - current_trust) # Needs exploiter_trust_lr in init (e.g., 0.1)
-                        # Apply the change directly
+                        current_trust = self.trust.get(responsible_source_id, 0.5)
+                        trust_change = self.exploiter_trust_lr * (confirmation_score - current_trust)
                         new_trust = current_trust + trust_change
-                        # Apply bounds 0.0 to 1.0
                         self.trust[responsible_source_id] = max(0.0, min(1.0, new_trust))
-                  
+                    
                      # Update acceptance counters
                      if responsible_source_id.startswith("H_"):
                          self.accepted_human += 1
@@ -573,6 +565,7 @@ class HumanAgent(Agent):
 
             correct_in_batch = 0
             incorrect_in_batch = 0
+            all_cell_rewards = []
 
             # --- Calculate Reward based on true state vs action ---
             for cell, belief_at_action_time in cells_and_beliefs:
@@ -587,13 +580,30 @@ class HumanAgent(Agent):
                      elif actual_level == 4: cell_reward = 2
                      elif actual_level == 3: cell_reward = 1
                      elif actual_level <= 2: cell_reward = -1.5
-                     batch_reward += cell_reward
+                     
+                     all_cell_rewards.append(cell_reward) 
                      # Confidence boost for correct identification (optional)
                      if is_correct_target and cell in self.beliefs and isinstance(self.beliefs[cell], dict):
                          correct_high_need_boost = 0.15
                          current_conf = self.beliefs[cell].get('confidence', 0.1)
                          self.beliefs[cell]['confidence'] = min(0.99, current_conf + correct_high_need_boost)
                  else: pass # Invalid cell coord
+            
+            positive_rewards = [r for r in all_cell_rewards if r > 0]
+            negative_rewards = [r for r in all_cell_rewards if r <= 0] # Include 0 reward if necessary
+
+            if correct_in_batch > 0: # Check if ANY correct target was hit
+                # If successful hits, reward is the value of the BEST hit
+                # Handle case where positive_rewards might be empty if only Lvl 3 hit (reward=1)
+                # but let's assume Lvl 3+ counts as positive reward here.
+                # Safer: check correct_in_batch counter
+                batch_reward = max(all_cell_rewards) # Get the max reward achieved
+
+            elif all_cell_rewards: # Only misses (negative rewards) or maybe zeros
+                # If only misses, sum the penalties (sum will be <= 0)
+                batch_reward = sum(all_cell_rewards)
+            else: # Should not happen if cells_and_beliefs was not empty initially
+                batch_reward = -1.5 # Assign a penalty if something went wrong
 
             # Update agent's overall performance counters
             self.correct_targets += correct_in_batch
@@ -666,7 +676,7 @@ class HumanAgent(Agent):
 
                  
                  trust_change_factor_pos = 0.05 # For positive reward
-                 trust_change_factor_neg = 0.4 # Example: larger for negative reward
+                 trust_change_factor_neg = 0.05 #  for negative reward
                  if scaled_norm >= 0:
                     trust_change = trust_change_factor_pos * scaled_norm
                  else:
@@ -719,7 +729,7 @@ class AIAgent(Agent):
         self.memory = {}
         self.sensed = {}
         self.total_cells = self.model.width * self.model.height        
-        self.cells_to_sense = int(0.1 * self.total_cells)
+        self.cells_to_sense = int(0.15 * self.total_cells)
 
     def sense_environment(self):
         height, width = self.model.disaster_grid.shape
@@ -734,7 +744,7 @@ class AIAgent(Agent):
                 self.sensed[cell] = self.memory[memory_key]
             else:
                 value = self.model.disaster_grid[x, y]
-                if random.random() < 0.15: # 15% chance of AI sensing noise
+                if random.random() < 0.1: # 10% chance of AI sensing noise
                     value = max(0, min(5, value + random.choice([-1, 1])))
                 self.sensed[cell] = value
                 self.memory[(current_tick, cell)] = value
@@ -821,7 +831,7 @@ class DisasterModel(Model):
                  exploitative_correction_factor=1.0,
                  width=30, height=30,
                  lambda_parameter=0.5,
-                 learning_rate=0.05,
+                 learning_rate=0.15,
                  epsilon=0.3, #q-learning / exploration rate
                  ticks=150, 
                  rumor_probability=0.3, # 30%
@@ -900,9 +910,51 @@ class DisasterModel(Model):
             self.grid.place_agent(agent, pos)
             agent.pos = pos
 
+        self.agent_rumors = {} # Store assigned rumor details {agent_id: (epicenter, intensity, confidence)}
+        rumor_prob = getattr(self, 'rumor_probability', 0.0)
+        rumor_intensity = getattr(self, 'rumor_intensity', 0.0)
+        rumor_conf = getattr(self, 'rumor_confidence', 0.6)
+        min_sep_dist_sq = (self.disaster_radius * getattr(self, 'min_rumor_separation_factor', 0.7))**2
+        rumor_radius = self.disaster_radius * getattr(self, 'rumor_radius_factor', 0.5) # Needed for init
+
+        # Use integer node IDs from network for components
+        # Map node ID back to agent ID string 'H_i'
+        node_to_agent_id = {i: f"H_{i}" for i in range(self.num_humans)}
+
+        # Find connected components in the social network
+        # Note: This assumes node IDs 0..N-1 correspond to agent indices
+        components = list(nx.connected_components(self.social_network))
+        print(f"Found {len(components)} network components.") # Debug print
+
+        for i, component_nodes in enumerate(components):
+            # Decide if this component gets a rumor
+            if random.random() < rumor_prob:
+                # Generate ONE rumor epicenter for the entire component
+                rumor_epicenter = None
+                attempts = 0
+                max_attempts = 100
+                while attempts < max_attempts:
+                    potential_rumor_epicenter = (random.randrange(self.width), random.randrange(self.height))
+                    dist_sq = (potential_rumor_epicenter[0] - self.epicenter[0])**2 + \
+                          (potential_rumor_epicenter[1] - self.epicenter[1])**2
+                    if dist_sq >= min_sep_dist_sq:
+                        umor_epicenter = potential_rumor_epicenter
+                        # print(f"  Assigning rumor at {rumor_epicenter} to component {i} (size {len(component_nodes)})") # Debug
+                        break
+                    attempts += 1
+
+                # Assign the SAME rumor details to all agents in this component
+                if rumor_epicenter:
+                    rumor_details = (rumor_epicenter, rumor_intensity, rumor_conf, rumor_radius)
+                    for node_id in component_nodes:
+                        agent_id = node_to_agent_id.get(node_id)
+                        if agent_id: # Check if agent exists
+                            self.agent_rumors[agent_id] = rumor_details
+
         for agent in self.agent_list:
             if isinstance(agent, HumanAgent):
-                agent.initialize_beliefs()
+                agent_rumor = self.agent_rumors.get(agent.unique_id, None)
+                agent.initialize_beliefs(assigned_rumor=agent_rumor) # Pass rumor details
 
         # Set up trust, info accuracy, and friends.
         for i in range(self.num_humans):
@@ -1554,7 +1606,7 @@ def plot_individual_beliefs(model, agent_ids, tick, save_dir="grid_plots/individ
     for i in range(plot_idx, len(axes_flat)):
         axes_flat[i].axis('off')
 
-    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+    # plt.tight_layout(rect=[0, 0.03, 1, 0.95])
     filepath = os.path.join(save_dir, f"individual_beliefs_tick_{tick:04d}.png")
     plt.savefig(filepath)
     plt.close(fig)
