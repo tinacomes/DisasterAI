@@ -143,28 +143,28 @@ class HumanAgent(Agent):
         for x in range(width):
             for y in range(height):
                 cell = (x, y)
-                
+
                 # Default initialization - all cells start with minimal belief
                 initial_level = 0
                 initial_conf = 0.1
-                
+
                 # Calculate distance from agent for sensing
                 distance_from_agent = math.sqrt((x - self.pos[0])**2 + (y - self.pos[1])**2)
                 sense_radius = 3 if self.agent_type == "exploratory" else 2
-                
+
                 # If cell is within sensing range, initialize with noisy perception of actual disaster
                 if distance_from_agent <= sense_radius:
                     try:
                         # Get actual level with bounds checking
                         if 0 <= x < self.model.width and 0 <= y < self.model.height:
                             actual_level = self.model.disaster_grid[y, x]  # Check if this should be [x, y] instead!
-                            
+
                             # Add small noise to initial sensing
                             if random.random() < 0.2:  # 20% chance of noisy reading
                                 initial_level = max(0, min(5, actual_level + random.choice([-1, 0, 1])))
                             else:
                                 initial_level = actual_level
-                            
+
                             initial_conf = 0.7 if self.agent_type == "exploratory" else 0.5  # Explorers more confident
                     except (IndexError, TypeError) as e:
                         # Log the error for debugging
@@ -230,7 +230,7 @@ class HumanAgent(Agent):
             if hasattr(source_agent, 'report_beliefs'):
                 return source_agent.report_beliefs(interest_point, query_radius)
         return {}
-        
+
     def sense_environment(self):
         pos = self.pos
         radius = 2 if self.agent_type == "exploitative" else 3
@@ -327,13 +327,13 @@ class HumanAgent(Agent):
             self.believed_epicenter = random.choice(best_cells) # Return one coordinate tuple (x,y)
         else:
             self.believed_epicenter = None # Indicate no clear epicenter believed yet
-   
+
 
     def find_exploration_targets(self, num_targets=1):
         """Finds cells scoring high on a weighted sum of believed level and uncertainty."""
         candidates = []
         min_level_to_explore = 1  # Consider L1+ cells
-        
+
         # Check if we have any beliefs to work with
         if not self.beliefs:
             # Handle case with no beliefs
@@ -341,16 +341,16 @@ class HumanAgent(Agent):
                 print(f"Agent {self.unique_id}: No beliefs available for exploration targeting")
             self.exploration_targets = []
             return
-        
+
         # Gather all valid candidates with their scores
         for cell, belief_info in self.beliefs.items():
             if isinstance(belief_info, dict):
                 level = belief_info.get('level', 0)
-                
+
                 # Skip L0 cells for primary exploration targets
                 if level < min_level_to_explore:
                     continue
-                    
+
                 # Check if cell coordinates are valid
                 if not (0 <= cell[0] < self.model.width and 0 <= cell[1] < self.model.height):
                     continue
@@ -374,24 +374,24 @@ class HumanAgent(Agent):
         if not candidates:
             if self.model.debug_mode:
                 print(f"Agent {self.unique_id} ({self.agent_type}): No L{min_level_to_explore}+ targets found. Using fallback.")
-            
+
             # Look for cells with lowest confidence
             min_conf = 1.1
             lowest_conf_cells = []
-            
+
             for cell, belief_info in self.beliefs.items():
                 if isinstance(belief_info, dict):
                     # Check if cell coordinates are valid
                     if not (0 <= cell[0] < self.model.width and 0 <= cell[1] < self.model.height):
                         continue
-                        
+
                     conf = belief_info.get('confidence', 1.0)
                     if conf < min_conf:
                         min_conf = conf
                         lowest_conf_cells = [cell]
                     elif conf == min_conf:
                         lowest_conf_cells.append(cell)
-            
+
             if lowest_conf_cells:
                 fallback_cell = random.choice(lowest_conf_cells)
                 candidates = [{'cell': fallback_cell, 'score': -1, 'level': '?', 'conf': min_conf}]
@@ -404,11 +404,11 @@ class HumanAgent(Agent):
                     cell = (x, y)
                     if cell in self.beliefs and isinstance(self.beliefs[cell], dict):
                         random_cells.append(cell)
-                
+
                 if random_cells:
                     random_cell = random.choice(random_cells)
                     belief_info = self.beliefs.get(random_cell, {'level': 0, 'confidence': 0.1})
-                    candidates = [{'cell': random_cell, 'score': -2, 'level': belief_info.get('level', 0), 
+                    candidates = [{'cell': random_cell, 'score': -2, 'level': belief_info.get('level', 0),
                                   'conf': belief_info.get('confidence', 0.1)}]
                 elif self.model.debug_mode:
                     print(f"SEVERE: Agent {self.unique_id} couldn't find any valid exploration targets")
@@ -419,7 +419,7 @@ class HumanAgent(Agent):
             # Debug print top candidates periodically
             if self.model.debug_mode and self.model.tick % 10 == 1 and random.random() < 0.2:
                 print(f"DEBUG Tick {self.model.tick} Agt {self.unique_id} Top Explore Candidates:")
-                for cand in candidates[:min(5, len(candidates))]: 
+                for cand in candidates[:min(5, len(candidates))]:
                     print(f"  Cell:{cand.get('cell')} Lvl:{cand.get('level')} Conf:{cand.get('conf'):.2f} Score:{cand.get('score'):.3f}")
 
             self.exploration_targets = [c['cell'] for c in candidates[:num_targets]]
@@ -437,11 +437,11 @@ class HumanAgent(Agent):
          for source_id in list(self.trust.keys()):
               rate = friend_decay_rate if source_id in self.friends else decay_rate
               self.trust[source_id] = max(0, self.trust[source_id] - rate)
-    
+
     def update_belief_bayesian(self, cell, reported_level, source_trust):
         """
         Update agent's belief about a cell using Bayesian principles.
-        
+
         Parameters:
         - cell: The (x,y) coordinates of the cell
         - reported_level: The disaster level reported by the source
@@ -451,42 +451,42 @@ class HumanAgent(Agent):
         if cell not in self.beliefs:
             # Initialize if not present
             self.beliefs[cell] = {'level': 0, 'confidence': 0.1}
-        
+
         current_belief = self.beliefs[cell]
         prior_level = current_belief.get('level', 0)
         prior_confidence = current_belief.get('confidence', 0.1)
-        
+
         # Convert confidence to precision (inverse variance)
         # Higher confidence = lower variance = higher precision
         prior_precision = prior_confidence / (1 - prior_confidence + 1e-6)
-        
+
         # Source precision is based on trust
         # Scale to make reasonable variance values
         source_precision = 4.0 * source_trust / (1 - source_trust + 1e-6)
-        
+
         # Special case for low trust sources - reduce precision further
         if source_trust < 0.3:
             source_precision *= (source_trust / 0.3)
-        
+
         # Special case for completely untrusted sources
         if source_trust < 0.05:
             # Almost ignore this information
             source_precision *= 0.1
-        
+
         # Combine information using precision weighting (Bayesian update)
         # For normally distributed beliefs, optimal combination weights by precision
         posterior_precision = prior_precision + source_precision
-        
+
         # Calculate the weighted update of belief level
         posterior_level = (prior_precision * prior_level + source_precision * reported_level) / posterior_precision
-        
+
         # Convert precision back to confidence [0,1]
         posterior_confidence = posterior_precision / (1 + posterior_precision)
-        
+
         # Constrain to valid ranges
         posterior_level = max(0, min(5, round(posterior_level)))
         posterior_confidence = max(0.01, min(0.99, posterior_confidence))
-        
+
         # Apply agent-type-specific adjustments
         if self.agent_type == "exploitative":
             # Exploitative agents give more weight to consistent information
@@ -500,13 +500,13 @@ class HumanAgent(Agent):
                 # Information significantly differs from prior
                 # Increase confidence less for exploratory agents when beliefs change a lot
                 posterior_confidence = max(0.05, posterior_confidence * 0.9)
-        
+
         # Update the belief
         self.beliefs[cell] = {
             'level': int(posterior_level),  # Ensure integer
             'confidence': posterior_confidence
         }
-        
+
         # Return whether this was a significant belief change
         return abs(posterior_level - prior_level) >= 1
 
@@ -523,8 +523,12 @@ class HumanAgent(Agent):
         eports = {}
         source_id = None  # Initialize source_id here, at the beginning of the method
         chosen_mode = None  # Initialize chosen_mode as well
-    
-        
+
+        # init counters
+        belief_updates = 0
+        source_calls_human = 0
+        source_calls_ai = 0
+
         # Add diagnostic logging for source selection
         decision_factors = {'q_values': {}, 'biases': {}, 'final_scores': {}}
 
@@ -558,7 +562,7 @@ class HumanAgent(Agent):
                         # FIX: Initialize max_conf and highest_conf_cells properly
                         max_conf = -1
                         highest_conf_cells = []
-                        
+
                         # Ensure we have valid beliefs to search through
                         if len(self.beliefs) > 0:
                             for cell, belief_info in self.beliefs.items():
@@ -569,7 +573,7 @@ class HumanAgent(Agent):
                                         highest_conf_cells = [cell]
                                     elif conf == max_conf:
                                         highest_conf_cells.append(cell)
-                        
+
                         # FIX: Ensure we have at least one valid cell before choosing
                         if highest_conf_cells:
                             interest_point = random.choice(highest_conf_cells)
@@ -583,13 +587,13 @@ class HumanAgent(Agent):
                 self.find_exploration_targets()
                 interest_point = self.exploration_targets[0] if self.exploration_targets else None
                 query_radius = 3
-                
+
                 # FIX: Add robust fallback mechanism
                 if not interest_point:
                     # Try finding highest confidence cells
                     max_conf = -1
                     highest_conf_cells = []
-                    
+
                     if len(self.beliefs) > 0:
                         for cell, belief_info in self.beliefs.items():
                             if isinstance(belief_info, dict):
@@ -599,7 +603,7 @@ class HumanAgent(Agent):
                                     highest_conf_cells = [cell]
                                 elif conf == max_conf:
                                     highest_conf_cells.append(cell)
-                    
+
                     if highest_conf_cells:
                         interest_point = random.choice(highest_conf_cells)
                     else:
@@ -613,7 +617,7 @@ class HumanAgent(Agent):
                 if self.model.debug_mode:
                     print(f"Agent {self.unique_id}: No valid interest point, skipping seek_information.")
                 return
-            
+
             # Validate coordinates are within grid bounds
             if not (0 <= interest_point[0] < self.model.width and 0 <= interest_point[1] < self.model.height):
                 if self.model.debug_mode:
@@ -626,7 +630,7 @@ class HumanAgent(Agent):
                 print(f" > My belief: {self.beliefs.get(interest_point, {})}")
                 print(f" > Ground truth: {self.model.disaster_grid[interest_point[0], interest_point[1]]}")
 
-            
+
             if not interest_point:
                 print(f"Agent {self.unique_id}: No valid interest point, skipping seek_information.")
                 return
@@ -643,7 +647,7 @@ class HumanAgent(Agent):
             # DIAGNOSTIC: Store Q-values
             for mode in possible_modes:
                 decision_factors['q_values'][mode] = self.q_table.get(mode, 0.0)
-            
+
             # Exploration case - record randomly chosen mode
             if random.random() < self.epsilon:
                 chosen_mode = random.choice(possible_modes)
@@ -652,22 +656,22 @@ class HumanAgent(Agent):
             else:
                 # Exploitation case - record all factors in decision
                 decision_factors['selection_type'] = 'exploitation'
-                
+
                 # Base scores are from Q-table
                 scores = {mode: self.q_table.get(mode, 0.0) for mode in possible_modes}
                 decision_factors['base_scores'] = scores.copy()
-                
+
                 # Add biases based on agent type
                 decision_factors['biases'] = {}
-                
+
                 if self.agent_type == "exploitative":
                     # Exploitative agents prefer friends and self-confirmation
                     scores["human"] += self.exploit_friend_bias
                     scores["self_action"] += self.exploit_self_bias
-                    
+
                     decision_factors['biases']["human"] = self.exploit_friend_bias
                     decision_factors['biases']["self_action"] = self.exploit_self_bias
-                    
+
                     # AI alignment effect on exploitative agents
                     ai_alignment_factor = self.model.ai_alignment_level * 0.2
                     for k in range(self.model.num_ai):
@@ -675,21 +679,21 @@ class HumanAgent(Agent):
                         ai_bias = ai_alignment_factor * self.trust.get(ai_id, 0.1)
                         scores[ai_id] += ai_bias
                         decision_factors['biases'][ai_id] = ai_bias
-                        
+
                 else:  # exploratory
                     # Exploratory agents have a slight bias against self-confirmation
                     scores["self_action"] -= 0.05
                     decision_factors['biases']["self_action"] = -0.05
-                    
+
                     # Low AI alignment makes exploratory agents more likely to consult AI
                     # This is where the pattern might be wrong - let's log it carefully
                     inverse_alignment_factor = (1.0 - self.model.ai_alignment_level) * 0.15
-                    
+
                     for k in range(self.model.num_ai):
                         ai_id = f"A_{k}"
                         scores[ai_id] += inverse_alignment_factor
                         decision_factors['biases'][ai_id] = inverse_alignment_factor
-                
+
                 # Add small random noise to break ties
                 for mode in scores:
                     noise = random.uniform(-0.01, 0.01)
@@ -697,9 +701,9 @@ class HumanAgent(Agent):
                     if 'noise' not in decision_factors:
                         decision_factors['noise'] = {}
                     decision_factors['noise'][mode] = noise
-                
+
                 decision_factors['final_scores'] = scores
-                
+
                 # Choose highest scoring mode
                 chosen_mode = max(scores, key=scores.get)
                 decision_factors['chosen_mode'] = chosen_mode
@@ -715,12 +719,12 @@ class HumanAgent(Agent):
                         print(f"  Applied biases: {decision_factors['biases']}")
                         print(f"  Final scores: {decision_factors['final_scores']}")
                     print(f"  AI alignment level: {self.model.ai_alignment_level}")
-                    
+
             self.tokens_this_tick = {chosen_mode: 1}
             self.last_queried_source_ids = []
 
             # Query source
-            
+
             if chosen_mode == "self_action":
                 reports = self.report_beliefs(interest_point, query_radius)
                 source_id = None  # No external source used
@@ -737,7 +741,7 @@ class HumanAgent(Agent):
                         source_id = max(friend_trust_pairs, key=lambda x: x[1])[0]
                     else:
                         source_id = random.choice(valid_sources)
-                        
+
                 source_agent = self.model.humans.get(source_id)
                 if source_agent:
                     reports = source_agent.report_beliefs(interest_point, query_radius)
@@ -762,21 +766,21 @@ class HumanAgent(Agent):
             # Process reports and update beliefs
             belief_updates = 0
             source_trust = self.trust.get(source_id, 0.1) if source_id else 0.1
-            
+
             for cell, reported_value in reports.items():
                 if cell not in self.beliefs:
                     continue
-                    
+
                 # Convert to integer level if it's not already
                 reported_level = int(round(reported_value))
-                
+
                 # Use the Bayesian update function instead of the old P_accept logic
                 significant_update = self.update_belief_bayesian(cell, reported_level, source_trust)
-                
+
                 # Track if this was a significant belief update
                 if significant_update:
                     belief_updates += 1
-                    
+
                     # Track source acceptance (for metrics)
                     if source_id:
                         if source_id.startswith("H_"):
@@ -909,10 +913,10 @@ class HumanAgent(Agent):
                             self.q_table[source_id] = old_q + self.learning_rate * (scaled_reward - old_q)
                         if source_id in self.trust:
                             old_trust = self.trust[source_id]
-                            
+
                             # Enhanced trust update logic based on agent type
                             trust_change = self.trust_learning_rate * (target_trust - old_trust)
-                            
+
                             # Exploitative agents increase trust more for confirmatory info
                             if self.agent_type == "exploitative" and source_id.startswith("A_"):
                                 # Check if AI's report aligned with agent's existing beliefs
@@ -922,20 +926,20 @@ class HumanAgent(Agent):
                                         agent_belief = self.beliefs[cell].get('level', 0)
                                         # Alignment is measured by closeness of beliefs
                                         confirmation_bonus += (1.0 - abs(agent_belief - actual_level) / 5.0) * 0.1
-                                
+
                                 # Higher alignment levels make exploitative agents trust AI more when it confirms beliefs
                                 ai_alignment = self.model.ai_alignment_level
                                 trust_change *= (1.0 + confirmation_bonus * ai_alignment * 2.0)
-                            
+
                             # Exploratory agents increase trust more for correct information
                             elif self.agent_type == "exploratory" and source_id.startswith("A_"):
                                 # Boost trust change for correct information proportionally to accuracy
                                 accuracy_bonus = correct_in_batch / max(1, len(cells_and_beliefs))
-                                
+
                                 # Lower alignment makes exploratory agents trust AI more for accurate info
                                 inverse_alignment = 1.0 - self.model.ai_alignment_level
                                 trust_change *= (1.0 + accuracy_bonus * inverse_alignment * 1.5)
-                                
+
                             self.trust[source_id] = max(0.0, min(1.0, old_trust + trust_change))
 
         except Exception as e:
@@ -1061,27 +1065,27 @@ class AIAgent(Agent):
 
         # --- Apply "Confidence-Weighted Alignment" Logic ---
         alignment_strength = self.model.ai_alignment_level
-        
-        # Formula: 
+
+        # Formula:
         # - For high human confidence: AI reports shift more toward human beliefs
         # - For low trust: Shift more to match human's beliefs (attempting to build trust)
-        
+
         # Base amplification inversely proportional to trust (low trust → higher alignment)
         low_trust_amplification = getattr(self.model, 'low_trust_amplification_factor', 0.3)
         clipped_trust = max(0.0, min(1.0, caller_trust_in_ai))
-        
+
         # Calculate personalized alignment for each cell based on confidence
         alignment_factors = alignment_strength * (1.0 + human_conf) + low_trust_amplification * (1.0 - clipped_trust)
         alignment_factors = np.clip(alignment_factors, 0.0, 2.0)  # Cap the max alignment factor
-        
+
         # Calculate adjustments
         belief_differences = human_vals - sensed_vals
         adjustments = alignment_factors * belief_differences
-        
+
         # Apply adjustments to AI's sensed values
         corrected = np.round(sensed_vals + adjustments)
         corrected = np.clip(corrected, 0, 5)
-        
+
         # Build the report dictionary with aligned values
         for i, cell in enumerate(valid_cells_in_query):
             report[cell] = int(corrected[i])
@@ -1316,19 +1320,19 @@ class DisasterModel(Model):
     def debug_log(self, message, force=False):
         """Log debug messages if debug mode is enabled or forced."""
         if self.debug_mode or force:
-            print(f"[DEBUG] Tick {self.tick}: {message}")   
-                            
+            print(f"[DEBUG] Tick {self.tick}: {message}")
+
     def track_ai_usage_patterns(model, tick_interval=10, save_dir="analysis_plots"):
         """Track and plot AI usage patterns over time."""
         os.makedirs(save_dir, exist_ok=True)
-        
+
         if model.tick % tick_interval != 0:
             return  # Only run at specified intervals
-            
+
         # Gather data on AI usage ratio
         exploit_ai_ratio = []
         explor_ai_ratio = []
-        
+
         for agent in model.humans.values():
             if agent.accum_calls_total > 0:
                 ai_ratio = agent.accum_calls_ai / agent.accum_calls_total
@@ -1336,46 +1340,46 @@ class DisasterModel(Model):
                     exploit_ai_ratio.append(ai_ratio)
                 else:
                     explor_ai_ratio.append(ai_ratio)
-        
+
         # Save data for later analysis
         if not hasattr(model, 'ai_usage_history'):
-            model.ai_usage_history = {'tick': [], 'exploit_mean': [], 'exploit_std': [], 
+            model.ai_usage_history = {'tick': [], 'exploit_mean': [], 'exploit_std': [],
                                     'explor_mean': [], 'explor_std': []}
-        
+
         model.ai_usage_history['tick'].append(model.tick)
         model.ai_usage_history['exploit_mean'].append(np.mean(exploit_ai_ratio) if exploit_ai_ratio else 0)
         model.ai_usage_history['exploit_std'].append(np.std(exploit_ai_ratio) if exploit_ai_ratio else 0)
         model.ai_usage_history['explor_mean'].append(np.mean(explor_ai_ratio) if explor_ai_ratio else 0)
         model.ai_usage_history['explor_std'].append(np.std(explor_ai_ratio) if explor_ai_ratio else 0)
-        
+
         # Plot current state
         if model.tick > 0 and len(model.ai_usage_history['tick']) > 1:
             fig, ax = plt.subplots(figsize=(10, 6))
-            
-            ax.plot(model.ai_usage_history['tick'], model.ai_usage_history['exploit_mean'], 
+
+            ax.plot(model.ai_usage_history['tick'], model.ai_usage_history['exploit_mean'],
                     'r-', label='Exploitative')
             ax.fill_between(model.ai_usage_history['tick'],
                             np.array(model.ai_usage_history['exploit_mean']) - np.array(model.ai_usage_history['exploit_std']),
                             np.array(model.ai_usage_history['exploit_mean']) + np.array(model.ai_usage_history['exploit_std']),
                             color='r', alpha=0.2)
-                            
-            ax.plot(model.ai_usage_history['tick'], model.ai_usage_history['explor_mean'], 
+
+            ax.plot(model.ai_usage_history['tick'], model.ai_usage_history['explor_mean'],
                     'b-', label='Exploratory')
             ax.fill_between(model.ai_usage_history['tick'],
                             np.array(model.ai_usage_history['explor_mean']) - np.array(model.ai_usage_history['explor_std']),
                             np.array(model.ai_usage_history['explor_mean']) + np.array(model.ai_usage_history['explor_std']),
                             color='b', alpha=0.2)
-            
+
             ax.set_xlabel('Tick')
             ax.set_ylabel('AI Usage Ratio')
             ax.set_title(f'AI Usage Over Time (Alignment = {model.ai_alignment_level})')
             ax.legend()
             ax.grid(True, linestyle='--', alpha=0.7)
-            
+
             plt.tight_layout()
             plt.savefig(os.path.join(save_dir, f"ai_usage_tick_{model.tick}.png"))
-            plt.close() 
-                
+            plt.close()
+
     def update_disaster(self):
         # Store a copy of the current grid before updating
         if self.disaster_grid is not None:
@@ -1421,11 +1425,11 @@ class DisasterModel(Model):
 
         # Create a proper token array counting all tokens
         token_array = np.zeros((self.width, self.height), dtype=int)
-        
+
         # Debug totals for verification
         total_exploit_tokens = 0
         total_explor_tokens = 0
-        
+
         # Fill the token array
         for pos, count_dict in self.tokens_this_tick.items():
             x, y = pos
@@ -1434,30 +1438,30 @@ class DisasterModel(Model):
                 # Get token counts by type
                 exploit_tokens = count_dict.get('exploit', 0)
                 explor_tokens = count_dict.get('explor', 0)
-                
+
                 # Track totals for debugging
                 total_exploit_tokens += exploit_tokens
                 total_explor_tokens += explor_tokens
-                
+
                 # Assign the sum to the token array
                 token_array[x, y] = exploit_tokens + explor_tokens
             else:
                 print(f"Warning: Invalid position key in tokens_this_tick: {pos}")
-        
+
         # Log token totals periodically
         if self.tick % 10 == 0 or self.debug_mode:
             print(f"Tick {self.tick} token counts - Exploit: {total_exploit_tokens}, Explor: {total_explor_tokens}, Total: {total_exploit_tokens + total_explor_tokens}")
-        
+
         # Identify high-need cells (L4+) that received no tokens
         need_mask = self.disaster_grid >= 4
         tokens_mask = token_array == 0
         unmet = np.sum(need_mask & tokens_mask)
-        
+
         # Log details about the unmet needs
         if self.tick % 10 == 0 or self.debug_mode:
             high_need_count = np.sum(need_mask)
             print(f"Tick {self.tick} high-need cells: {high_need_count}, unmet: {unmet} ({unmet/max(1,high_need_count)*100:.1f}%)")
-        
+
         self.unmet_needs_evolution.append(unmet)
 
         if self.tick % 10 == 0:
@@ -1528,7 +1532,7 @@ class DisasterModel(Model):
             min_ai_ratio = 0.3      # Lowered from 0.5 to be more inclusive
 
             ai_reliant_agents = [agent for agent in self.humans.values()
-                                if agent.accum_calls_total >= min_calls_threshold and 
+                                if agent.accum_calls_total >= min_calls_threshold and
                                   (agent.accum_calls_ai / max(1, agent.accum_calls_total)) >= min_ai_ratio]
 
             # Log counts for debugging
@@ -1545,16 +1549,16 @@ class DisasterModel(Model):
                     for belief_info in agent.beliefs.values():
                         if isinstance(belief_info, dict):
                             all_belief_levels.append(belief_info.get('level', 0))
-                
+
                 global_var = np.var(all_belief_levels) if all_belief_levels else 1e-6
-                
+
                 # Now get AI-reliant agents' belief variance
                 ai_reliant_beliefs = []
                 for agent in ai_reliant_agents:
                     for belief_info in agent.beliefs.values():
                         if isinstance(belief_info, dict):
                             ai_reliant_beliefs.append(belief_info.get('level', 0))
-                
+
                 if ai_reliant_beliefs and global_var > 1e-9:
                     ai_reliant_var = np.var(ai_reliant_beliefs)
                     aeci_variance = max(0, min(1, (global_var - ai_reliant_var) / global_var))
@@ -1572,7 +1576,7 @@ class DisasterModel(Model):
                         ratio = agent.accum_calls_ai / max(1, agent.accum_calls_total)
                         print(f"Agent {agent.unique_id} ({agent.agent_type[:4]}): AI calls {agent.accum_calls_ai}/{agent.accum_calls_total} = {ratio:.2f}")
 
-            
+
             # --- New Metric: Component-AECI ---
             component_aeci_list = []
             for component_nodes in nx.connected_components(self.social_network):
@@ -1654,7 +1658,7 @@ class DisasterModel(Model):
 
 
             # --- AECI Calculation ---
-           
+
             aeci_exp = []
             aeci_expl = []
 
@@ -1662,7 +1666,7 @@ class DisasterModel(Model):
                 if agent.accum_calls_total > 0:
                     # Ensure ratio is properly bounded between 0 and 1
                     ratio = max(0.0, min(1.0, agent.accum_calls_ai / agent.accum_calls_total))
-                    
+
                     if agent.agent_type == "exploitative":
                         aeci_exp.append(ratio)
                     else:  # exploratory
@@ -1690,56 +1694,56 @@ class DisasterModel(Model):
                 if aeci_array is None or aeci_array.ndim < 3 or aeci_array.shape[0] == 0:
                     print(f"Warning: Invalid or empty data for plot_aeci_evolution {title_suffix}")
                     return
-                
+
                 ticks = aeci_array[0, :, 0]  # Get ticks from first run
-                
+
                 # Extract and clean data for each agent type
                 def get_cleaned_stats(index):
                     # Get raw data for this index
                     data = aeci_array[:, :, index]
-                    
+
                     # Ensure all values are within [0,1]
                     data = np.clip(data, 0.0, 1.0)
-                    
+
                     # Calculate statistics
                     mean = np.mean(data, axis=0)
                     lower = np.percentile(data, 25, axis=0)
                     upper = np.percentile(data, 75, axis=0)
-                    
+
                     # Final safety check
                     mean = np.clip(mean, 0.0, 1.0)
                     lower = np.clip(lower, 0.0, 1.0)
                     upper = np.clip(upper, 0.0, 1.0)
-                    
+
                     return mean, lower, upper
-                
+
                 # Get stats for each agent type
                 aeci_exp_mean, aeci_exp_lower, aeci_exp_upper = get_cleaned_stats(1)  # Index 1 is exploitative
                 aeci_expl_mean, aeci_expl_lower, aeci_expl_upper = get_cleaned_stats(2)  # Index 2 is exploratory
-                
+
                 # Create the plot
                 plt.figure(figsize=(10, 6))
-                
+
                 # Plot exploitative agents
                 plt.plot(ticks, aeci_exp_mean, label="Exploitative", color="blue")
                 plt.fill_between(ticks, aeci_exp_lower, aeci_exp_upper, color="blue", alpha=0.2)
-                
+
                 # Plot exploratory agents
                 plt.plot(ticks, aeci_expl_mean, label="Exploratory", color="orange")
                 plt.fill_between(ticks, aeci_expl_lower, aeci_expl_upper, color="orange", alpha=0.2)
-                
+
                 plt.title(f"AI Call Ratio Evolution {title_suffix} (Mean +/- IQR)")
                 plt.xlabel("Tick")
                 plt.ylabel("AI Call Ratio [0-1]")
                 plt.legend()
                 plt.grid(True, linestyle='--', alpha=0.6)
                 plt.ylim(0, 1)  # Force y-axis limits to [0,1]
-                
+
                 plt.tight_layout()
                 save_path = f"agent_model_results/aeci_evolution_{title_suffix.replace('(','').replace(')','').replace('=','_')}.png"
                 plt.savefig(save_path)
                 plt.close()
-           
+
             # Debug logging
             total_calls_exp = sum(agent.accum_calls_total for agent in self.humans.values() if agent.agent_type == "exploitative")
             ai_calls_exp = sum(agent.accum_calls_ai for agent in self.humans.values() if agent.agent_type == "exploitative")
@@ -1808,6 +1812,7 @@ class DisasterModel(Model):
             # Reset call counters after computing AECI metrics.
             for agent in self.humans.values():
                 agent.accum_calls_ai = 0
+                agent.accum_calls_human = 0
                 agent.accum_calls_total = 0
 
 #########################################
@@ -1899,25 +1904,25 @@ def simulation_generator(num_runs, base_params):
         """Safely stacks a list of numpy arrays, handling empty lists/arrays and shape inconsistencies."""
         if not data_list:
             return np.array([])
-        
+
         # Filter out None values and empty arrays
         valid_arrays = [item for item in data_list if isinstance(item, np.ndarray) and item.size > 0]
-        
+
         if not valid_arrays:
             return np.array([])
-        
+
         # Check if all arrays have the same shape
         first_shape = valid_arrays[0].shape
         if all(arr.shape == first_shape for arr in valid_arrays):
             return np.stack(valid_arrays, axis=0)
-        
+
         # Handle case where arrays might have different numbers of time steps
         # Find arrays with same number of dimensions but possibly different lengths
         same_ndim = [arr for arr in valid_arrays if arr.ndim == valid_arrays[0].ndim]
-        
+
         if not same_ndim:
             return np.array([])
-        
+
         # For time series data (assumed to be shape (time_steps, metrics))
         # Find the minimum number of time steps across all arrays
         if valid_arrays[0].ndim >= 2:
@@ -1929,7 +1934,7 @@ def simulation_generator(num_runs, base_params):
             # For 1D arrays, just stack them if they have the same shape
             if all(arr.shape == same_ndim[0].shape for arr in same_ndim):
                 return np.stack(same_ndim, axis=0)
-        
+
         # If we can't stack, return empty array
         print("Warning: Could not stack arrays with inconsistent shapes")
         return np.array([])
@@ -1999,44 +2004,44 @@ def experiment_alignment_tipping_point(base_params, alignment_values=None, num_r
     if alignment_values is None:
         # Create a fine-grained list of alignment values
         alignment_values = [round(x * 0.1, 1) for x in range(11)]  # 0.0 to 1.0 by 0.1
-        
+
     results = {}
     crossover_detected = False
-    
+
     for align in alignment_values:
         params = base_params.copy()
         params["ai_alignment_level"] = align
         print(f"Running ai_alignment_level = {align}")
-        
+
         result = aggregate_simulation_results(num_runs, params)
         results[align] = result
-        
+
         # Check for tipping point where exploratory agents prefer AI more than exploitative agents
         if align > 0 and align-0.1 in results:
             prev_result = results[align-0.1]
-            
+
             # Extract AECI values (AI Call Ratio) for each agent type
             curr_aeci_exploit = result.get("aeci", np.array([]))
             curr_aeci_explor = result.get("aeci", np.array([]))
             prev_aeci_exploit = prev_result.get("aeci", np.array([]))
             prev_aeci_explor = prev_result.get("aeci", np.array([]))
-            
+
             # Check if crossover occurred
-            if (prev_aeci_explor.size > 0 and prev_aeci_exploit.size > 0 and 
+            if (prev_aeci_explor.size > 0 and prev_aeci_exploit.size > 0 and
                 curr_aeci_explor.size > 0 and curr_aeci_exploit.size > 0):
-                
+
                 prev_explor_mean = np.mean(prev_aeci_explor[:, -1, 2])  # Last tick, explor column
                 prev_exploit_mean = np.mean(prev_aeci_exploit[:, -1, 1])  # Last tick, exploit column
                 curr_explor_mean = np.mean(curr_aeci_explor[:, -1, 2])
                 curr_exploit_mean = np.mean(curr_aeci_exploit[:, -1, 1])
-                
+
                 if ((prev_explor_mean > prev_exploit_mean and curr_explor_mean < curr_exploit_mean) or
                     (prev_explor_mean < prev_exploit_mean and curr_explor_mean > curr_exploit_mean)):
                     crossover_detected = True
                     print(f"TIPPING POINT DETECTED between alignment {align-0.1} and {align}")
                     print(f"Previous: Explor={prev_explor_mean:.3f}, Exploit={prev_exploit_mean:.3f}")
                     print(f"Current: Explor={curr_explor_mean:.3f}, Exploit={curr_exploit_mean:.3f}")
-                    
+
                     # Run a finer-grained search between these values
                     fine_alignment = [round((align-0.1) + x * 0.02, 2) for x in range(1, 5)]  # 5 points between
                     for fine_align in fine_alignment:
@@ -2044,10 +2049,10 @@ def experiment_alignment_tipping_point(base_params, alignment_values=None, num_r
                         params["ai_alignment_level"] = fine_align
                         print(f"Running fine-grained ai_alignment_level = {fine_align}")
                         results[fine_align] = aggregate_simulation_results(num_runs, params)
-    
+
     if not crossover_detected:
         print("No tipping point detected across the alignment range.")
-        
+
     return results
 
 def experiment_share_exploitative(base_params, share_values, num_runs=20):
@@ -2146,6 +2151,7 @@ def aggregate_simulation_results(num_runs, base_params):
     # <<< Lists for New Metrics >>>
     component_seci_list, aeci_variance_list, component_aeci_list, component_ai_trust_variance_list = [], [], [], []
     event_ticks_list = [] # Collect event ticks from each run
+    max_aeci_variance_per_run = [] #max aeci var
 
     # --- Lists for Assistance Counts ---
     exploit_correct_per_run, exploit_incorrect_per_run = [], []
@@ -2162,6 +2168,7 @@ def aggregate_simulation_results(num_runs, base_params):
             trust_list.append(result.get("trust_stats", np.array([])))
             seci_list.append(result.get("seci", np.array([])))
             aeci_list.append(result.get("aeci", np.array([]))) # AI Call Ratio
+            aeci_variance_data = result.get("aeci_variance", np.array([])) 
             retain_aeci_list.append(result.get("retain_aeci", np.array([])))
             retain_seci_list.append(result.get("retain_seci", np.array([])))
             unmet_needs_evolution_list.append(result.get("unmet_needs_evolution", [])) # List
@@ -2174,6 +2181,19 @@ def aggregate_simulation_results(num_runs, base_params):
             component_ai_trust_variance_list.append(result.get("component_ai_trust_variance", np.array([])))
             event_ticks_list.append(result.get("event_ticks", [])) # List
 
+            
+            # Find maximum AECI variance value for this run
+            if isinstance(aeci_variance_data, np.ndarray) and aeci_variance_data.size > 0:
+                if aeci_variance_data.ndim >= 3 and aeci_variance_data.shape[1] > 0 and aeci_variance_data.shape[2] > 1:
+                    # Extract values from column 1 (value column)
+                    aeci_variance_values = aeci_variance_data[:, :, 1]
+                    # Get maximum value across all time steps
+                    max_variance = np.max(aeci_variance_values)
+                    max_aeci_variance_per_run.append(max_variance)
+                else:
+                    print(f"Warning: Invalid AECI variance data shape for run {run_num}")
+            else:
+                print(f"Warning: No AECI variance data for run {run_num}")
             # --- Aggregate Assistance Counts ---
             run_exploit_correct, run_exploit_incorrect = 0, 0
             run_explor_correct, run_explor_incorrect = 0, 0
@@ -2267,9 +2287,10 @@ def aggregate_simulation_results(num_runs, base_params):
             "explor_correct": explor_correct_per_run,
             "explor_incorrect": explor_incorrect_per_run
         },
-        # <<< ADD New Aggregated Arrays >>>
+        # <<<  Aggregated Arrays >>>
         "component_seci": component_seci_array,
         "aeci_variance": aeci_variance_array,
+        "max_aeci_variance": max_aeci_variance_per_run,
         "component_aeci": component_aeci_array,
         "component_ai_trust_variance": component_ai_trust_variance_array,
         "event_ticks_list": event_ticks_list # Pass list of lists for event ticks
@@ -2475,95 +2496,182 @@ def plot_grid_state(model, tick, save_dir="grid_plots"):
     plt.savefig(filepath)
     plt.close(fig) # Close figure to free memory
 
-# Echo chamber plotting functions
+def plot_max_aeci_variance_by_alignment(results_dict, alignment_values, title_suffix=""):
+    """Plots the maximum AECI variance observed in each run for different alignment levels."""
+    # Initialize lists to store mean and IQR of max values for each alignment level
+    max_var_means = []
+    max_var_errors = [[],[]]  # For lower and upper error bars
+    
+    # Process each alignment level
+    for align in alignment_values:
+        result = results_dict.get(align, {})
+        max_values = result.get("max_aeci_variance", [])
+        
+        if max_values:
+            # Calculate statistics for this alignment level
+            mean_max = np.mean(max_values)
+            p25 = np.percentile(max_values, 25)
+            p75 = np.percentile(max_values, 75)
+            
+            max_var_means.append(mean_max)
+            max_var_errors[0].append(max(0, mean_max - p25))  # Lower error
+            max_var_errors[1].append(max(0, p75 - mean_max))  # Upper error
+        else:
+            # If no data, append zeros
+            max_var_means.append(0)
+            max_var_errors[0].append(0)
+            max_var_errors[1].append(0)
+    
+    # Create plot
+    plt.figure(figsize=(10, 6))
+    x = np.arange(len(alignment_values))
+    
+    plt.bar(x, max_var_means, width=0.6, yerr=max_var_errors, capsize=5, 
+            color='magenta', alpha=0.7, label='Max AECI Variance')
+    
+    # Add value labels on top of bars
+    for i, v in enumerate(max_var_means):
+        plt.text(i, v + 0.01, f'{v:.3f}', ha='center', va='bottom')
+    
+    plt.xlabel('AI Alignment Level')
+    plt.ylabel('Maximum AECI Variance Reduction')
+    plt.title(f'Maximum AI Belief Variance Reduction by Alignment Level {title_suffix}')
+    plt.xticks(x, alignment_values)
+    plt.grid(axis='y', linestyle='--', alpha=0.7)
+    plt.legend()
+    
+    # Save and show the plot
+    save_path = f"agent_model_results/max_aeci_variance_{title_suffix.replace('(','').replace(')','').replace('=','_')}.png"
+    plt.savefig(save_path)
+    plt.tight_layout()
+    plt.show()
 
+#########################################
+# Echo chamber plotting functions
 def plot_final_echo_indices_vs_alignment(results_b, alignment_values, title_suffix="Exp B"):
     """Plots final mean values of echo chamber indices vs AI alignment."""
     num_params = len(alignment_values)
     bar_width = 0.15
+
     index = np.arange(num_params)
 
+    # Initialize data structures
     final_seci_exploit_mean, final_seci_exploit_err = [], [[],[]]
     final_seci_explor_mean, final_seci_explor_err = [], [[],[]]
     final_aeci_var_mean, final_aeci_var_err = [], [[],[]] # AI Echo Chamber
     final_aeci_call_exploit_mean, final_aeci_call_exploit_err = [], [[],[]] # AI Call ratio
     final_aeci_call_explor_mean, final_aeci_call_explor_err = [], [[],[]]
+    final_comp_ai_trust_var_mean, final_comp_ai_trust_var_err = [], [[],[]]
 
     for align in alignment_values:
         res = results_b.get(align)
-        if not res: continue # Skip if results missing
+        if not res: continue
 
         # Helper to extract final mean and IQR error across runs
         def get_final_stats(data_array, col_index):
-            if data_array is None or data_array.size == 0 or data_array.ndim < 2 or data_array.shape[1] == 0:
+            if data_array is None or not isinstance(data_array, np.ndarray) or data_array.size == 0:
                 return 0, [0, 0]
-            final_vals = data_array[:, -1, col_index] # Get last value for the column across all runs
+
+            if data_array.ndim < 3 or data_array.shape[1] == 0 or col_index >= data_array.shape[2]:
+                return 0, [0, 0]
+
+            # Get final values for all runs
+            final_vals = data_array[:, -1, col_index]
+
+            # Handle ratio metrics - clip to [0,1]
+            if any(x in str(col_index) for x in ['aeci', 'seci']) or col_index in [1, 2]:
+                final_vals = np.clip(final_vals, 0.0, 1.0)
+
+            # Calculate mean and percentiles
             mean = np.mean(final_vals)
             p25 = np.percentile(final_vals, 25)
             p75 = np.percentile(final_vals, 75)
-            err = [max(0, mean - p25), max(0, p75 - mean)]
-            return mean, err
 
-        # Extract final values
-        mean, err = get_final_stats(res.get("seci"), 1); final_seci_exploit_mean.append(mean); final_seci_exploit_err[0].append(err[0]); final_seci_exploit_err[1].append(err[1])
-        mean, err = get_final_stats(res.get("seci"), 2); final_seci_explor_mean.append(mean); final_seci_explor_err[0].append(err[0]); final_seci_explor_err[1].append(err[1])
-        mean, err = get_final_stats(res.get("aeci_variance"), 1); final_aeci_var_mean.append(mean); final_aeci_var_err[0].append(err[0]); final_aeci_var_err[1].append(err[1])
-        mean, err = get_final_stats(res.get("aeci"), 1); final_aeci_call_exploit_mean.append(mean); final_aeci_call_exploit_err[0].append(err[0]); final_aeci_call_exploit_err[1].append(err[1])
-        mean, err = get_final_stats(res.get("aeci"), 2); final_aeci_call_explor_mean.append(mean); final_aeci_call_explor_err[0].append(err[0]); final_aeci_call_explor_err[1].append(err[1])
+            # Return mean and error lengths [lower, upper]
+            return mean, [max(0, mean - p25), max(0, p75 - mean)]
 
-        final_comp_ai_trust_var_mean, final_comp_ai_trust_var_err = [], [[],[]]
-        for align in alignment_values:
-            res = results_b.get(align)
-            if not res: continue
-            # Assuming component_ai_trust_variance shape is (runs, ticks, 2) -> [tick, value]
-            mean, err = get_final_stats(res.get("component_ai_trust_variance"), 1) # Get value from col 1
-            final_comp_ai_trust_var_mean.append(mean)
-            final_comp_ai_trust_var_err[0].append(err[0])
-            final_comp_ai_trust_var_err[1].append(err[1])
+        # Extract final values with percentiles
+        mean, err = get_final_stats(res.get("seci"), 1)
+        final_seci_exploit_mean.append(mean)
+        final_seci_exploit_err[0].append(err[0])
+        final_seci_exploit_err[1].append(err[1])
 
-    # setting up plot
+        mean, err = get_final_stats(res.get("seci"), 2)
+        final_seci_explor_mean.append(mean)
+        final_seci_explor_err[0].append(err[0])
+        final_seci_explor_err[1].append(err[1])
+
+        mean, err = get_final_stats(res.get("aeci_variance"), 1)
+        final_aeci_var_mean.append(mean)
+        final_aeci_var_err[0].append(err[0])
+        final_aeci_var_err[1].append(err[1])
+
+        mean, err = get_final_stats(res.get("aeci"), 1)
+        final_aeci_call_exploit_mean.append(mean)
+        final_aeci_call_exploit_err[0].append(err[0])
+        final_aeci_call_exploit_err[1].append(err[1])
+
+        mean, err = get_final_stats(res.get("aeci"), 2)
+        final_aeci_call_explor_mean.append(mean)
+        final_aeci_call_explor_err[0].append(err[0])
+        final_aeci_call_explor_err[1].append(err[1])
+
+        mean, err = get_final_stats(res.get("component_ai_trust_variance"), 1)
+        final_comp_ai_trust_var_mean.append(mean)
+        final_comp_ai_trust_var_err[0].append(err[0])
+        final_comp_ai_trust_var_err[1].append(err[1])
+
+    # Setup plot
     fig, axes = plt.subplots(2, 2, figsize=(14, 10), sharex=True)
     fig.suptitle(f"Final Echo Chamber Indices vs AI Alignment ({title_suffix})", fontsize=16)
 
-    # Plot Final SECI
-    axes[0, 0].bar(index - bar_width/2, final_seci_exploit_mean, bar_width, yerr=np.array(final_seci_exploit_err), capsize=4, label='Exploit', color='maroon')
-    axes[0, 0].bar(index + bar_width/2, final_seci_explor_mean, bar_width, yerr=np.array(final_seci_explor_err), capsize=4, label='Explor', color='salmon')
+    # Plot Final SECI with percentile error bars
+    axes[0, 0].bar(index - bar_width/2, final_seci_exploit_mean, bar_width,
+                   yerr=final_seci_exploit_err, capsize=4, label='Exploit', color='maroon')
+    axes[0, 0].bar(index + bar_width/2, final_seci_explor_mean, bar_width,
+                   yerr=final_seci_explor_err, capsize=4, label='Explor', color='salmon')
     axes[0, 0].set_ylabel("Final Mean SECI")
     axes[0, 0].set_title("Social Echo Chamber (SECI)")
     axes[0, 0].legend()
     axes[0, 0].grid(True, axis='y', linestyle='--', alpha=0.6)
+    axes[0, 0].set_ylim(0, 1)  # Set bounds for SECI
 
-    # Plot Final AI Echo Chamber (AECI-Variance)
-    axes[0, 1].bar(index, final_aeci_var_mean, bar_width*1.5, yerr=np.array(final_aeci_var_err), capsize=4, label='AI Reliant Group', color='magenta')
+    # Plot Final AI Echo Chamber (AECI-Variance) with percentile error bars
+    axes[0, 1].bar(index, final_aeci_var_mean, bar_width*1.5,
+                   yerr=final_aeci_var_err, capsize=4, label='AI Reliant Group', color='magenta')
     axes[0, 1].set_ylabel("Final Mean AI Bel. Var. Reduction")
     axes[0, 1].set_title("AI Echo Chamber (AECI-Var)")
     axes[0, 1].legend()
     axes[0, 1].grid(True, axis='y', linestyle='--', alpha=0.6)
+    axes[0, 1].set_ylim(0, 1)  # Set bounds for variance reduction
 
-    # Plot Final AI Call Ratio
-    axes[1, 0].bar(index - bar_width/2, final_aeci_call_exploit_mean, bar_width, yerr=np.array(final_aeci_call_exploit_err), capsize=4, label='Exploit', color='darkblue')
-    axes[1, 0].bar(index + bar_width/2, final_aeci_call_explor_mean, bar_width, yerr=np.array(final_aeci_call_explor_err), capsize=4, label='Explor', color='skyblue')
+    # Plot Final AI Call Ratio with percentile error bars
+    axes[1, 0].bar(index - bar_width/2, final_aeci_call_exploit_mean, bar_width,
+                   yerr=final_aeci_call_exploit_err, capsize=4, label='Exploit', color='darkblue')
+    axes[1, 0].bar(index + bar_width/2, final_aeci_call_explor_mean, bar_width,
+                   yerr=final_aeci_call_explor_err, capsize=4, label='Explor', color='skyblue')
     axes[1, 0].set_ylabel("Final Mean AI Call Ratio")
     axes[1, 0].set_title("AI Usage (AECI Call Ratio)")
     axes[1, 0].set_xlabel("AI Alignment Level")
-    axes[1, 0].set_xticks(index)
-    axes[1, 0].set_xticklabels(alignment_values)
     axes[1, 0].legend()
     axes[1, 0].grid(True, axis='y', linestyle='--', alpha=0.6)
+    # Ensure y-limits are appropriate - AI call ratio should be between 0 and 1
+    axes[1, 0].set_ylim(0, 1)
 
-    # AI Trust Variance
+    # Plot Component AI Trust Variance with percentile error bars
+    axes[1, 1].bar(index, final_comp_ai_trust_var_mean, bar_width*1.5,
+                   yerr=final_comp_ai_trust_var_err, capsize=4, label='Comp. AI Trust Var.', color='cyan')
+    axes[1, 1].set_ylabel("Final Mean Variance")
+    axes[1, 1].set_title("Component AI Trust Variance")
+    axes[1, 1].set_xlabel("AI Alignment Level")
+    axes[1, 1].legend()
+    axes[1, 1].grid(True, axis='y', linestyle='--', alpha=0.6)
+    axes[1, 1].set_ylim(bottom=0)  # Variance should be non-negative
 
-    ax4 = axes[1, 1] # Get the axis
-    ax4.text(0.5, 0.5, 'Plot for Component AI Trust Var\n ') # Remove placeholder text
-    ax4.bar(index, final_comp_ai_trust_var_mean, bar_width*1.5, yerr=np.array(final_comp_ai_trust_var_err), capsize=4, label='Comp. AI Trust Var.', color='cyan')
-    ax4.set_ylabel("Final Mean Variance")
-    ax4.set_title("Component AI Trust Variance")
-    ax4.set_xlabel("AI Alignment Level")
-    ax4.set_xticks(index)
-    ax4.set_xticklabels(alignment_values)
-    ax4.legend()
-    ax4.grid(True, axis='y', linestyle='--', alpha=0.6)
-    ax4.set_ylim(bottom=0) # Variance should be non-negative
+    for ax_row in axes:
+        for ax in ax_row:
+            ax.set_xticks(index)
+            ax.set_xticklabels(alignment_values)
 
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])
     save_path = f"agent_model_results/summary_echo_{title_suffix}.png"
@@ -2591,40 +2699,40 @@ def plot_final_performance_vs_alignment(results_b, alignment_values, title_suffi
         def get_final_stats(data_array, col_index):
             if data_array is None or not isinstance(data_array, np.ndarray) or data_array.size == 0:
                 return 0, [0, 0]
-            
+
             if data_array.ndim < 3 or data_array.shape[1] == 0 or col_index >= data_array.shape[2]:
                 return 0, [0, 0]
-                
+
             # Get the final values for all runs
             final_vals = data_array[:, -1, col_index]
-            
+
             # Calculate mean and percentiles
             mean = np.mean(final_vals)
             p25 = np.percentile(final_vals, 25)
             p75 = np.percentile(final_vals, 75)
-            
+
             # Return mean and error lengths [lower, upper]
             return mean, [max(0, mean - p25), max(0, p75 - mean)]
 
         # Helper for unmet needs (list of lists)
         def get_final_unmet_stats(unmet_list):
-            if not unmet_list: 
+            if not unmet_list:
                 return 0, [0, 0]
-                
+
             # Extract final values from each run
             final_vals = []
             for run_data in unmet_list:
                 if run_data and len(run_data) > 0:
                     final_vals.append(run_data[-1])
-            
+
             if not final_vals:
                 return 0, [0, 0]
-                
+
             # Calculate mean and percentiles
             mean = np.mean(final_vals)
             p25 = np.percentile(final_vals, 25)
             p75 = np.percentile(final_vals, 75)
-            
+
             # Return mean and error lengths [lower, upper]
             return mean, [max(0, mean - p25), max(0, p75 - mean)]
 
@@ -2632,11 +2740,11 @@ def plot_final_performance_vs_alignment(results_b, alignment_values, title_suffi
         def get_ratio_stats(raw_counts, correct_key, incorrect_key):
             correct_list = raw_counts.get(correct_key, [])
             incorrect_list = raw_counts.get(incorrect_key, [])
-            
+
             # Skip if either list is empty
             if not correct_list or not incorrect_list:
                 return 0, [0, 0]
-                
+
             # Calculate ratio for each run
             ratios = []
             for i in range(min(len(correct_list), len(incorrect_list))):
@@ -2645,15 +2753,18 @@ def plot_final_performance_vs_alignment(results_b, alignment_values, title_suffi
                     ratios.append(correct_list[i] / total)
                 else:
                     ratios.append(0)
-            
+
             if not ratios:
                 return 0, [0, 0]
-                
+
+            # Ensure ratios are in [0,1]
+            ratios = np.clip(ratios, 0.0, 1.0)
+
             # Calculate mean and percentiles
             mean = np.mean(ratios)
             p25 = np.percentile(ratios, 25)
             p75 = np.percentile(ratios, 75)
-            
+
             # Return mean and error lengths [lower, upper]
             return mean, [max(0, mean - p25), max(0, p75 - mean)]
 
@@ -2662,25 +2773,25 @@ def plot_final_performance_vs_alignment(results_b, alignment_values, title_suffi
         final_mae_exploit_mean.append(mean)
         final_mae_exploit_err[0].append(err[0])
         final_mae_exploit_err[1].append(err[1])
-        
+
         mean, err = get_final_stats(res.get("belief_error"), 2)
         final_mae_explor_mean.append(mean)
         final_mae_explor_err[0].append(err[0])
         final_mae_explor_err[1].append(err[1])
-        
+
         # Extract unmet needs stats
         mean, err = get_final_unmet_stats(res.get("unmet_needs_evol"))
         final_unmet_mean.append(mean)
         final_unmet_err[0].append(err[0])
         final_unmet_err[1].append(err[1])
-        
+
         # Extract correct token ratios with percentiles
         raw_counts = res.get("raw_assist_counts", {})
         mean, err = get_ratio_stats(raw_counts, "exploit_correct", "exploit_incorrect")
         final_correct_ratio_exploit_mean.append(mean)
         final_correct_ratio_exploit_err[0].append(err[0])
         final_correct_ratio_exploit_err[1].append(err[1])
-        
+
         mean, err = get_ratio_stats(raw_counts, "explor_correct", "explor_incorrect")
         final_correct_ratio_explor_mean.append(mean)
         final_correct_ratio_explor_err[0].append(err[0])
@@ -2691,33 +2802,35 @@ def plot_final_performance_vs_alignment(results_b, alignment_values, title_suffi
     fig.suptitle(f"Final Performance vs AI Alignment ({title_suffix})", fontsize=16)
 
     # Plot Final MAE with percentile error bars
-    axes[0].bar(index - bar_width/2, final_mae_exploit_mean, bar_width, 
+    axes[0].bar(index - bar_width/2, final_mae_exploit_mean, bar_width,
                 yerr=final_mae_exploit_err, capsize=4, label='Exploit', color='red')
-    axes[0].bar(index + bar_width/2, final_mae_explor_mean, bar_width, 
+    axes[0].bar(index + bar_width/2, final_mae_explor_mean, bar_width,
                 yerr=final_mae_explor_err, capsize=4, label='Explor', color='blue')
     axes[0].set_ylabel("Final Mean MAE")
     axes[0].set_title("Belief Error (MAE)")
     axes[0].legend()
     axes[0].grid(True, axis='y', linestyle='--', alpha=0.6)
+    axes[0].set_ylim(bottom=0)  # MAE cannot be negative
 
     # Plot Final Unmet Needs with percentile error bars
-    axes[1].bar(index, final_unmet_mean, bar_width*1.5, 
+    axes[1].bar(index, final_unmet_mean, bar_width*1.5,
                 yerr=final_unmet_err, capsize=4, label='Overall', color='purple')
     axes[1].set_ylabel("Final Mean Unmet Needs")
     axes[1].set_title("Unmet Needs")
     axes[1].set_xlabel("AI Alignment Level")
     axes[1].grid(True, axis='y', linestyle='--', alpha=0.6)
+    axes[1].set_ylim(bottom=0)  # Unmet needs cannot be negative
 
     # Plot Final Correct Token Share with percentile error bars
-    axes[2].bar(index - bar_width/2, final_correct_ratio_exploit_mean, bar_width, 
+    axes[2].bar(index - bar_width/2, final_correct_ratio_exploit_mean, bar_width,
                 yerr=final_correct_ratio_exploit_err, capsize=4, label='Exploit', color='red')
-    axes[2].bar(index + bar_width/2, final_correct_ratio_explor_mean, bar_width, 
+    axes[2].bar(index + bar_width/2, final_correct_ratio_explor_mean, bar_width,
                 yerr=final_correct_ratio_explor_err, capsize=4, label='Explor', color='blue')
     axes[2].set_ylabel("Final Mean Correct Token Share")
     axes[2].set_title("Assistance Quality (Correct Ratio)")
     axes[2].legend()
     axes[2].grid(True, axis='y', linestyle='--', alpha=0.6)
-    axes[2].set_ylim(0, 1)
+    axes[2].set_ylim(0, 1)  # Ratio must be between 0 and 1
 
     for ax in axes:
         ax.set_xticks(index)
@@ -2750,18 +2863,18 @@ def plot_final_echo_indices_vs_alignment(results_b, alignment_values, title_suff
         def get_final_stats(data_array, col_index):
             if data_array is None or not isinstance(data_array, np.ndarray) or data_array.size == 0:
                 return 0, [0, 0]
-                
+
             if data_array.ndim < 3 or data_array.shape[1] == 0 or col_index >= data_array.shape[2]:
                 return 0, [0, 0]
-                
+
             # Get final values for all runs
             final_vals = data_array[:, -1, col_index]
-            
+
             # Calculate mean and percentiles
             mean = np.mean(final_vals)
             p25 = np.percentile(final_vals, 25)
             p75 = np.percentile(final_vals, 75)
-            
+
             # Return mean and error lengths [lower, upper]
             return mean, [max(0, mean - p25), max(0, p75 - mean)]
 
@@ -2770,27 +2883,27 @@ def plot_final_echo_indices_vs_alignment(results_b, alignment_values, title_suff
         final_seci_exploit_mean.append(mean)
         final_seci_exploit_err[0].append(err[0])
         final_seci_exploit_err[1].append(err[1])
-        
+
         mean, err = get_final_stats(res.get("seci"), 2)
         final_seci_explor_mean.append(mean)
         final_seci_explor_err[0].append(err[0])
         final_seci_explor_err[1].append(err[1])
-        
+
         mean, err = get_final_stats(res.get("aeci_variance"), 1)
         final_aeci_var_mean.append(mean)
         final_aeci_var_err[0].append(err[0])
         final_aeci_var_err[1].append(err[1])
-        
+
         mean, err = get_final_stats(res.get("aeci"), 1)
         final_aeci_call_exploit_mean.append(mean)
         final_aeci_call_exploit_err[0].append(err[0])
         final_aeci_call_exploit_err[1].append(err[1])
-        
+
         mean, err = get_final_stats(res.get("aeci"), 2)
         final_aeci_call_explor_mean.append(mean)
         final_aeci_call_explor_err[0].append(err[0])
         final_aeci_call_explor_err[1].append(err[1])
-        
+
         mean, err = get_final_stats(res.get("component_ai_trust_variance"), 1)
         final_comp_ai_trust_var_mean.append(mean)
         final_comp_ai_trust_var_err[0].append(err[0])
@@ -2801,9 +2914,9 @@ def plot_final_echo_indices_vs_alignment(results_b, alignment_values, title_suff
     fig.suptitle(f"Final Echo Chamber Indices vs AI Alignment ({title_suffix})", fontsize=16)
 
     # Plot Final SECI with percentile error bars
-    axes[0, 0].bar(index - bar_width/2, final_seci_exploit_mean, bar_width, 
+    axes[0, 0].bar(index - bar_width/2, final_seci_exploit_mean, bar_width,
                    yerr=final_seci_exploit_err, capsize=4, label='Exploit', color='maroon')
-    axes[0, 0].bar(index + bar_width/2, final_seci_explor_mean, bar_width, 
+    axes[0, 0].bar(index + bar_width/2, final_seci_explor_mean, bar_width,
                    yerr=final_seci_explor_err, capsize=4, label='Explor', color='salmon')
     axes[0, 0].set_ylabel("Final Mean SECI")
     axes[0, 0].set_title("Social Echo Chamber (SECI)")
@@ -2811,7 +2924,7 @@ def plot_final_echo_indices_vs_alignment(results_b, alignment_values, title_suff
     axes[0, 0].grid(True, axis='y', linestyle='--', alpha=0.6)
 
     # Plot Final AI Echo Chamber (AECI-Variance) with percentile error bars
-    axes[0, 1].bar(index, final_aeci_var_mean, bar_width*1.5, 
+    axes[0, 1].bar(index, final_aeci_var_mean, bar_width*1.5,
                    yerr=final_aeci_var_err, capsize=4, label='AI Reliant Group', color='magenta')
     axes[0, 1].set_ylabel("Final Mean AI Bel. Var. Reduction")
     axes[0, 1].set_title("AI Echo Chamber (AECI-Var)")
@@ -2819,9 +2932,9 @@ def plot_final_echo_indices_vs_alignment(results_b, alignment_values, title_suff
     axes[0, 1].grid(True, axis='y', linestyle='--', alpha=0.6)
 
     # Plot Final AI Call Ratio with percentile error bars
-    axes[1, 0].bar(index - bar_width/2, final_aeci_call_exploit_mean, bar_width, 
+    axes[1, 0].bar(index - bar_width/2, final_aeci_call_exploit_mean, bar_width,
                    yerr=final_aeci_call_exploit_err, capsize=4, label='Exploit', color='darkblue')
-    axes[1, 0].bar(index + bar_width/2, final_aeci_call_explor_mean, bar_width, 
+    axes[1, 0].bar(index + bar_width/2, final_aeci_call_explor_mean, bar_width,
                    yerr=final_aeci_call_explor_err, capsize=4, label='Explor', color='skyblue')
     axes[1, 0].set_ylabel("Final Mean AI Call Ratio")
     axes[1, 0].set_title("AI Usage (AECI Call Ratio)")
@@ -2831,8 +2944,9 @@ def plot_final_echo_indices_vs_alignment(results_b, alignment_values, title_suff
     # Ensure y-limits are appropriate - AI call ratio should be between 0 and 1
     axes[1, 0].set_ylim(0, 1)
 
+
     # Plot Component AI Trust Variance with percentile error bars
-    axes[1, 1].bar(index, final_comp_ai_trust_var_mean, bar_width*1.5, 
+    axes[1, 1].bar(index, final_comp_ai_trust_var_mean, bar_width*1.5,
                    yerr=final_comp_ai_trust_var_err, capsize=4, label='Comp. AI Trust Var.', color='cyan')
     axes[1, 1].set_ylabel("Final Mean Variance")
     axes[1, 1].set_title("Component AI Trust Variance")
@@ -2948,25 +3062,46 @@ def plot_belief_histogram(model, tick, save_dir="grid_plots/histograms"):
 def plot_trust_evolution(trust_stats_array, title_suffix=""):
     """Plots trust evolution with Mean +/- IQR bands."""
     # Input validation
-    if trust_stats_array is None or trust_stats_array.ndim < 3 or trust_stats_array.shape[0] == 0:
-         print(f"Warning: Invalid or empty data for plot_trust_evolution {title_suffix}")
-         return
+    if trust_stats_array is None or not isinstance(trust_stats_array, np.ndarray) or trust_stats_array.ndim < 3 or trust_stats_array.shape[0] == 0:
+        print(f"Warning: Invalid or empty data for plot_trust_evolution {title_suffix}")
+        return
+
     num_runs, T, num_metrics = trust_stats_array.shape
     if num_metrics < 7:
         print(f"Warning: Expected 7 metrics in trust_stats_array, found {num_metrics} for {title_suffix}")
         return
+
     ticks = trust_stats_array[0, :, 0] # Get ticks from first run
 
     # Helper to get stats for a specific trust type index
     def compute_plot_stats(data_index):
-         # Ensure index is valid
-         if data_index >= num_metrics:
-             print(f"Warning: Invalid data index {data_index} requested.")
-             return np.zeros(T), np.zeros(T), np.zeros(T) # Return zeros matching tick length
-         mean = np.mean(trust_stats_array[:, :, data_index], axis=0)
-         lower = np.percentile(trust_stats_array[:, :, data_index], 25, axis=0)
-         upper = np.percentile(trust_stats_array[:, :, data_index], 75, axis=0)
-         return mean, lower, upper
+        # Ensure index is valid
+        if data_index >= num_metrics:
+            print(f"Warning: Invalid data index {data_index} requested.")
+            return np.zeros(T), np.zeros(T), np.zeros(T) # Return zeros matching tick length
+
+        # Extract data slice and handle infinities/NaNs
+        data_slice = trust_stats_array[:, :, data_index]
+        data_slice = np.where(np.isinf(data_slice), np.nan, data_slice)
+
+        # Trust values must be in [0,1]
+        data_slice = np.clip(data_slice, 0.0, 1.0)
+
+        # Calculate statistics
+        mean = np.nanmean(data_slice, axis=0)
+        lower = np.nanpercentile(data_slice, 25, axis=0)
+        upper = np.nanpercentile(data_slice, 75, axis=0)
+
+        # Replace NaNs and ensure bounds
+        mean = np.clip(np.nan_to_num(mean), 0.0, 1.0)
+        lower = np.clip(np.nan_to_num(lower), 0.0, 1.0)
+        upper = np.clip(np.nan_to_num(upper), 0.0, 1.0)
+
+        # Ensure percentiles don't cross mean
+        lower = np.minimum(mean, lower)
+        upper = np.maximum(mean, upper)
+
+        return mean, lower, upper
 
     # Indices: 1:AI_exp, 2:Friend_exp, 3:NonFriend_exp, 4:AI_expl, 5:Friend_expl, 6:NonFriend_expl
     ai_exp_mean, ai_exp_lower, ai_exp_upper = compute_plot_stats(1)
@@ -2990,7 +3125,7 @@ def plot_trust_evolution(trust_stats_array, title_suffix=""):
     axes[0].set_ylabel("Trust Level")
     axes[0].legend(fontsize='small')
     axes[0].grid(True, linestyle='--', alpha=0.6)
-    axes[0].set_ylim(bottom=0, top=1.05) # Set Y limits for trust
+    axes[0].set_ylim(0, 1)  # Trust must be in [0,1]
 
     # Exploratory Plot
     axes[1].plot(ticks, ai_expl_mean, label="AI Trust", color='blue')
@@ -3004,26 +3139,60 @@ def plot_trust_evolution(trust_stats_array, title_suffix=""):
     axes[1].set_ylabel("Trust Level")
     axes[1].legend(fontsize='small')
     axes[1].grid(True, linestyle='--', alpha=0.6)
-    axes[1].set_ylim(bottom=0, top=1.05) # Set Y limits for trust
+    axes[1].set_ylim(0, 1)  # Trust must be in [0,1]
 
-    plt.tight_layout(rect=[0, 0.03, 1, 0.95]) # Adjust for suptitle
+    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
     plt.show()
 
 def _plot_mean_iqr(ax, ticks, data_array, data_index, label, color, linestyle='-'):
     """Helper to plot mean and IQR band."""
+    # --- Robust Check ---
     if data_array is None or data_array.size == 0 or data_array.ndim < 2 or data_index >= data_array.shape[2] or data_array.shape[1] == 0:
         print(f"Warning: Skipping plot for {label} due to invalid data shape {data_array.shape if data_array is not None else 'None'} or index {data_index}.")
         return
-    T = data_array.shape[1]
-    if len(ticks) != T:
-        print(f"Warning: Tick length mismatch for {label} ({len(ticks)} vs {T}). Using default range.")
-        ticks = np.arange(T)
+    T = data_array.shape[1] # Get number of ticks from data
+    # Ensure ticks array matches data length
+    if ticks is None or len(ticks) != T:
+        print(f"Warning: Tick length mismatch for {label} ({len(ticks) if ticks is not None else 'None'} vs {T}). Using default range.")
+        ticks = np.arange(T) # Default ticks if mismatch
 
-    mean = np.mean(data_array[:, :, data_index], axis=0)
-    lower = np.percentile(data_array[:, :, data_index], 25, axis=0)
-    upper = np.percentile(data_array[:, :, data_index], 75, axis=0)
+    # --- Calculate Stats ---
+    try:
+        # Handle potential NaNs and infinities
+        data_slice = data_array[:, :, data_index]
+        data_slice = np.where(np.isinf(data_slice), np.nan, data_slice)
+
+        mean = np.nanmean(data_slice, axis=0)
+        lower = np.nanpercentile(data_slice, 25, axis=0)
+        upper = np.nanpercentile(data_slice, 75, axis=0)
+
+        # Replace NaNs with zeros
+        mean = np.nan_to_num(mean)
+        lower = np.nan_to_num(lower)
+        upper = np.nan_to_num(upper)
+
+        # Ensure percentiles don't cross mean
+        lower = np.minimum(mean, lower)
+        upper = np.maximum(mean, upper)
+
+        # Special handling for ratios and indices (must be in [0,1])
+        if 'ratio' in label.lower() or any(x in label.lower() for x in ['aeci', 'seci', 'trust']):
+            mean = np.clip(mean, 0.0, 1.0)
+            lower = np.clip(lower, 0.0, 1.0)
+            upper = np.clip(upper, 0.0, 1.0)
+    except IndexError: # Handle cases where percentile calculation might fail on edge cases
+        print(f"Warning: Could not calculate percentiles for {label}. Plotting mean only.")
+        mean = np.nanmean(data_array[:, :, data_index], axis=0)
+        mean = np.nan_to_num(mean)
+        lower = mean
+        upper = mean
+    except Exception as e:
+        print(f"Error calculating stats for {label}: {e}")
+        return # Skip plotting this line
+
+    # --- Plot Mean and IQR Band ---
     ax.plot(ticks, mean, label=label, color=color, linestyle=linestyle)
-    ax.fill_between(ticks, lower, upper, color=color, alpha=0.2)
+    ax.fill_between(ticks, lower, upper, color=color, alpha=0.4) # Draws the shaded band
 
 # ---  CONSOLIDATED PLOT 1: SIMULATION INDICES  ---
 def plot_simulation_overview(results_dict, title_suffix=""):
@@ -3151,11 +3320,11 @@ def plot_echo_chamber_indices(results_dict, title_suffix=""):
             else:
                 ticks = np.arange(data_array.shape[1])
                 break
-    
+
     if ticks.size == 0:
         print("Warning: Cannot determine ticks for echo plot.")
         ticks = np.arange(100)  # Default fallback
-    
+
     # Helper to add event lines
     def add_event_lines(ax, events):
         first = True
@@ -3170,38 +3339,60 @@ def plot_echo_chamber_indices(results_dict, title_suffix=""):
         if data_array is None or not isinstance(data_array, np.ndarray) or data_array.size == 0:
             print(f"Warning: Empty data for {label}")
             return
-            
+
         if data_array.ndim < 3:
             print(f"Warning: Data for {label} has wrong dimensions: {data_array.ndim}")
             return
-            
+
         if data_array.shape[1] == 0:
             print(f"Warning: No time points for {label}")
             return
-            
+
         if data_index >= data_array.shape[2]:
             print(f"Warning: Invalid data index {data_index} for {label} (max: {data_array.shape[2]-1})")
             return
-        
+
         # Ensure ticks match data length
         plot_ticks = ticks
         if len(ticks) != data_array.shape[1]:
             print(f"Warning: Tick length mismatch for {label} ({len(ticks)} vs {data_array.shape[1]})")
             plot_ticks = np.arange(data_array.shape[1])
-        
+
         try:
             # Try with nan-safe functions to handle potential NaNs
-            mean = np.nanmean(data_array[:, :, data_index], axis=0)
-            lower = np.nanpercentile(data_array[:, :, data_index], 25, axis=0)
-            upper = np.nanpercentile(data_array[:, :, data_index], 75, axis=0)
-            
+            data_slice = data_array[:, :, data_index]
+            data_slice = np.where(np.isinf(data_slice), np.nan, data_slice)
+
+            mean = np.nanmean(data_slice, axis=0)
+            lower = np.nanpercentile(data_slice, 25, axis=0)
+            upper = np.nanpercentile(data_slice, 75, axis=0)
+
             # Replace any remaining NaNs
             mean = np.nan_to_num(mean)
             lower = np.nan_to_num(lower)
             upper = np.nan_to_num(upper)
-            
+
+            # Ensure percentiles are properly ordered
+            lower = np.minimum(mean, lower)
+            upper = np.maximum(mean, upper)
+
+            # Clip values for indices and ratios
+            if is_ratio_metric:
+                mean = np.clip(mean, 0.0, 1.0)
+                lower = np.clip(lower, 0.0, 1.0)
+                upper = np.clip(upper, 0.0, 1.0)
+
+                # Safety check - print warnings for any out-of-bounds values
+                if (mean < 0).any() or (mean > 1).any() or (lower < 0).any() or (lower > 1).any() or (upper < 0).any() or (upper > 1).any():
+                    print(f"Warning: After clipping, {label} still has out-of-bounds values")
+
             ax.plot(plot_ticks, mean, label=label, color=color, linestyle=linestyle)
             ax.fill_between(plot_ticks, lower, upper, color=color, alpha=0.2)
+
+            # For ratio metrics, explicitly set y-axis limits
+            if is_ratio_metric:
+                ax.set_ylim(0, 1)
+
         except Exception as e:
             print(f"Error plotting {label}: {e}")
 
@@ -3242,7 +3433,7 @@ def plot_echo_chamber_indices(results_dict, title_suffix=""):
     ax.set_xlabel("Tick")
     ax.grid(True, linestyle='--', alpha=0.6)
     ax.legend(fontsize='small')
-    ax.set_ylim(bottom=0)
+    ax.set_ylim(bottom=0, top=1.05)  # Set explicit limits for consistency
 
     # --- Subplot 4: AI Trust Clustering ---
     ax = axes[1, 1]
@@ -3253,7 +3444,7 @@ def plot_echo_chamber_indices(results_dict, title_suffix=""):
     ax.set_xlabel("Tick")
     ax.grid(True, linestyle='--', alpha=0.6)
     ax.legend(fontsize='small')
-    ax.set_ylim(bottom=0)
+    ax.set_ylim(bottom=0)  # Only set bottom for variance
 
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])
     # Save or show
@@ -3264,13 +3455,42 @@ def plot_echo_chamber_indices(results_dict, title_suffix=""):
 def plot_seci_aeci_evolution(seci_array, aeci_array, title_suffix=""):
     """Plots SECI and AECI evolution with Mean +/- IQR bands."""
 
-    # Helper to get stats
+    # Helper to get stats with better error handling
     def get_stats(data_array, index):
-        if data_array is None or data_array.ndim < 3 or data_array.shape[0] == 0: return None, None, None
-        mean = np.mean(data_array[:, :, index], axis=0)
-        lower = np.percentile(data_array[:, :, index], 25, axis=0)
-        upper = np.percentile(data_array[:, :, index], 75, axis=0)
-        return mean, lower, upper
+        if data_array is None or not isinstance(data_array, np.ndarray) or data_array.size == 0 or data_array.ndim < 3:
+            print(f"Warning: Invalid data array for index {index}")
+            return None, None, None
+
+        if index >= data_array.shape[2]:
+            print(f"Warning: Index {index} out of bounds for data array with shape {data_array.shape}")
+            return None, None, None
+
+        try:
+            # Extract data slice and handle infinities
+            data_slice = data_array[:, :, index]
+            data_slice = np.where(np.isinf(data_slice), np.nan, data_slice)
+
+            # For SECI/AECI, ensure values are bounded in [0,1]
+            data_slice = np.clip(data_slice, 0.0, 1.0)
+
+            # Calculate stats
+            mean = np.nanmean(data_slice, axis=0)
+            lower = np.nanpercentile(data_slice, 25, axis=0)
+            upper = np.nanpercentile(data_slice, 75, axis=0)
+
+            # Replace NaNs and ensure bounds
+            mean = np.clip(np.nan_to_num(mean), 0.0, 1.0)
+            lower = np.clip(np.nan_to_num(lower), 0.0, 1.0)
+            upper = np.clip(np.nan_to_num(upper), 0.0, 1.0)
+
+            # Ensure percentiles don't cross mean
+            lower = np.minimum(mean, lower)
+            upper = np.maximum(mean, upper)
+
+            return mean, lower, upper
+        except Exception as e:
+            print(f"Error calculating stats for index {index}: {e}")
+            return None, None, None
 
     # Get SECI Stats (Index 1: Exploit, Index 2: Explor)
     seci_exp_mean, seci_exp_lower, seci_exp_upper = get_stats(seci_array, 1)
@@ -3282,14 +3502,16 @@ def plot_seci_aeci_evolution(seci_array, aeci_array, title_suffix=""):
 
     # Check if data is valid before plotting
     if seci_exp_mean is None or aeci_exp_mean is None:
-         print(f"Warning: Insufficient data to plot SECI/AECI evolution {title_suffix}")
-         return
+        print(f"Warning: Insufficient data to plot SECI/AECI evolution {title_suffix}")
+        return
+
     if seci_array.shape[1] == 0: # Check if there are any ticks recorded
         print(f"Warning: No ticks recorded in SECI/AECI data for {title_suffix}")
         return
+
     ticks = seci_array[0, :, 0] # Assuming seci_array is valid
 
-    fig, axes = plt.subplots(1, 2, figsize=(12, 5), sharex=True, sharey=True) # *** Add sharey=True ***
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5), sharex=True, sharey=True)
     fig.suptitle(f"SECI & AECI Evolution {title_suffix} (Mean +/- IQR)")
 
     # SECI Plot
@@ -3302,7 +3524,7 @@ def plot_seci_aeci_evolution(seci_array, aeci_array, title_suffix=""):
     axes[0].set_ylabel("SECI")
     axes[0].legend(fontsize='small')
     axes[0].grid(True, linestyle='--', alpha=0.6)
-    axes[0].set_ylim(bottom=0)
+    axes[0].set_ylim(0, 1)  # Force y-axis limits to [0,1]
 
     # AECI Plot
     axes[1].plot(ticks, aeci_exp_mean, label="Exploitative", color="blue")
@@ -3314,19 +3536,7 @@ def plot_seci_aeci_evolution(seci_array, aeci_array, title_suffix=""):
     axes[1].set_ylabel("AECI")
     axes[1].legend(fontsize='small')
     axes[1].grid(True, linestyle='--', alpha=0.6)
-    axes[1].set_ylim(bottom=0)
-
-    #*** FIX: Explicitly set shared Y limits AFTER plotting all data ***
-    # Find overall min/max across all relevant data for these plots (usually 0 to 1, but check)
-    all_means = np.concatenate([d for d in [seci_exp_mean, seci_expl_mean, aeci_exp_mean, aeci_expl_mean] if d is not None])
-    all_uppers = np.concatenate([d for d in [seci_exp_upper, seci_expl_upper, aeci_exp_upper, aeci_expl_upper] if d is not None])
-
-    # Check if we have valid data before setting limits
-    if all_means.size > 0 and all_uppers.size > 0:
-        ymin = 0 # Usually starts at 0
-        ymax = max(1.0, np.nanmax(all_uppers) * 1.05) # Ensure at least 1.0, add 5% padding
-        axes[0].set_ylim(ymin, ymax)
-        axes[1].set_ylim(ymin, ymax) # Apply same limits to second plot
+    axes[1].set_ylim(0, 1)  # Force y-axis limits to [0,1]
 
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])
     plt.show()
@@ -3334,43 +3544,43 @@ def plot_seci_aeci_evolution(seci_array, aeci_array, title_suffix=""):
 def plot_ai_trust_vs_alignment(model, save_dir="analysis_plots"):
     """Plot AI trust by agent type with respect to AI alignment level."""
     os.makedirs(save_dir, exist_ok=True)
-    
+
     fig, ax = plt.subplots(figsize=(10, 6))
-    
+
     # Gather trust data by agent type
     trust_by_type = {"exploitative": [], "exploratory": []}
-    
+
     for agent in model.humans.values():
         # Calculate average trust in AI agents
         ai_trust_vals = [agent.trust.get(f"A_{k}", 0) for k in range(model.num_ai)]
         avg_ai_trust = sum(ai_trust_vals) / len(ai_trust_vals) if ai_trust_vals else 0
         trust_by_type[agent.agent_type].append(avg_ai_trust)
-    
+
     # Calculate statistics
     exploit_mean = np.mean(trust_by_type["exploitative"]) if trust_by_type["exploitative"] else 0
     exploit_std = np.std(trust_by_type["exploitative"]) if trust_by_type["exploitative"] else 0
     explor_mean = np.mean(trust_by_type["exploratory"]) if trust_by_type["exploratory"] else 0
     explor_std = np.std(trust_by_type["exploratory"]) if trust_by_type["exploratory"] else 0
-    
+
     # Plot
     x = ["Exploitative", "Exploratory"]
     means = [exploit_mean, explor_mean]
     stds = [exploit_std, explor_std]
-    
+
     ax.bar(x, means, yerr=stds, capsize=10, color=['red', 'blue'], alpha=0.7)
     ax.set_ylabel("Average AI Trust")
     ax.set_title(f"AI Trust by Agent Type (AI Alignment = {model.ai_alignment_level})")
     ax.grid(axis='y', linestyle='--', alpha=0.7)
-    
+
     # Add value labels
     for i, v in enumerate(means):
         ax.text(i, v + 0.02, f"{v:.2f}", ha='center')
-    
+
     plt.tight_layout()
     plt.savefig(os.path.join(save_dir, f"ai_trust_alignment_{model.ai_alignment_level:.1f}.png"))
     plt.close()
 
-def plot_assistance_bars(assist_stats, raw_assist_counts, title_suffix=""):
+ddef plot_assistance_bars(assist_stats, raw_assist_counts, title_suffix=""):
     """Plots mean cumulative correct/incorrect tokens as bars with IQR error bars."""
     labels = ['Exploitative', 'Exploratory']
 
@@ -3407,47 +3617,65 @@ def plot_assistance_bars(assist_stats, raw_assist_counts, title_suffix=""):
         get_iqr_errors(raw_assist_counts.get("explor_incorrect", []))
     ]
     
-    # Transpose error lists for yerr format: [[lower1, lower2], [upper1, upper2]]
+    # Transpose error lists for yerr format
     yerr_correct = np.array(errors_correct).T if errors_correct and errors_correct[0] else np.zeros((2, 2))
     yerr_incorrect = np.array(errors_incorrect).T if errors_incorrect and errors_incorrect[0] else np.zeros((2, 2))
 
-    x = np.arange(len(labels))  # label locations
-    width = 0.35  # Width of bars
+    # Improved bar positioning
+    x = np.arange(len(labels))
+    width = 0.3  # Reduced width for better spacing
     
-    fig, ax = plt.subplots(figsize=(10, 6))
+    fig, ax = plt.subplots(figsize=(12, 7))  # Increased figure width
     
-    # Position bars properly with appropriate spacing
-    rects1 = ax.bar(x - width/2, mean_correct, width*0.8, yerr=yerr_correct, capsize=4, 
-                    label='Mean Correct Tokens', color='forestgreen', error_kw=dict(alpha=0.5))
-    rects2 = ax.bar(x + width/2, mean_incorrect, width*0.8, yerr=yerr_incorrect, capsize=4, 
-                    label='Mean Incorrect Tokens', color='firebrick', error_kw=dict(alpha=0.5))
+    # Position bars with better spacing
+    rects1 = ax.bar(x - width/2, mean_correct, width*0.9, yerr=yerr_correct, capsize=5, 
+                   label='Mean Correct Tokens', color='forestgreen', error_kw=dict(alpha=0.5))
+    rects2 = ax.bar(x + width/2, mean_incorrect, width*0.9, yerr=yerr_incorrect, capsize=5, 
+                   label='Mean Incorrect Tokens', color='firebrick', error_kw=dict(alpha=0.5))
 
-    ax.set_ylabel('Mean Cumulative Tokens Sent per Run (Total)')
-    ax.set_title(f'Token Assistance Summary {title_suffix} (Mean & IQR)')
-    ax.set_xticks(x)
-    ax.set_xticklabels(labels)
-    ax.legend()
+    # Add more informative title and labels
+    ax.set_ylabel('Mean Cumulative Tokens Sent per Run', fontsize=12)
+    ax.set_title(f'Token Assistance Summary {title_suffix} (Mean & IQR)', fontsize=14)
     
-    # Add value labels on top of bars - with better compatibility check
+    # Better tick positioning and larger font
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels, fontsize=12)
+    
+    # Add a legend with better positioning
+    ax.legend(loc='upper left', fontsize=11)
+    
+    # Add value labels above bars with improved placement
     def add_bar_labels(rects, values):
         for rect, value in zip(rects, values):
-            height = rect.get_height()
-            ax.annotate(f'{value:.1f}',
-                        xy=(rect.get_x() + rect.get_width() / 2, height),
-                        xytext=(0, 3),  # 3 points vertical offset
-                        textcoords="offset points",
-                        ha='center', va='bottom')
+            try:
+                height = rect.get_height()
+                ax.annotate(f'{value:.1f}',
+                            xy=(rect.get_x() + rect.get_width() / 2, height),
+                            xytext=(0, 4),  # 4 points vertical offset (increased)
+                            textcoords="offset points",
+                            ha='center', va='bottom',
+                            fontsize=10,
+                            fontweight='bold')
+            except (AttributeError, TypeError):
+                pass
     
     add_bar_labels(rects1, mean_correct)
     add_bar_labels(rects2, mean_incorrect)
 
+    # Add grid lines for better readability
     ax.grid(True, axis='y', linestyle='--', alpha=0.6)
-    ax.set_ylim(bottom=0)  # Ensure y-axis starts at 0
-    fig.tight_layout()
     
+    # Set bottom of y-axis to 0
+    y_max = max(max(mean_correct) + max(yerr_correct[1]), max(mean_incorrect) + max(yerr_incorrect[1]))
+    ax.set_ylim(bottom=0, top=y_max*1.1)  # Add 10% padding at the top
+    
+    # Add spacing around the plots
+    fig.tight_layout(pad=2.0)
+    
+    # Save the plot with higher DPI for better quality
     save_path = f"agent_model_results/assistance_bars_{title_suffix.replace('(','').replace(')','').replace('=','_')}.png"
-    plt.savefig(save_path)
-    plt.close(fig)  # Close figure to avoid display in notebooks
+    plt.savefig(save_path, dpi=150)
+    plt.close(fig)
 
 def plot_retainment_comparison(seci_data, aeci_data, retain_seci_data, retain_aeci_data, title_suffix=""):
     """Plots SECI/AECI vs Retainment metrics with Mean +/- IQR bands."""
@@ -3720,39 +3948,53 @@ def plot_belief_variance_evolution(belief_variance_array, title_suffix=""):
 def plot_unmet_need_evolution(unmet_needs_data, title_suffix=""):
     """Plots Unmet Need count evolution with Mean +/- IQR bands."""
     # unmet_needs_data is expected to be a list of lists/arrays (one per run)
-    if not unmet_needs_data or not isinstance(unmet_needs_data, list) or not all(isinstance(run_data, (list, np.ndarray)) for run_data in unmet_needs_data):
+    if not unmet_needs_data or not isinstance(unmet_needs_data, list):
         print(f"Warning: Invalid or empty data for plot_unmet_need_evolution {title_suffix}")
+        return
+
+    # Filter out None values and empty lists
+    valid_runs = [run_data for run_data in unmet_needs_data if run_data is not None and len(run_data) > 0]
+    if not valid_runs:
+        print(f"Warning: No valid run data for unmet needs evolution {title_suffix}")
         return
 
     # Pad shorter runs with NaN if lengths differ, then convert to array
     try:
-        # Find max length across all runs, ensure it's > 0
-        T = max(len(run_data) for run_data in unmet_needs_data if run_data is not None and len(run_data)>0)
-        if T == 0: raise ValueError("No non-empty runs found")
+        # Find max length across all runs
+        T = max(len(run_data) for run_data in valid_runs)
+        if T == 0:
+            print(f"Warning: All runs have empty data for {title_suffix}")
+            return
 
-        unmet_array = np.full((len(unmet_needs_data), T), np.nan)
-        for i, run_data in enumerate(unmet_needs_data):
-             if run_data is not None and len(run_data) > 0:
-                  unmet_array[i, :len(run_data)] = run_data
-        num_runs = unmet_array.shape[0]
+        unmet_array = np.full((len(valid_runs), T), np.nan)
+        for i, run_data in enumerate(valid_runs):
+            unmet_array[i, :len(run_data)] = run_data
     except Exception as e:
         print(f"Warning: Could not process unmet needs data for {title_suffix}: {e}")
         return
 
     ticks = np.arange(T) # Simple tick count (0 to T-1)
 
-    mean = np.nanmean(unmet_array, axis=0) # Use nanmean to ignore padding
+    # Calculate statistics with nan-safe functions
     try:
-         lower = np.nanpercentile(unmet_array, 25, axis=0)
-         upper = np.nanpercentile(unmet_array, 75, axis=0)
-    except (AttributeError, TypeError): # Fallback for older numpy or if NaNs cause issues
-         print("Warning: np.nanpercentile failed. Plotting mean only for unmet need.")
-         lower = mean
-         upper = mean
-         # Replace NaNs in mean if any resulted from all-NaN columns
-         mean = np.nan_to_num(mean)
-         lower = np.nan_to_num(lower)
-         upper = np.nan_to_num(upper)
+        mean = np.nanmean(unmet_array, axis=0)
+        lower = np.nanpercentile(unmet_array, 25, axis=0)
+        upper = np.nanpercentile(unmet_array, 75, axis=0)
+
+        # Replace NaNs with zeros
+        mean = np.nan_to_num(mean)
+        lower = np.nan_to_num(lower)
+        upper = np.nan_to_num(upper)
+
+        # Ensure percentiles don't cross mean
+        lower = np.minimum(mean, lower)
+        upper = np.maximum(mean, upper)
+    except Exception as e:
+        print(f"Warning: Error calculating statistics for unmet needs: {e}")
+        mean = np.nanmean(unmet_array, axis=0)
+        mean = np.nan_to_num(mean)
+        lower = mean
+        upper = mean
 
     plt.figure(figsize=(8, 5))
     plt.plot(ticks, mean, label="Mean Unmet Need", color="purple")
@@ -3763,7 +4005,7 @@ def plot_unmet_need_evolution(unmet_needs_data, title_suffix=""):
     plt.ylabel("Number of High-Need Cells with 0 Tokens")
     plt.legend(fontsize='small')
     plt.grid(True, linestyle='--', alpha=0.6)
-    plt.ylim(bottom=0)
+    plt.ylim(bottom=0)  # Unmet needs cannot be negative
     plt.tight_layout()
     plt.show()
 
@@ -3893,15 +4135,15 @@ if __name__ == "__main__":
             plot_simulation_overview(results_dict, title_suffix)
             plot_trust_evolution(results_dict.get("trust_stats"), title_suffix)
             plot_echo_chamber_indices(results_dict, title_suffix)
-            
+
             # To generate the trust vs alignment plot, we need to run a model with this alignment setting
             # since we need the actual agent objects, not just the aggregated statistics
             model_params = base_params.copy()
             model_params["ai_alignment_level"] = align
             temp_model = run_simulation(model_params)
             plot_ai_trust_vs_alignment(temp_model, save_dir=f"{save_dir}/trust_plots")
-            del temp_model 
-                                                                                
+            del temp_model
+
         else:
             print(f"  Skipping plots for {param_name_b}={align} (missing data)")
 
