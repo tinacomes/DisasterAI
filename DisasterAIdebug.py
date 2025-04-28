@@ -157,7 +157,7 @@ class HumanAgent(Agent):
                     try:
                         # Get actual level with bounds checking
                         if 0 <= x < self.model.width and 0 <= y < self.model.height:
-                            actual_level = self.model.disaster_grid[y, x]  # Check if this should be [x, y] instead!
+                            actual_level = self.model.disaster_grid[x, y]  #
 
                             # Add small noise to initial sensing
                             if random.random() < 0.2:  # 20% chance of noisy reading
@@ -186,18 +186,18 @@ class HumanAgent(Agent):
                 self.beliefs[cell] = {'level': initial_level, 'confidence': initial_conf}
 
         # Debug logging for key agents
-        if self.unique_id in [f"H_0", f"H_{self.model.num_humans // 2}"]:
-            print(f"\n--- Initial Beliefs for Agent {self.unique_id} ({self.agent_type}) ---")
-            high_belief_cells = [(cell, info['level']) for cell, info in self.beliefs.items() if info['level'] >= 3]
-            if high_belief_cells:
-                print(f"  Found {len(high_belief_cells)} initial high-belief (L3+) cells.")
-                max_lvl = max(info['level'] for info in self.beliefs.values())
-                print(f"  Max initial believed level: {max_lvl}")
-            else:
-                print("  WARNING: No initial high-belief (L3+) cells found!")
-                max_lvl = max(info['level'] for info in self.beliefs.values())
-                print(f"  Max initial believed level: {max_lvl}")
-            print("------------------------------------\n")
+       # if self.unique_id in [f"H_0", f"H_{self.model.num_humans // 2}"]:
+          #  print(f"\n--- Initial Beliefs for Agent {self.unique_id} ({self.agent_type}) ---")
+           # high_belief_cells = [(cell, info['level']) for cell, info in self.beliefs.items() if info['level'] >= 3]
+           # if high_belief_cells:
+            #    print(f"  Found {len(high_belief_cells)} initial high-belief (L3+) cells.")
+             #   max_lvl = max(info['level'] for info in self.beliefs.values())
+          #      print(f"  Max initial believed level: {max_lvl}")
+         #   else:
+           #     print("  WARNING: No initial high-belief (L3+) cells found!")
+           #     max_lvl = max(info['level'] for info in self.beliefs.values())
+          #      print(f"  Max initial believed level: {max_lvl}")
+          #  print("------------------------------------\n")
 
         # Verify that all cells have been initialized
         if len(self.beliefs) != width * height:
@@ -225,7 +225,7 @@ class HumanAgent(Agent):
                     self.beliefs[cell]['confidence'] = new_confidence
 
     def query_source(self, source_id, interest_point, query_radius):
-        source_agent = self.humans.get(source_id) or self.ais.get(source_id)
+        source_agent = self.model.humans.get(source_id) or self.model.ais.get(source_id)
         if source_agent:
             if hasattr(source_agent, 'report_beliefs'):
                 return source_agent.report_beliefs(interest_point, query_radius)
@@ -684,15 +684,25 @@ class HumanAgent(Agent):
                     # Exploratory agents have a slight bias against self-confirmation
                     scores["self_action"] -= 0.05
                     decision_factors['biases']["self_action"] = -0.05
-
-                    # Low AI alignment makes exploratory agents more likely to consult AI
-                    # This is where the pattern might be wrong - let's log it carefully
+                    
+                    # For exploratory agents, AI consultation should increase at low alignment levels
+                    
                     inverse_alignment_factor = (1.0 - self.model.ai_alignment_level) * 0.15
-
+                    
+                    # Add a baseline factor to ensure AI usage doesn't drop too much at any alignment level
+                    baseline_ai_factor = 0.1
+                    
                     for k in range(self.model.num_ai):
                         ai_id = f"A_{k}"
-                        scores[ai_id] += inverse_alignment_factor
-                        decision_factors['biases'][ai_id] = inverse_alignment_factor
+                        # Combine baseline with inverse alignment for more stable behavior
+                        ai_bias = baseline_ai_factor + inverse_alignment_factor
+                        scores[ai_id] += ai_bias
+                        decision_factors['biases'][ai_id] = ai_bias
+                    
+                    #  human consultation bias
+                    #social_alignment_factor = self.model.ai_alignment_level * 0.2
+                    #scores["human"] += social_alignment_factor
+                    # decision_factors['biases']["human"] = social_alignment_factor
 
                 # Add small random noise to break ties
                 for mode in scores:
@@ -1260,7 +1270,7 @@ class DisasterModel(Model):
                     dist_sq = (potential_rumor_epicenter[0] - self.epicenter[0])**2 + \
                           (potential_rumor_epicenter[1] - self.epicenter[1])**2
                     if dist_sq >= min_sep_dist_sq:
-                        umor_epicenter = potential_rumor_epicenter
+                        rumor_epicenter = potential_rumor_epicenter
                         # print(f"  Assigning rumor at {rumor_epicenter} to component {i} (size {len(component_nodes)})") # Debug
                         break
                     attempts += 1
@@ -1482,32 +1492,41 @@ class DisasterModel(Model):
             seci_exp_list = []
             seci_expl_list = []
             for agent in self.humans.values():
-                friend_beliefs = []
+
+                # FIXED: Properly collect friend beliefs
+                friend_belief_levels = []
                 for fid in agent.friends:
                     friend = self.humans.get(fid)
                     if friend:
                         for belief_info in friend.beliefs.values():
-                             # Ensure it's a dictionary and get the level, default 0
                             if isinstance(belief_info, dict):
                                 friend_belief_levels.append(belief_info.get('level', 0))
-
-                friend_var = np.var(friend_belief_levels) if friend_belief_levels else global_var
-
-                # Add safety check for division by (near) zero
-                if global_var < 1e-9:
-                     seci_val = 0 # Assign 0 if global variance is effectively zero
+                
+                # Calculate friend variance with safety check
+                if len(friend_belief_levels) > 1:
+                    friend_var = np.var(friend_belief_levels)
                 else:
-                     seci_val = max(0, min(1, (global_var - friend_var) / (global_var + 1e-6))) #normalise
+                    friend_var = global_var  # Default to global if insufficient friend data
+                
+                # FIXED: Ensure SECI is properly bounded
+                seci_val = max(0, min(1, (global_var - friend_var) / global_var))
 
+              
 
                 if agent.agent_type == "exploitative":
                     seci_exp_list.append(seci_val)
                 else:
                     seci_expl_list.append(seci_val)
-            self.seci_data.append((self.tick,
-                                   np.mean(seci_exp_list) if seci_exp_list else 0,
-                                   np.mean(seci_expl_list) if seci_expl_list else 0))
+           self.seci_data.append((
+                self.tick,
+                np.mean(seci_exp_list) if seci_exp_list else 0,
+                np.mean(seci_expl_list) if seci_expl_list else 0
+            ))
+        else:
+            # Store zeros if we have insufficient global data
+            self.seci_data.append((self.tick, 0, 0))
 
+          
             component_seci_list = []
             for component_nodes in nx.connected_components(self.social_network):
                 component_beliefs = []
@@ -3580,11 +3599,11 @@ def plot_ai_trust_vs_alignment(model, save_dir="analysis_plots"):
     plt.savefig(os.path.join(save_dir, f"ai_trust_alignment_{model.ai_alignment_level:.1f}.png"))
     plt.close()
 
-ddef plot_assistance_bars(assist_stats, raw_assist_counts, title_suffix=""):
+def plot_assistance_bars(assist_stats, raw_assist_counts, title_suffix=""):
     """Plots mean cumulative correct/incorrect tokens as bars with IQR error bars."""
     labels = ['Exploitative', 'Exploratory']
 
-    # Data for bars (means) - use .get for safety
+    # Data for bars (means)
     mean_correct = [
         assist_stats.get("exploit_correct", {}).get("mean", 0),
         assist_stats.get("explor_correct", {}).get("mean", 0)
@@ -3594,87 +3613,86 @@ ddef plot_assistance_bars(assist_stats, raw_assist_counts, title_suffix=""):
         assist_stats.get("explor_incorrect", {}).get("mean", 0)
     ]
 
-    # Data for error bars (IQR relative to mean)
-    def get_iqr_errors(count_list):
-        valid_counts = [c for c in count_list if isinstance(c, (int, float, np.number))]
-        if not valid_counts: return [0, 0]
-        
-        p25 = np.percentile(valid_counts, 25)
-        p75 = np.percentile(valid_counts, 75)
-        mean_val = np.mean(valid_counts)
-
-        lower_error_length = max(0, mean_val - p25)
-        upper_error_length = max(0, p75 - mean_val)
-        
-        return [lower_error_length, upper_error_length]
-
-    errors_correct = [
-        get_iqr_errors(raw_assist_counts.get("exploit_correct", [])),
-        get_iqr_errors(raw_assist_counts.get("explor_correct", []))
-    ]
-    errors_incorrect = [
-        get_iqr_errors(raw_assist_counts.get("exploit_incorrect", [])),
-        get_iqr_errors(raw_assist_counts.get("explor_incorrect", []))
-    ]
+    # FIXED: Error calculation with better handling
+    errors_correct = [[0, 0], [0, 0]]  # Default empty errors
+    errors_incorrect = [[0, 0], [0, 0]]  # Default empty errors
     
-    # Transpose error lists for yerr format
-    yerr_correct = np.array(errors_correct).T if errors_correct and errors_correct[0] else np.zeros((2, 2))
-    yerr_incorrect = np.array(errors_incorrect).T if errors_incorrect and errors_incorrect[0] else np.zeros((2, 2))
+    # Calculate errors if data exists
+    if "exploit_correct" in raw_assist_counts and raw_assist_counts["exploit_correct"]:
+        data = raw_assist_counts["exploit_correct"]
+        mean = np.mean(data)
+        p25 = np.percentile(data, 25)
+        p75 = np.percentile(data, 75)
+        errors_correct[0] = [max(0, mean - p25), max(0, p75 - mean)]
+        
+    if "explor_correct" in raw_assist_counts and raw_assist_counts["explor_correct"]:
+        data = raw_assist_counts["explor_correct"]
+        mean = np.mean(data)
+        p25 = np.percentile(data, 25)
+        p75 = np.percentile(data, 75)
+        errors_correct[1] = [max(0, mean - p25), max(0, p75 - mean)]
+        
+    if "exploit_incorrect" in raw_assist_counts and raw_assist_counts["exploit_incorrect"]:
+        data = raw_assist_counts["exploit_incorrect"]
+        mean = np.mean(data)
+        p25 = np.percentile(data, 25)
+        p75 = np.percentile(data, 75)
+        errors_incorrect[0] = [max(0, mean - p25), max(0, p75 - mean)]
+        
+    if "explor_incorrect" in raw_assist_counts and raw_assist_counts["explor_incorrect"]:
+        data = raw_assist_counts["explor_incorrect"]
+        mean = np.mean(data)
+        p25 = np.percentile(data, 25)
+        p75 = np.percentile(data, 75)
+        errors_incorrect[1] = [max(0, mean - p25), max(0, p75 - mean)]
+    
+    # FIXED: Properly format error bars for matplotlib
+    yerr_correct = np.array(errors_correct).T
+    yerr_incorrect = np.array(errors_incorrect).T
 
-    # Improved bar positioning
     x = np.arange(len(labels))
-    width = 0.3  # Reduced width for better spacing
+    width = 0.35
     
-    fig, ax = plt.subplots(figsize=(12, 7))  # Increased figure width
+    # FIXED: Create new figure with more space
+    fig, ax = plt.subplots(figsize=(12, 8))
     
-    # Position bars with better spacing
-    rects1 = ax.bar(x - width/2, mean_correct, width*0.9, yerr=yerr_correct, capsize=5, 
-                   label='Mean Correct Tokens', color='forestgreen', error_kw=dict(alpha=0.5))
-    rects2 = ax.bar(x + width/2, mean_incorrect, width*0.9, yerr=yerr_incorrect, capsize=5, 
-                   label='Mean Incorrect Tokens', color='firebrick', error_kw=dict(alpha=0.5))
+    # FIXED: Properly position bars to avoid overlap
+    rects1 = ax.bar(x - width/2, mean_correct, width*0.7, yerr=yerr_correct, capsize=4, 
+                   label='Mean Correct Tokens', color='forestgreen')
+    rects2 = ax.bar(x + width/2, mean_incorrect, width*0.7, yerr=yerr_incorrect, capsize=4, 
+                   label='Mean Incorrect Tokens', color='firebrick')
 
-    # Add more informative title and labels
-    ax.set_ylabel('Mean Cumulative Tokens Sent per Run', fontsize=12)
-    ax.set_title(f'Token Assistance Summary {title_suffix} (Mean & IQR)', fontsize=14)
-    
-    # Better tick positioning and larger font
+    ax.set_ylabel('Mean Cumulative Tokens Sent per Run (Total)')
+    ax.set_title(f'Token Assistance Summary {title_suffix} (Mean & IQR)')
     ax.set_xticks(x)
-    ax.set_xticklabels(labels, fontsize=12)
+    ax.set_xticklabels(labels)
+    ax.legend(loc='upper left')
     
-    # Add a legend with better positioning
-    ax.legend(loc='upper left', fontsize=11)
-    
-    # Add value labels above bars with improved placement
-    def add_bar_labels(rects, values):
-        for rect, value in zip(rects, values):
-            try:
-                height = rect.get_height()
-                ax.annotate(f'{value:.1f}',
-                            xy=(rect.get_x() + rect.get_width() / 2, height),
-                            xytext=(0, 4),  # 4 points vertical offset (increased)
-                            textcoords="offset points",
-                            ha='center', va='bottom',
-                            fontsize=10,
-                            fontweight='bold')
-            except (AttributeError, TypeError):
-                pass
-    
-    add_bar_labels(rects1, mean_correct)
-    add_bar_labels(rects2, mean_incorrect)
+    # FIXED: Add value labels with position adjustment
+    for i, rect in enumerate(rects1):
+        height = rect.get_height()
+        ax.annotate(f'{mean_correct[i]:.1f}',
+                    xy=(rect.get_x() + rect.get_width() / 2, height),
+                    xytext=(0, 3),
+                    textcoords="offset points",
+                    ha='center', va='bottom')
 
-    # Add grid lines for better readability
+    for i, rect in enumerate(rects2):
+        height = rect.get_height()
+        ax.annotate(f'{mean_incorrect[i]:.1f}',
+                    xy=(rect.get_x() + rect.get_width() / 2, height),
+                    xytext=(0, 3),
+                    textcoords="offset points",
+                    ha='center', va='bottom')
+
     ax.grid(True, axis='y', linestyle='--', alpha=0.6)
+    ax.set_ylim(bottom=0)
     
-    # Set bottom of y-axis to 0
-    y_max = max(max(mean_correct) + max(yerr_correct[1]), max(mean_incorrect) + max(yerr_incorrect[1]))
-    ax.set_ylim(bottom=0, top=y_max*1.1)  # Add 10% padding at the top
+    # FIXED: More space in layout
+    plt.tight_layout(rect=[0, 0, 1, 0.95])
     
-    # Add spacing around the plots
-    fig.tight_layout(pad=2.0)
-    
-    # Save the plot with higher DPI for better quality
     save_path = f"agent_model_results/assistance_bars_{title_suffix.replace('(','').replace(')','').replace('=','_')}.png"
-    plt.savefig(save_path, dpi=150)
+    plt.savefig(save_path, dpi=150, bbox_inches='tight')
     plt.close(fig)
 
 def plot_retainment_comparison(seci_data, aeci_data, retain_seci_data, retain_aeci_data, title_suffix=""):
