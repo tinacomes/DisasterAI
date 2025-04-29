@@ -281,15 +281,15 @@ class HumanAgent(Agent):
                     belief_level = actual
                     if self.agent_type == "exploitative":
                         # Keep slightly lower base confidence, but boost strongly for high levels
-                        belief_conf = 0.75 # Lower base than explorer
+                        belief_conf = 0.6 # Lower base than explorer
                         if belief_level >= 3:
-                            belief_conf = 0.9 # HIGH confidence if accurately sensing L3+
+                            belief_conf = 0.85 # HIGH confidence if accurately sensing L3+
                         elif belief_level > 0:
-                            belief_conf = 0.85 # Moderate confidence for L1/L2
+                            belief_conf = 0.75 # Moderate confidence for L1/L2
                     else: # Exploratory (Keep previous boost: 0.90 base, 0.98 for L>0)
-                        belief_conf = 0.85
+                        belief_conf = 0.9
                         if belief_level > 0:
-                            belief_conf = 0.95
+                            belief_conf = 0.98
                 
                 if cell in self.beliefs and isinstance(self.beliefs[cell], dict):
                     old_belief = self.beliefs[cell]
@@ -475,14 +475,39 @@ class HumanAgent(Agent):
             self.exploration_targets = [self.pos]  # Use current position as a last resort
 
     def apply_trust_decay(self):
-         """Applies a slow decay to all trust relationships."""
-         decay_rate = 0.002 if self.agent_type == "exploitative" else 0.002 # Slow general decay rate per step
-         friend_decay_rate = 0.0005 if self.agent_type == "exploitative" else 0.001# # Slower decay for friends
-         # Iterate over a copy of keys because dictionary size might change (though unlikely here)
-         for source_id in list(self.trust.keys()):
-              rate = friend_decay_rate if source_id in self.friends else decay_rate
-              self.trust[source_id] = max(0, self.trust[source_id] - rate)
-
+        """Applies a slow decay to all trust relationships."""
+        #  Make decay rates more distinct and agent-specific
+        if self.agent_type == "exploitative":
+            base_decay_rate = 0.002     # Standard decay
+            friend_decay_rate = 0.0005  # Very slow decay for friends - exploiters value stable relationships
+        else:  # exploratory
+            base_decay_rate = 0.003     # Slightly faster standard decay - more critical
+            friend_decay_rate = 0.0015  # Faster friend decay - less friend bias
+            
+        # For AI sources, modify decay based on alignment level and agent type
+        for source_id in list(self.trust.keys()):
+            decay_rate = None
+            
+            # Special handling for AI sources
+            if source_id.startswith("A_"):
+                if self.agent_type == "exploratory":
+                    # Exploratory agents should decay trust in AI slower when alignment is low
+                    inverse_alignment = 1.0 - self.model.ai_alignment_level
+                    decay_rate = base_decay_rate * (1.0 - (inverse_alignment * 0.5))
+                else:  # exploitative
+                    # Exploitative agents should decay trust in AI slower when alignment is high
+                    alignment = self.model.ai_alignment_level
+                    decay_rate = base_decay_rate * (1.0 - (alignment * 0.5))
+            # Friend decay rate
+            elif source_id in self.friends:
+                decay_rate = friend_decay_rate
+            # Standard decay for other sources
+            else:
+                decay_rate = base_decay_rate
+                
+            # Apply the calculated decay rate
+            self.trust[source_id] = max(0, self.trust[source_id] - decay_rate)
+            
     def update_belief_bayesian(self, cell, reported_level, source_trust):
         """Update agent's belief about a cell using Bayesian principles."""
         try: 
@@ -517,6 +542,9 @@ class HumanAgent(Agent):
             source_precision = source_precision_base
             
             # Apply conditional adjustments to source_precision
+
+            is_ai_source = hasattr(self, 'ai_info_sources') and cell in self.ai_info_sources
+    
             if source_trust < 0.3:
                 # Smoother transition for low trust
                 trust_factor = (source_trust / 0.3) ** 0.5  # Square root for smoother curve
@@ -525,7 +553,16 @@ class HumanAgent(Agent):
             # Lower threshold for ignoring extremely low trust sources
             if source_trust < 0.03:
                 source_precision *= 0.05  # Almost entirely ignore
-            
+
+            if is_ai_source and source_trust > 0.3:
+                # Give extra weight to AI information from somewhat trusted sources
+                source_precision = source_precision * 1.5
+                
+                # For exploratory agents at low alignment, boost even more
+                if self.agent_type == "exploratory" and hasattr(self.model, 'ai_alignment_level'):
+                    if self.model.ai_alignment_level < 0.3:  # Low alignment means AI is truthful
+                        source_precision = source_precision * 2.0  # Much stronger effect for truthful AI
+   
             # Apply a maximum to source precision to prevent overwhelming prior
             # Different maximums by agent type
             if self.agent_type == "exploitative":
@@ -551,19 +588,19 @@ class HumanAgent(Agent):
                 # Exploitative agents give more weight to consistent information
                 if abs(posterior_level - prior_level) <= 1:
                     # Information confirms existing belief - stronger boost
-                    confirmation_boost = min(0.15, 0.2 * prior_confidence)
+                    confirmation_boost = min(0.2, 0.25 * prior_confidence)
                     posterior_confidence = min(0.98, posterior_confidence + confirmation_boost)
             else:  # exploratory
                 # Exploratory agents are more accepting of new information
                 if abs(posterior_level - prior_level) >= 2:
                     # Information significantly differs from prior
                     # Don't reduce confidence as much - they value the new information
-                    posterior_confidence = max(0.1, posterior_confidence * 0.9)
+                    posterior_confidence = max(0.3, posterior_confidence * 0.95)
                     
-                # KEY CHANGE: Explorers gain extra confidence when source is trusted and reported level is high
+                # Explorers gain extra confidence when source is trusted and reported level is high
                 if source_trust > 0.6 and reported_level >= 3:
-                    info_value_boost = min(0.1, 0.15 * source_trust)
-                    posterior_confidence = min(0.95, posterior_confidence + info_value_boost)
+                    info_value_boost = min(0.3, 0.4 * source_trust)
+                    posterior_confidence = min(0.97, posterior_confidence + info_value_boost)
 
             # Apply a smoothing factor to reduce large jumps in level for both agent types
             if abs(posterior_level - prior_level) >= 2:
@@ -584,6 +621,16 @@ class HumanAgent(Agent):
 
             # Return whether this was a significant belief change
             return abs(posterior_level - prior_level) >= 1
+
+            if is_ai_source and abs(posterior_level - prior_level) >= 1:
+                if not hasattr(self, 'ai_acceptances'):
+                    self.ai_acceptances = {}
+                self.ai_acceptances[cell] = self.model.tick  # Track when AI info was accepted
+                
+            # Track whether this was a significant belief change
+            was_significant = abs(posterior_level - prior_level) >= 1
+            return was_significant
+
         except Exception as e:
             print(f"ERROR in Agent {self.unique_id} update_belief_bayesian: {e}")
             return False
@@ -651,7 +698,7 @@ class HumanAgent(Agent):
                                     elif conf == max_conf:
                                         highest_conf_cells.append(cell)
 
-                        # FIX: Ensure we have at least one valid cell before choosing
+                        # Ensure we have at least one valid cell before choosing
                         if highest_conf_cells:
                             interest_point = random.choice(highest_conf_cells)
                         else:
@@ -665,7 +712,7 @@ class HumanAgent(Agent):
                 interest_point = self.exploration_targets[0] if self.exploration_targets else None
                 query_radius = 3
 
-                # FIX: Add robust fallback mechanism
+                # Add robust fallback mechanism
                 if not interest_point:
                     # Try finding highest confidence cells
                     max_conf = -1
@@ -721,12 +768,13 @@ class HumanAgent(Agent):
             # Source selection (epsilon-greedy with type-specific biases)
             possible_modes = ["self_action", "human"] + [f"A_{k}" for k in range(self.model.num_ai)]
 
-            # DIAGNOSTIC: Store Q-values
+            # Store Q-values
             for mode in possible_modes:
                 decision_factors['q_values'][mode] = self.q_table.get(mode, 0.0)
 
+            # Epsilon greedy strategy - not to be confused with the agent types :)
             # Exploration case - record randomly chosen mode
-            if random.random() < self.epsilon:
+            if random.random() < self.epsilon: #epsilon parameter for randomness
                 chosen_mode = random.choice(possible_modes)
                 decision_factors['selection_type'] = 'exploration'
                 decision_factors['chosen_mode'] = chosen_mode
@@ -845,7 +893,16 @@ class HumanAgent(Agent):
                 source_agent = self.model.ais.get(source_id)
                 if source_agent:
                     reports = source_agent.report_beliefs(interest_point, query_radius, self.beliefs, self.trust.get(source_id, 0.1))
+                    
+                    # track AI source 
                     self.last_queried_source_ids = [source_id]
+                    
+                    # Additional tracking for AI information to ensure it persists
+                    for cell, reported_value in reports.items():
+                        if not hasattr(self, 'ai_info_sources'):
+                            self.ai_info_sources = {}
+                        self.ai_info_sources[cell] = source_id  # Track which AI provided info for which cell
+                        
                     self.accum_calls_ai += 1
                     self.accum_calls_total += 1
                 else:
@@ -1038,14 +1095,16 @@ class HumanAgent(Agent):
                     # Blend components for final reward - KEY CHANGE: Make this agent-type dependent
                     if self.agent_type == "exploratory":
                         # Explorers care more about actual levels (accuracy)
+                        # Explorers care almost exclusively about actual accuracy
                         avg_actual_reward = sum(cell_rewards) / len(cell_rewards)
-                        batch_reward = avg_actual_reward
+                        correct_ratio = correct_in_batch / len(cell_rewards) if cell_rewards else 0
+                        batch_reward = 0.8 * avg_actual_reward + 0.2 * (correct_ratio * 5.0)  # 80% actual value, 10% correctness
                     else:
-                        # Exploiters care more about correct/incorrect ratio (validation)
+                        # Exploiters care much more about validation of beliefs than actual accuracy
                         correct_ratio = correct_in_batch / len(cell_rewards) if cell_rewards else 0
                         avg_actual_reward = sum(cell_rewards) / len(cell_rewards)
-                        batch_reward = 0.6 * (correct_ratio * 5.0) + 0.4 * avg_actual_reward
-                    
+                        batch_reward = 0.2 * avg_actual_reward + 0.8 * (correct_ratio * 5.0)  # 20% actual value, 70% correctness
+       
                     # Cap the reward range
                     batch_reward = max(-3.0, min(5.0, batch_reward))
                 else:
@@ -1092,24 +1151,28 @@ class HumanAgent(Agent):
                             
                             # Trust update depends on source type and agent type
                             if source_id.startswith("A_"):
-                                # For AI sources, adjust trust update based on actual accuracy vs. alignment
                                 if self.agent_type == "exploratory":
-                                    # Explorers increase trust in AI based on ACTUAL accuracy
-                                    # Higher learning rate when alignment is low (accurate info)
-                                    accuracy_boost = correct_in_batch / max(1, len(cell_rewards))
-                                    inverse_alignment = 1.0 - self.model.ai_alignment_level
-                                    trust_change = self.trust_learning_rate * (1.0 + inverse_alignment * 0.5) * (target_trust - old_trust)
+                                    # Even stronger trust update for exploratory agents with truthful AI
+                                    if hasattr(self.model, 'ai_alignment_level') and self.model.ai_alignment_level < 0.3:
+                                        inverse_alignment = 1.0 - self.model.ai_alignment_level
+                                        # Very substantial trust boost for truthful AI that leads to correct actions
+                                        if correct_in_batch > incorrect_in_batch:
+                                            trust_change = self.trust_learning_rate * 3.0 * inverse_alignment * (target_trust - old_trust)
+                                        else:
+                                            trust_change = self.trust_learning_rate * 0.5 * (target_trust - old_trust)
+                                    else:
+                                        # Normal exploratory AI trust update
+                                        trust_change = self.trust_learning_rate * (target_trust - old_trust)
                                 else:
-                                    # Exploiters increase trust when AI confirms their beliefs
-                                    # Higher learning rate when alignment is high (confirmation)
-                                    alignment = self.model.ai_alignment_level
-                                    trust_change = self.trust_learning_rate * (1.0 + alignment * 0.5) * (target_trust - old_trust)
+                                    # Normal exploitative AI trust update
+                                    trust_change = self.trust_learning_rate * (target_trust - old_trust)
                             else:
-                                # For human sources - default trust learning rate
+                                # Normal trust update for non-AI sources
                                 trust_change = self.trust_learning_rate * (target_trust - old_trust)
-                                
+                            
                             new_trust = max(0.0, min(1.0, old_trust + trust_change))
                             self.trust[source_id] = new_trust
+        
         except Exception as e:
             print(f"ERROR in Agent {self.unique_id} process_reward at tick {current_tick}: {e}")
             import traceback
@@ -1123,7 +1186,7 @@ class HumanAgent(Agent):
         self.send_relief()
         reward = self.process_reward()
 
-
+        self.update_trust_for_accuracy() # Add direct trust update for accurate information
         self.apply_trust_decay() # Apply slow trust decay to all relationships
         self.apply_confidence_decay() # Apply slow decay to confidence
         #confidence_decay_rate = 0.005 # Start very small and tune
@@ -1157,6 +1220,64 @@ class HumanAgent(Agent):
         if "ai" not in self.tokens_this_tick:
             self.trust["ai"] = max(0, self.trust["ai"] - 0.005)
 
+    def update_trust_for_accuracy(self):
+        """Directly updates trust based on observed accuracy of previous information."""
+        # Skip if we don't have both tracking measures
+        if not hasattr(self, 'ai_acceptances') or not hasattr(self, 'ai_info_sources'):
+            return
+            
+        # Check each cell where we accepted AI information
+        for cell, tick in list(self.ai_acceptances.items()):
+            # Only process recently accepted information (past 5 ticks)
+            if self.model.tick - tick > 5:
+                # Remove old entries to prevent dict from growing too large
+                self.ai_acceptances.pop(cell, None)
+                continue
+                
+            # Get the AI source that provided this information
+            ai_source = self.ai_info_sources.get(cell)
+            if not ai_source:
+                continue
+                
+            # Get the AI's reported value and the actual value
+            if cell in self.beliefs and isinstance(self.beliefs[cell], dict):
+                believed_level = self.beliefs[cell].get('level', 0)
+                
+                # Get actual disaster level
+                actual_level = None
+                try:
+                    if 0 <= cell[0] < self.model.width and 0 <= cell[1] < self.model.height:
+                        actual_level = self.model.disaster_grid[cell[0], cell[1]]
+                except (IndexError, TypeError):
+                    continue
+                    
+                if actual_level is not None:
+                    # Calculate accuracy (how close belief is to reality)
+                    accuracy = 1.0 - (abs(believed_level - actual_level) / 5.0)
+                    
+                    # Apply direct trust update based on accuracy
+                    if accuracy > 0.8:  # High accuracy
+                        if ai_source in self.trust:
+                            old_trust = self.trust[ai_source]
+                            
+                            # Calculate trust boost based on agent type and alignment
+                            boost = 0.05  # Default small boost
+                            
+                            if self.agent_type == "exploratory":
+                                # Explorers strongly value accuracy from low-alignment (truthful) AI
+                                if hasattr(self.model, 'ai_alignment_level'):
+                                    inverse_alignment = 1.0 - self.model.ai_alignment_level
+                                    boost = 0.1 * (0.5 + inverse_alignment)  # Up to 0.15 boost
+                            
+                            # Apply trust update with limits
+                            new_trust = min(1.0, old_trust + boost)
+                            self.trust[ai_source] = new_trust
+                            
+                            # Debug logging
+                            if self.model.debug_mode and random.random() < 0.1:
+                                print(f"Agent {self.unique_id} direct trust update for {ai_source}:")
+                                print(f"  - Accuracy: {accuracy:.2f}, Trust: {old_trust:.2f} -> {new_trust:.2f}")
+
 
 class AIAgent(Agent):
     def __init__(self, unique_id, model):
@@ -1181,12 +1302,19 @@ class AIAgent(Agent):
                 self.sensed[cell] = self.memory[memory_key]
             else:
                 value = self.model.disaster_grid[x, y]
-                if random.random() < 0.1: # 10% chance of AI sensing noise
+
+                # When alignment is low, AI should be more truthful/accurate
+                noise_prob = 0.1  # Default 10% chance of noise
+                if hasattr(self.model, 'ai_alignment_level'):
+                    # Reduce noise when alignment is low (more truthful)
+                    noise_prob = 0.1 * self.model.ai_alignment_level
+                
+                if random.random() < noise_prob:
                     value = max(0, min(5, value + random.choice([-1, 1])))
+                    
                 self.sensed[cell] = value
                 self.memory[(current_tick, cell)] = value
-
-
+                
     def report_beliefs(self, interest_point, query_radius, caller_beliefs, caller_trust_in_ai):
         """
         Reports AI's beliefs about cells within query_radius of interest_point,
@@ -3831,63 +3959,58 @@ def plot_simulation_overview(results_dict, title_suffix=""):
     ax = axes[1, 1]
     if assist_stats and raw_counts:
         labels = ['Exploitative', 'Exploratory']
-        mean_correct = [assist_stats.get("exploit_correct", {}).get("mean", 0), 
-                      assist_stats.get("explor_correct", {}).get("mean", 0)]
-        mean_incorrect = [assist_stats.get("exploit_incorrect", {}).get("mean", 0), 
-                        assist_stats.get("explor_incorrect", {}).get("mean", 0)]
+        exploit_correct = assist_stats.get("exploit_correct", {}).get("mean", 0)
+        exploit_incorrect = assist_stats.get("exploit_incorrect", {}).get("mean", 0)
+        explor_correct = assist_stats.get("explor_correct", {}).get("mean", 0)
+        explor_incorrect = assist_stats.get("explor_incorrect", {}).get("mean", 0)
         
-        # Calculate total tokens and percentages for clarity
-        total_exploit = mean_correct[0] + mean_incorrect[0]
-        total_explor = mean_correct[1] + mean_incorrect[1]
+        # Calculate totals
+        exploit_total = exploit_correct + exploit_incorrect
+        explor_total = explor_correct + explor_incorrect
         
-        # Percentage correct
-        pct_correct_exploit = (mean_correct[0] / total_exploit * 100) if total_exploit > 0 else 0
-        pct_correct_explor = (mean_correct[1] / total_explor * 100) if total_explor > 0 else 0
-        
+        # Use a different approach with large text and clear percentages
         x = np.arange(len(labels))
-        width = 0.7  # Wider bars
+        width = 0.8  # Wider bars for visibility
         
-        # Use stacked bars instead of side-by-side
-        rects1 = ax.bar(x, mean_correct, width, label='Correct', color='forestgreen')
-        rects2 = ax.bar(x, mean_incorrect, width, bottom=mean_correct, label='Incorrect', color='firebrick')
+        # Create stacked bar chart
+        ax.bar(x, [exploit_correct, explor_correct], width, color='green', label='Correct')
+        ax.bar(x, [exploit_incorrect, explor_incorrect], width, 
+              bottom=[exploit_correct, explor_correct], color='red', label='Incorrect')
         
-        # Add value labels with percentages
-        for i, (correct, total, pct) in enumerate(zip(mean_correct, [total_exploit, total_explor], 
-                                                  [pct_correct_exploit, pct_correct_explor])):
-            # Label on the correct (bottom) portion
-            ax.text(i, correct/2, f"{correct:.1f}\n({pct:.1f}%)", 
-                  ha='center', va='center', color='white', fontweight='bold')
-            
-            # Label on the incorrect (top) portion if large enough
-            incorrect = total - correct
-            if incorrect > total * 0.15:  # Only if the segment is large enough
-                ax.text(i, correct + incorrect/2, f"{incorrect:.1f}", 
-                      ha='center', va='center', color='white', fontweight='bold')
+        # Add large percentage labels INSIDE the bars
+        for i, (correct, total) in enumerate(zip([exploit_correct, explor_correct], 
+                                              [exploit_total, explor_total])):
+            if total > 0:
+                pct = correct / total * 100
+                # Position text in middle of green section
+                if correct > 0:
+                    ax.text(i, correct/2, f"{pct:.1f}%", ha='center', va='center', 
+                          color='white', fontweight='bold', fontsize=12)
+                
+                # Position text in middle of red section if large enough
+                incorrect = total - correct
+                if incorrect > total * 0.15:
+                    ax.text(i, correct + incorrect/2, f"{100-pct:.1f}%", 
+                          ha='center', va='center', color='white', 
+                          fontweight='bold', fontsize=12)
         
-        # Add total numbers above each bar
-        for i, total in enumerate([total_exploit, total_explor]):
-            ax.text(i, total + 0.5, f"Total: {total:.1f}", 
-                  ha='center', va='bottom', fontweight='bold')
+        # Add totals as text at bottom of chart
+        for i, total in enumerate([exploit_total, explor_total]):
+            ax.text(i, -total*0.1, f"Total: {total:.1f}", ha='center', va='top', 
+                  fontweight='bold', fontsize=10)
         
         ax.set_ylabel('Mean Tokens per Run')
-        ax.set_title('Assistance Quality')
+        ax.set_title('Assistance Quality', fontsize=12)
         ax.set_xticks(x)
-        ax.set_xticklabels(labels)
-        ax.legend(loc='upper right', fontsize='small')
+        ax.set_xticklabels(labels, fontsize=10)
+        ax.legend(loc='upper right', fontsize=10)
         
-        # Set appropriate y-limit to accommodate the labels
-        max_total = max(total_exploit, total_explor)
-        ax.set_ylim(0, max_total * 1.15)  # 15% headroom for labels
-        
-        # Add percentage text to make it clearer
-        ax.text(0.5, -0.15, f"Correct token percentage:\nExploit: {pct_correct_exploit:.1f}%  |  Explor: {pct_correct_explor:.1f}%", 
-              ha='center', va='center', transform=ax.transAxes, fontsize=9,
-              bbox=dict(boxstyle='round,pad=0.5', facecolor='wheat', alpha=0.5))
+        # Ensure y-limits accommodate all elements
+        max_total = max(exploit_total, explor_total)
+        ax.set_ylim(0, max_total * 1.2)  # Extra room at top
     else:
-        ax.text(0.5, 0.5, 'Assistance data missing', ha='center', va='center')
-
-    ax.set_xlabel("Agent Type")
-    ax.grid(axis='y', linestyle='--', alpha=0.6)
+        ax.text(0.5, 0.5, 'Assistance data missing', ha='center', va='center', 
+              fontsize=12, bbox=dict(facecolor='wheat', alpha=0.5))  
 
 
 # ---  PLOT 2: ECHO CHAMBERS ---
@@ -4008,6 +4131,7 @@ def plot_echo_chamber_indices(results_dict, title_suffix=""):
     ax.set_ylim(bottom=0, top=1.05)
 
     # --- Subplot 2: Retainment ---
+    ax = axes [0, 1]
     # Check if retainment data exists and has proper shape before plotting
     if retain_seci is not None and isinstance(retain_seci, np.ndarray) and retain_seci.shape[0] > 0:
         retain_seci_shape = retain_seci.shape
