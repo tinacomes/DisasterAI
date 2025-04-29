@@ -765,14 +765,14 @@ class HumanAgent(Agent):
 
                     # Strengthen inverse alignment effect for exploratory agents
                     # Exploratory agents prefer truth-telling AI (low alignment)
-                    inverse_alignment_factor = (1.0 - self.model.ai_alignment_level) * 0.  # Stronger effect
-                    #baseline_ai_factor = 0.1  # alignment more important than AI preference
+                    inverse_alignment_factor = (1.0 - self.model.ai_alignment_level) * 0.5  # Stronger effect
+                    baseline_ai_factor = 0.1  # alignment more important than AI preference
     
 
                     for k in range(self.model.num_ai):
                         ai_id = f"A_{k}"
                         # Combine baseline with inverse alignment for more stable behavior
-                        ai_bias = inverse_alignment_factor #+baseline_ai_factor
+                        ai_bias = inverse_alignment_factor +baseline_ai_factor
                         scores[ai_id] += ai_bias
                         decision_factors['biases'][ai_id] = ai_bias
 
@@ -4008,11 +4008,39 @@ def plot_echo_chamber_indices(results_dict, title_suffix=""):
     ax.set_ylim(bottom=0, top=1.05)
 
     # --- Subplot 2: Retainment ---
-    ax = axes[0, 1]
-    safe_plot(ax, retain_seci, 1, "Retain Friend (Exploit)", "green", ticks=ticks)
-    safe_plot(ax, retain_seci, 2, "Retain Friend (Explor)", "lightgreen", linestyle='--', ticks=ticks)
-    safe_plot(ax, retain_aeci, 1, "Retain AI (Exploit)", "purple", ticks=ticks)
-    safe_plot(ax, retain_aeci, 2, "Retain AI (Explor)", "plum", linestyle='--', ticks=ticks)
+    # Check if retainment data exists and has proper shape before plotting
+    if retain_seci is not None and isinstance(retain_seci, np.ndarray) and retain_seci.shape[0] > 0:
+        retain_seci_shape = retain_seci.shape
+        print(f"Retain SECI data shape: {retain_seci_shape}")
+        if retain_seci.ndim >= 3 and retain_seci.shape[1] > 0 and retain_seci.shape[2] > 2:
+            # Safe plot with explicit error handling
+            plot_success = safe_plot(ax, retain_seci, 1, "Retain Friend (Exploit)", "green", ticks=ticks)
+            if not plot_success:
+                print("WARNING: Failed to plot Retain Friend (Exploit)")
+                
+            plot_success = safe_plot(ax, retain_seci, 2, "Retain Friend (Explor)", "lightgreen", linestyle='--', ticks=ticks)
+            if not plot_success:
+                print("WARNING: Failed to plot Retain Friend (Explor)")
+                
+            plot_success = safe_plot(ax, retain_aeci, 1, "Retain AI (Exploit)", "purple", ticks=ticks)
+            if not plot_success:
+                print("WARNING: Failed to plot Retain AI (Exploit)")
+                
+            plot_success = safe_plot(ax, retain_aeci, 2, "Retain AI (Explor)", "plum", linestyle='--', ticks=ticks)
+            if not plot_success:
+                print("WARNING: Failed to plot Retain AI (Explor)")
+        else:
+            print(f"WARNING: Retainment data has wrong dimensions/shape: {retain_seci_shape}")
+            # Fallback text
+            ax.text(0.5, 0.5, "Retainment data has invalid shape", 
+                   ha='center', va='center', transform=ax.transAxes)
+    else:
+        print("WARNING: Retainment data missing or invalid")
+        # Add info text to empty subplot
+        ax.text(0.5, 0.5, "No retainment data available", 
+               ha='center', va='center', transform=ax.transAxes)
+    
+    # Add event lines if available
     add_event_lines(ax, avg_event_ticks)
     ax.set_title("Information Retainment (Share Accepted)")
     ax.set_ylabel("Share of Accepted Info")
