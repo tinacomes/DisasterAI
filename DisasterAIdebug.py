@@ -210,25 +210,25 @@ class HumanAgent(Agent):
         """Apply confidence decay with more stability and cell-specific rates."""
         base_decay_rate = 0.0003 if self.agent_type == "exploitative" else 0.0005  # Higher for exploratory
         min_confidence_floor = 0.1 if self.agent_type == "exploitative" else 0.15  # Higher floor for exploratory
-    
-        
+
+
         # Add position-based and level-based decay adjustments
         for cell, belief in self.beliefs.items():
             if isinstance(belief, dict):
                 confidence = belief.get('confidence', 0.1)
                 level = belief.get('level', 0)
-                
+
                 if self.agent_type == "exploratory" and belief.get('confidence', 0) > 0.8:
                     adaptive_decay_rate *= 1.5  # Increase decay for high confidence beliefs
-                
+
                 # Skip decay for high confidence in high-level disaster cells
                 if level >= 4 and confidence > 0.8:
                     continue
-                    
+
                 # Apply level-based decay adjustment
                 # Less decay for important cells (higher levels)
                 level_factor = max(0.5, 1.0 - (level / 10.0))
-                
+
                 # Apply distance-based decay adjustment
                 # Cells further from agent decay faster
                 if self.pos and cell:
@@ -238,10 +238,10 @@ class HumanAgent(Agent):
                     distance_factor = min(1.5, 1.0 + (distance / (2 * radius)))
                 else:
                     distance_factor = 1.0
-                    
+
                 # Calculate final adaptive decay rate
                 adaptive_decay_rate = base_decay_rate * level_factor * distance_factor
-                
+
                 # Apply decay with higher floor
                 if confidence > min_confidence_floor:
                     # Apply smaller decay for recently acquired high-confidence beliefs
@@ -249,7 +249,7 @@ class HumanAgent(Agent):
                         ticks_since_update = self.model.tick - self.last_belief_update[cell]
                         if ticks_since_update < 5:  # Recently updated
                             adaptive_decay_rate *= 0.2  # Much slower decay
-                            
+
                     new_confidence = max(min_confidence_floor, confidence - adaptive_decay_rate)
                     self.beliefs[cell]['confidence'] = new_confidence
 
@@ -290,34 +290,34 @@ class HumanAgent(Agent):
                         belief_conf = 0.9
                         if belief_level > 0:
                             belief_conf = 0.98
-                
+
                 if cell in self.beliefs and isinstance(self.beliefs[cell], dict):
                     old_belief = self.beliefs[cell]
                     old_level = old_belief.get('level', 0)
                     old_confidence = old_belief.get('confidence', 0.1)
-                    
+
                     # FIXED: Calculate distance-based weight - cells further away get less weight
                     distance = math.sqrt((cell[0] - pos[0])**2 + (cell[1] - pos[1])**2)
                     distance_factor = max(0.1, 1.0 - (distance / (radius + 1)))
-                    
+
                     # FIXED: More conservative blending weights
                     # Direct perception has more weight for nearby cells and accurate readings
                     accuracy_factor = 0.7 if noise_roll >= noise_threshold else 0.5
                     sense_weight = accuracy_factor * distance_factor
-                    
+
                     # FIXED: Blend both level and confidence
                     # For level, use weighted average with rounding
                     final_level = int(round(sense_weight * belief_level + (1 - sense_weight) * old_level))
-                    
+
                     # For confidence, use weighted average with bounds
                     final_confidence = (sense_weight * belief_conf) + ((1 - sense_weight) * old_confidence)
                     final_confidence = max(0.1, min(0.98, final_confidence))
-                    
+
                     self.beliefs[cell] = {'level': final_level, 'confidence': final_confidence}
                 else:
                     # No existing belief, create new one
                     self.beliefs[cell] = {'level': belief_level, 'confidence': belief_conf}
-                                          
+
     def report_beliefs(self, interest_point, query_radius):  # New Arguments
         """Reports own beliefs about cells within query_radius of the interest_point."""
         report = {}
@@ -483,11 +483,11 @@ class HumanAgent(Agent):
         else:  # exploratory
             base_decay_rate = 0.003     # Slightly faster standard decay - more critical
             friend_decay_rate = 0.0015  # Faster friend decay - less friend bias
-            
+
         # For AI sources, modify decay based on alignment level and agent type
         for source_id in list(self.trust.keys()):
             decay_rate = None
-            
+
             # Special handling for AI sources
             if source_id.startswith("A_"):
                 if self.agent_type == "exploratory":
@@ -504,13 +504,13 @@ class HumanAgent(Agent):
             # Standard decay for other sources
             else:
                 decay_rate = base_decay_rate
-                
+
             # Apply the calculated decay rate
             self.trust[source_id] = max(0, self.trust[source_id] - decay_rate)
-            
+
     def update_belief_bayesian(self, cell, reported_level, source_trust):
         """Update agent's belief about a cell using Bayesian principles."""
-        try: 
+        try:
             # Get current belief
             if cell not in self.beliefs:
                 # Initialize if not present
@@ -519,10 +519,10 @@ class HumanAgent(Agent):
             current_belief = self.beliefs[cell]
             prior_level = current_belief.get('level', 0)
             prior_confidence = current_belief.get('confidence', 0.1)
-            
+
             # Apply a minimum confidence threshold to prevent wild swings
             prior_confidence = max(0.1, prior_confidence)
-            
+
             # Convert confidence to precision with agent-specific scaling
             if self.agent_type == "exploitative":
                 # Exploiters have higher prior precision (stronger resistance to change)
@@ -538,18 +538,18 @@ class HumanAgent(Agent):
             else:
                 # Explorers more moderately weigh trust
                 source_precision_base = 2.5 * source_trust / (1 - source_trust + 1e-6)
-            
+
             source_precision = source_precision_base
-            
+
             # Apply conditional adjustments to source_precision
 
             is_ai_source = hasattr(self, 'ai_info_sources') and cell in self.ai_info_sources
-    
+
             if source_trust < 0.3:
                 # Smoother transition for low trust
                 trust_factor = (source_trust / 0.3) ** 0.5  # Square root for smoother curve
                 source_precision = source_precision_base * trust_factor
-            
+
             # Lower threshold for ignoring extremely low trust sources
             if source_trust < 0.03:
                 source_precision *= 0.05  # Almost entirely ignore
@@ -557,12 +557,12 @@ class HumanAgent(Agent):
             if is_ai_source and source_trust > 0.3:
                 # Give extra weight to AI information from somewhat trusted sources
                 source_precision = source_precision * 1.5
-                
+
                 # For exploratory agents at low alignment, boost even more
                 if self.agent_type == "exploratory" and hasattr(self.model, 'ai_alignment_level'):
                     if self.model.ai_alignment_level < 0.3:  # Low alignment means AI is truthful
                         source_precision = source_precision * 2.0  # Much stronger effect for truthful AI
-   
+
             # Apply a maximum to source precision to prevent overwhelming prior
             # Different maximums by agent type
             if self.agent_type == "exploitative":
@@ -596,7 +596,7 @@ class HumanAgent(Agent):
                     # Information significantly differs from prior
                     # Don't reduce confidence as much - they value the new information
                     posterior_confidence = max(0.3, posterior_confidence * 0.95)
-                    
+
                 # Explorers gain extra confidence when source is trusted and reported level is high
                 if source_trust > 0.6 and reported_level >= 3:
                     info_value_boost = min(0.3, 0.4 * source_trust)
@@ -615,21 +615,17 @@ class HumanAgent(Agent):
                 'confidence': posterior_confidence
             }
 
-            # Add tracking for diagnostic purposes
-            if hasattr(self, 'last_belief_update'):
-                self.last_belief_update[cell] = self.model.tick
-
-            # Return whether this was a significant belief change
-            return abs(posterior_level - prior_level) >= 1
-
-            if is_ai_source and abs(posterior_level - prior_level) >= 1:
+            significant_change = abs(posterior_level - prior_level) >= 1
+        
+            # Track AI source information for later trust updates
+            is_ai_source = hasattr(self, 'ai_info_sources') and cell in self.ai_info_sources
+            if is_ai_source and significant_change:
                 if not hasattr(self, 'ai_acceptances'):
                     self.ai_acceptances = {}
-                self.ai_acceptances[cell] = self.model.tick  # Track when AI info was accepted
-                
-            # Track whether this was a significant belief change
-            was_significant = abs(posterior_level - prior_level) >= 1
-            return was_significant
+                self.ai_acceptances[cell] = self.model.tick
+            
+            # Return whether this update caused a significant belief change
+            return significant_change
 
         except Exception as e:
             print(f"ERROR in Agent {self.unique_id} update_belief_bayesian: {e}")
@@ -787,7 +783,7 @@ class HumanAgent(Agent):
                 decision_factors['base_scores'] = scores.copy()
 
                 # Add biases based on agent type
-                decision_factors['biases'] = {}         
+                decision_factors['biases'] = {}
 
                 if self.agent_type == "exploitative":
                     # Exploitative agents prefer friends and self-confirmation
@@ -815,7 +811,7 @@ class HumanAgent(Agent):
                     # Exploratory agents prefer truth-telling AI (low alignment)
                     inverse_alignment_factor = (1.0 - self.model.ai_alignment_level) * 0.5  # Stronger effect
                     baseline_ai_factor = 0.1  # alignment more important than AI preference
-    
+
 
                     for k in range(self.model.num_ai):
                         ai_id = f"A_{k}"
@@ -830,7 +826,7 @@ class HumanAgent(Agent):
                     human_bias = self.model.ai_alignment_level * 0.15
                     scores["human"] += human_bias  # Note: changed to positive bias now
                     decision_factors['biases']["human"] = human_bias
-                    
+
                 # Add small random noise to break ties
                 for mode in scores:
                     noise = random.uniform(-0.01, 0.01)
@@ -893,16 +889,16 @@ class HumanAgent(Agent):
                 source_agent = self.model.ais.get(source_id)
                 if source_agent:
                     reports = source_agent.report_beliefs(interest_point, query_radius, self.beliefs, self.trust.get(source_id, 0.1))
-                    
-                    # track AI source 
+
+                    # track AI source
                     self.last_queried_source_ids = [source_id]
-                    
+
                     # Additional tracking for AI information to ensure it persists
                     for cell, reported_value in reports.items():
                         if not hasattr(self, 'ai_info_sources'):
                             self.ai_info_sources = {}
                         self.ai_info_sources[cell] = source_id  # Track which AI provided info for which cell
-                        
+
                     self.accum_calls_ai += 1
                     self.accum_calls_total += 1
                 else:
@@ -1028,13 +1024,13 @@ class HumanAgent(Agent):
                 for cell, belief_level in cells_and_beliefs:
                     if not (0 <= cell[0] < self.model.width and 0 <= cell[1] < self.model.height):
                         continue
-                        
+
                     # Get the ACTUAL disaster level for this cell
                     actual_level = self.model.disaster_grid[cell[0], cell[1]]
-                    
+
                     # Define correctness criteria
                     is_correct = actual_level >= 3  # Keep this threshold for "high need"
-                    
+
                     if is_correct:
                         correct_in_batch += 1
                     else:
@@ -1053,22 +1049,22 @@ class HumanAgent(Agent):
                         cell_reward = -1.0  # Poor targeting - low need
                     else:  # Level 0
                         cell_reward = -2.0  # Very poor targeting - no need
-                    
+
                     cell_rewards.append(cell_reward)
-                    
+
                     # Update beliefs based on ground truth
                     if cell in self.beliefs and isinstance(self.beliefs[cell], dict):
                         old_belief = self.beliefs[cell].copy()
-                        
+
                         # Direct update with ground truth (with some noise)
                         noise = random.choice([-1, 0, 0, 0, 1]) if random.random() < 0.2 else 0
                         corrected_level = max(0, min(5, actual_level + noise))
-                        
+
                         # Blend with existing belief
                         update_weight = 0.7  # Strong update toward reality
-                        blended_level = int(round(update_weight * corrected_level + 
+                        blended_level = int(round(update_weight * corrected_level +
                                                 (1 - update_weight) * old_belief.get('level', 0)))
-                        
+
                         # Update confidence based on accuracy - KEY CHANGE: Make this agent-type dependent
                         if abs(old_belief.get('level', 0) - actual_level) <= 1:
                             # Belief was accurate
@@ -1086,7 +1082,7 @@ class HumanAgent(Agent):
                             else:
                                 # Exploiters only slightly reduce confidence when wrong (resist change)
                                 new_conf = max(0.2, old_belief.get('confidence', 0.5) - 0.1)
-                        
+
                         # Update the belief
                         self.beliefs[cell] = {'level': blended_level, 'confidence': new_conf}
 
@@ -1104,12 +1100,12 @@ class HumanAgent(Agent):
                         correct_ratio = correct_in_batch / len(cell_rewards) if cell_rewards else 0
                         avg_actual_reward = sum(cell_rewards) / len(cell_rewards)
                         batch_reward = 0.2 * avg_actual_reward + 0.8 * (correct_ratio * 5.0)  # 20% actual value, 70% correctness
-       
+
                     # Cap the reward range
                     batch_reward = max(-3.0, min(5.0, batch_reward))
                 else:
                     batch_reward = -1.0  # Penalty for targeting nothing
-                    
+
                 total_reward += batch_reward
 
                 self.correct_targets += correct_in_batch
@@ -1126,7 +1122,7 @@ class HumanAgent(Agent):
                     effective_learning_rate = self.learning_rate * (1.5 if self.agent_type == "exploratory" else 1.0)
                     new_q = old_q + effective_learning_rate * (scaled_reward - old_q)
                     self.q_table["self_action"] = new_q
-                    
+
                 elif source_ids:
                     for source_id in source_ids:
                         if source_id in self.q_table:
@@ -1142,13 +1138,13 @@ class HumanAgent(Agent):
                             else:
                                 # For human sources - default learning rate
                                 effective_learning_rate = self.learning_rate
-                                
+
                             new_q = old_q + effective_learning_rate * (scaled_reward - old_q)
                             self.q_table[source_id] = new_q
-                            
+
                         if source_id in self.trust:
                             old_trust = self.trust[source_id]
-                            
+
                             # Trust update depends on source type and agent type
                             if source_id.startswith("A_"):
                                 if self.agent_type == "exploratory":
@@ -1169,17 +1165,17 @@ class HumanAgent(Agent):
                             else:
                                 # Normal trust update for non-AI sources
                                 trust_change = self.trust_learning_rate * (target_trust - old_trust)
-                            
+
                             new_trust = max(0.0, min(1.0, old_trust + trust_change))
                             self.trust[source_id] = new_trust
-        
+
         except Exception as e:
             print(f"ERROR in Agent {self.unique_id} process_reward at tick {current_tick}: {e}")
             import traceback
             traceback.print_exc()
 
         return total_reward
-        
+
     def step(self):
         self.sense_environment()
         self.seek_information()
@@ -1225,7 +1221,7 @@ class HumanAgent(Agent):
         # Skip if we don't have both tracking measures
         if not hasattr(self, 'ai_acceptances') or not hasattr(self, 'ai_info_sources'):
             return
-            
+
         # Check each cell where we accepted AI information
         for cell, tick in list(self.ai_acceptances.items()):
             # Only process recently accepted information (past 5 ticks)
@@ -1233,16 +1229,16 @@ class HumanAgent(Agent):
                 # Remove old entries to prevent dict from growing too large
                 self.ai_acceptances.pop(cell, None)
                 continue
-                
+
             # Get the AI source that provided this information
             ai_source = self.ai_info_sources.get(cell)
             if not ai_source:
                 continue
-                
+
             # Get the AI's reported value and the actual value
             if cell in self.beliefs and isinstance(self.beliefs[cell], dict):
                 believed_level = self.beliefs[cell].get('level', 0)
-                
+
                 # Get actual disaster level
                 actual_level = None
                 try:
@@ -1250,29 +1246,29 @@ class HumanAgent(Agent):
                         actual_level = self.model.disaster_grid[cell[0], cell[1]]
                 except (IndexError, TypeError):
                     continue
-                    
+
                 if actual_level is not None:
                     # Calculate accuracy (how close belief is to reality)
                     accuracy = 1.0 - (abs(believed_level - actual_level) / 5.0)
-                    
+
                     # Apply direct trust update based on accuracy
                     if accuracy > 0.8:  # High accuracy
                         if ai_source in self.trust:
                             old_trust = self.trust[ai_source]
-                            
+
                             # Calculate trust boost based on agent type and alignment
                             boost = 0.05  # Default small boost
-                            
+
                             if self.agent_type == "exploratory":
                                 # Explorers strongly value accuracy from low-alignment (truthful) AI
                                 if hasattr(self.model, 'ai_alignment_level'):
                                     inverse_alignment = 1.0 - self.model.ai_alignment_level
                                     boost = 0.1 * (0.5 + inverse_alignment)  # Up to 0.15 boost
-                            
+
                             # Apply trust update with limits
                             new_trust = min(1.0, old_trust + boost)
                             self.trust[ai_source] = new_trust
-                            
+
                             # Debug logging
                             if self.model.debug_mode and random.random() < 0.1:
                                 print(f"Agent {self.unique_id} direct trust update for {ai_source}:")
@@ -1308,13 +1304,13 @@ class AIAgent(Agent):
                 if hasattr(self.model, 'ai_alignment_level'):
                     # Reduce noise when alignment is low (more truthful)
                     noise_prob = 0.1 * self.model.ai_alignment_level
-                
+
                 if random.random() < noise_prob:
                     value = max(0, min(5, value + random.choice([-1, 1])))
-                    
+
                 self.sensed[cell] = value
                 self.memory[(current_tick, cell)] = value
-                
+
     def report_beliefs(self, interest_point, query_radius, caller_beliefs, caller_trust_in_ai):
         """
         Reports AI's beliefs about cells within query_radius of interest_point,
@@ -1364,7 +1360,7 @@ class AIAgent(Agent):
         alignment_strength = self.model.ai_alignment_level
         low_trust_amplification = getattr(self.model, 'low_trust_amplification_factor', 0.5)  # Increased from 0.3
         clipped_trust = max(0.0, min(1.0, caller_trust_in_ai))
-        
+
         # If alignment is 0, report pure truth (no adjustments)
         if alignment_strength == 0:
             # Ground truth - no adjustments at all
@@ -1372,20 +1368,20 @@ class AIAgent(Agent):
         else:
             # Calculate adjustments based on alignment level - stronger effect
             alignment_factors = alignment_strength * (1.0 + human_conf * 2.0)  # Doubled confidence effect
-            
+
             # Add trust-based effect only when there's already some alignment
             # Low trust in AI should increase alignment (AI tries harder to confirm beliefs when not trusted)
             alignment_factors += alignment_strength * low_trust_amplification * (1.0 - clipped_trust)
-            
+
             # Cap the maximum alignment factor to prevent extreme distortions
             alignment_factors = np.clip(alignment_factors, 0.0, 3.0)  # Increased cap from 2.0
-            
+
             # Calculate the difference between human beliefs and AI sensed values
             belief_differences = human_vals - sensed_vals
-            
+
             # Apply proportional adjustments based on alignment factors
             adjustments = alignment_factors * belief_differences
-            
+
             # Apply adjustments to sensed values
             corrected = np.round(sensed_vals + adjustments)
             corrected = np.clip(corrected, 0, 5)  # Keep values in valid range
@@ -1648,7 +1644,7 @@ class DisasterModel(Model):
 
         # FIXED: Ensure means and bounds are properly calculated and clipped
         model.ai_usage_history['tick'].append(model.tick)
-        
+
         # Calculate exploit stats with bounds
         if exploit_ai_ratio:
             exploit_mean = np.mean(exploit_ai_ratio)
@@ -1656,7 +1652,7 @@ class DisasterModel(Model):
         else:
             exploit_mean = 0
             exploit_std = 0
-        
+
         # Calculate explor stats with bounds
         if explor_ai_ratio:
             explor_mean = np.mean(explor_ai_ratio)
@@ -1664,15 +1660,15 @@ class DisasterModel(Model):
         else:
             explor_mean = 0
             explor_std = 0
-        
+
         # Ensure all values are properly bounded
         exploit_mean = max(0.0, min(1.0, exploit_mean))
         explor_mean = max(0.0, min(1.0, explor_mean))
-        
+
         # Cap standard deviations to prevent out-of-bounds fill areas
         exploit_std = min(exploit_std, min(exploit_mean, 1.0 - exploit_mean))
         explor_std = min(explor_std, min(explor_mean, 1.0 - explor_mean))
-        
+
         model.ai_usage_history['exploit_mean'].append(exploit_mean)
         model.ai_usage_history['exploit_std'].append(exploit_std)
         model.ai_usage_history['explor_mean'].append(explor_mean)
@@ -1687,7 +1683,7 @@ class DisasterModel(Model):
             exploit_std_array = np.array(model.ai_usage_history['exploit_std'])
             explor_mean_array = np.array(model.ai_usage_history['explor_mean'])
             explor_std_array = np.array(model.ai_usage_history['explor_std'])
-            
+
             # Clip bounds to ensure they stay within [0,1]
             exploit_lower = np.clip(exploit_mean_array - exploit_std_array, 0.0, 1.0)
             exploit_upper = np.clip(exploit_mean_array + exploit_std_array, 0.0, 1.0)
@@ -1711,38 +1707,38 @@ class DisasterModel(Model):
             ax.set_title(f'AI Usage Over Time (Alignment = {model.ai_alignment_level})')
             ax.legend()
             ax.grid(True, linestyle='--', alpha=0.7)
-            
+
             # FIXED: Set explicit y-axis limits
             ax.set_ylim(0, 1)
 
             plt.tight_layout()
             plt.savefig(os.path.join(save_dir, f"ai_usage_tick_{model.tick}.png"))
             plt.close()
-            
+
             # FIXED: Save additional diagnostic data on tick 70 or near it
             if 65 <= model.tick <= 75:
                 # Create a detailed diagnostic plot
                 fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 10), sharex=True)
-                
+
                 # Plot mean values
                 ax1.plot(model.ai_usage_history['tick'], model.ai_usage_history['exploit_mean'], 'r-', label='Exploitative')
                 ax1.plot(model.ai_usage_history['tick'], model.ai_usage_history['explor_mean'], 'b-', label='Exploratory')
-                
+
                 # Add scatter points for individual agent values from current tick
                 exp_x = [model.tick] * len(exploit_ai_ratio)
                 exp_y = exploit_ai_ratio
                 expl_x = [model.tick] * len(explor_ai_ratio)
                 expl_y = explor_ai_ratio
-                
+
                 ax1.scatter(exp_x, exp_y, color='r', alpha=0.3, s=20)
                 ax1.scatter(expl_x, expl_y, color='b', alpha=0.3, s=20)
-                
+
                 ax1.set_ylabel('AI Usage Ratio')
                 ax1.set_title(f'AI Usage Detail Near Critical Tick (Alignment = {model.ai_alignment_level})')
                 ax1.legend()
                 ax1.grid(True, linestyle='--', alpha=0.7)
                 ax1.set_ylim(0, 1)
-                
+
                 # Plot Q-values
                 q_vals_exploit_ai = []
                 q_vals_exploit_human = []
@@ -1750,16 +1746,16 @@ class DisasterModel(Model):
                 q_vals_explor_ai = []
                 q_vals_explor_human = []
                 q_vals_explor_self = []
-                
+
                 for agent in model.humans.values():
                     # Calculate avg AI Q-value
                     ai_q_vals = [agent.q_table.get(f"A_{k}", 0) for k in range(model.num_ai)]
                     avg_ai_q = sum(ai_q_vals) / max(1, len(ai_q_vals))
-                    
+
                     # Get other source Q-values
                     human_q = agent.q_table.get("human", 0)
                     self_q = agent.q_table.get("self_action", 0)
-                    
+
                     if agent.agent_type == "exploitative":
                         q_vals_exploit_ai.append(avg_ai_q)
                         q_vals_exploit_human.append(human_q)
@@ -1768,24 +1764,24 @@ class DisasterModel(Model):
                         q_vals_explor_ai.append(avg_ai_q)
                         q_vals_explor_human.append(human_q)
                         q_vals_explor_self.append(self_q)
-                
+
                 # Plot Q-value distribution
                 if q_vals_explor_ai:
-                    ax2.boxplot([q_vals_explor_ai, q_vals_explor_human, q_vals_explor_self], 
-                              positions=[1, 2, 3], labels=['AI', 'Human', 'Self'], 
+                    ax2.boxplot([q_vals_explor_ai, q_vals_explor_human, q_vals_explor_self],
+                              positions=[1, 2, 3], labels=['AI', 'Human', 'Self'],
                               patch_artist=True, boxprops=dict(facecolor='blue', alpha=0.3))
-                
+
                 if q_vals_exploit_ai:
-                    ax2.boxplot([q_vals_exploit_ai, q_vals_exploit_human, q_vals_exploit_self], 
-                              positions=[5, 6, 7], labels=['AI', 'Human', 'Self'], 
+                    ax2.boxplot([q_vals_exploit_ai, q_vals_exploit_human, q_vals_exploit_self],
+                              positions=[5, 6, 7], labels=['AI', 'Human', 'Self'],
                               patch_artist=True, boxprops=dict(facecolor='red', alpha=0.3))
-                
+
                 ax2.set_ylabel('Q-Values')
                 ax2.set_title('Q-Values by Agent Type and Source')
                 ax2.grid(True, linestyle='--', alpha=0.7)
                 ax2.set_xticks([2, 6])
                 ax2.set_xticklabels(['Exploratory', 'Exploitative'])
-                
+
                 plt.tight_layout()
                 plt.savefig(os.path.join(save_dir, f"ai_usage_diagnostics_tick_{model.tick}.png"))
                 plt.close()
@@ -1889,7 +1885,7 @@ class DisasterModel(Model):
                 'aeci_variance': {'tick': 0, 'value': 0},
                 'component_aeci': {'tick': 0, 'value': 0},
                 'component_ai_trust_variance': {'tick': 0, 'value': 0},
-                'trust_stats': {'tick': 0, 'ai_exp': 0, 'friend_exp': 0, 'nonfriend_exp': 0, 
+                'trust_stats': {'tick': 0, 'ai_exp': 0, 'friend_exp': 0, 'nonfriend_exp': 0,
                               'ai_expl': 0, 'friend_expl': 0, 'nonfriend_expl': 0},
                 'running_aeci': {'tick': 0, 'exploit': 0, 'explor': 0}
             }
@@ -1898,7 +1894,7 @@ class DisasterModel(Model):
         if self.tick % 5 == 0:
             # --- SECI Calculation ---
             all_belief_levels = []
-            
+
             # Ensure we have beliefs to process
             for agent in self.humans.values():
                 if agent.beliefs:  # Check if any beliefs exist
@@ -1906,7 +1902,7 @@ class DisasterModel(Model):
                         if isinstance(belief_info, dict):
                             level = belief_info.get('level', 0)
                             all_belief_levels.append(level)
-            
+
             # Compute global variance with safety check
             if len(all_belief_levels) > 1:
                 global_var = np.var(all_belief_levels)
@@ -1914,11 +1910,11 @@ class DisasterModel(Model):
                 global_var = 1e-6  # Default to small value if insufficient data
                 if self.debug_mode:
                     print(f"Warning: Not enough belief data to calculate global variance at tick {self.tick}")
-            
+
             # Initialize metric lists
             seci_exp_list = []
             seci_expl_list = []
-            
+
             # More robust friend belief collection and SECI calculation
             for agent in self.humans.values():
                 # Collect friend beliefs with proper checks
@@ -1930,37 +1926,37 @@ class DisasterModel(Model):
                             if isinstance(belief_info, dict):
                                 level = belief_info.get('level', 0)
                                 friend_belief_levels.append(level)
-                
+
                 # Calculate friend variance only if we have enough data
                 if len(friend_belief_levels) > 1:
                     friend_var = np.var(friend_belief_levels)
                 else:
                     friend_var = global_var  # Default to global var if insufficient friend data
-                
+
                 # Calculate SECI safely
                 if global_var > 1e-9:  # Ensure non-zero denominator
                     seci_val = max(0, min(1, (global_var - friend_var) / global_var))
                 else:
                     seci_val = 0  # Default if global variance is essentially zero
-                
+
                 # Store by agent type
                 if agent.agent_type == "exploitative":
                     seci_exp_list.append(seci_val)
                 else:
                     seci_expl_list.append(seci_val)
-            
+
             # Store results with proper checks
             if seci_exp_list or seci_expl_list:  # Only store if we have data
                 seci_exploit_mean = np.mean(seci_exp_list) if seci_exp_list else 0
                 seci_explor_mean = np.mean(seci_expl_list) if seci_expl_list else 0
-                
+
                 # Update the last metrics dictionary
                 self._last_metrics['seci'] = {
                     'tick': self.tick,
                     'exploit': seci_exploit_mean,
                     'explor': seci_explor_mean
                 }
-                
+
                 self.seci_data.append((self.tick, seci_exploit_mean, seci_explor_mean))
             else:
                 # Add default values if no data
@@ -2008,7 +2004,7 @@ class DisasterModel(Model):
                     aeci_variance = max(0, min(1, (global_var - ai_reliant_var) / global_var))
                 elif ai_reliant_beliefs:
                     aeci_variance = 0.0  # If global_var is essentially zero, no reduction is possible
-            
+
             # Update last metrics
             self._last_metrics['aeci_variance'] = {
                 'tick': self.tick,
@@ -2030,35 +2026,55 @@ class DisasterModel(Model):
                         component_aeci.append(aeci)
                 avg_component_aeci = np.mean(component_aeci) if component_aeci else 0.0
                 component_aeci_list.append(avg_component_aeci)
-            
+
             component_aeci_mean = np.mean(component_aeci_list) if component_aeci_list else 0
-            
+
             # Update last metrics
             self._last_metrics['component_aeci'] = {
                 'tick': self.tick,
                 'value': component_aeci_mean
             }
-            
+
             self.component_aeci_data.append((self.tick, component_aeci_mean))
 
             # --- Component SECI ---
             component_seci_list = []
             for component_nodes in nx.connected_components(self.social_network):
-                component_seci = []
-                # Implementation details here...
-                # For the sake of example, let's just use a simple average
-                component_seci_mean = np.mean(component_seci) if component_seci else 0.0
-                component_seci_list.append(component_seci_mean)
-            
-            component_seci_mean = np.mean(component_seci_list) if component_seci_list else 0
-            
-            # Update last metrics
-            self._last_metrics['component_seci'] = {
-                'tick': self.tick,
-                'value': component_seci_mean
-            }
-            
-            self.component_seci_data.append((self.tick, component_seci_mean))
+                if len(component_nodes) <= 1:
+                    continue  # Skip components with only 1 node
+                    
+                # Get all beliefs from this component
+                component_belief_levels = []
+                for node_id in component_nodes:
+                    agent_id = f"H_{node_id}"
+                    agent = self.humans.get(agent_id)
+                    if agent and agent.beliefs:
+                        for cell, belief_info in agent.beliefs.items():
+                            if isinstance(belief_info, dict):
+                                level = belief_info.get('level', 0)
+                                component_belief_levels.append(level)
+                
+                if not component_belief_levels:
+                    continue  # Skip if no beliefs
+                
+                # Calculate global variance (all agents)
+                all_belief_levels = []
+                for agent in self.humans.values():
+                    for cell, belief_info in agent.beliefs.items():
+                        if isinstance(belief_info, dict):
+                            level = belief_info.get('level', 0)
+                            all_belief_levels.append(level)
+                
+                global_var = np.var(all_belief_levels) if len(all_belief_levels) > 1 else 1e-6
+                component_var = np.var(component_belief_levels) if len(component_belief_levels) > 1 else global_var
+                
+                # Calculate component SECI
+                if global_var > 1e-9:
+                    component_seci_val = max(0, min(1, (global_var - component_var) / global_var))
+                else:
+                    component_seci_val = 0
+                
+                component_seci_list.append(component_seci_val)
 
             # --- Component AI Trust Variance ---
             component_ai_trust_var_list = []
@@ -2072,15 +2088,15 @@ class DisasterModel(Model):
                         component_ai_trusts.append(ai_trust)
                 ai_trust_var = np.var(component_ai_trusts) if component_ai_trusts else 0.0
                 component_ai_trust_var_list.append(ai_trust_var)
-            
+
             component_ai_trust_var_mean = np.mean(component_ai_trust_var_list) if component_ai_trust_var_list else 0
-            
+
             # Update last metrics
             self._last_metrics['component_ai_trust_variance'] = {
                 'tick': self.tick,
                 'value': component_ai_trust_var_mean
             }
-            
+
             self.component_ai_trust_variance_data.append((self.tick, component_ai_trust_var_mean))
 
             # --- Belief Accuracy Metric (MAE) ---
@@ -2116,14 +2132,14 @@ class DisasterModel(Model):
 
             avg_mae_exploit = total_mae_exploit / count_exploit if count_exploit > 0 else 0
             avg_mae_explor = total_mae_explor / count_explor if count_explor > 0 else 0
-            
+
             # Update last metrics
             self._last_metrics['belief_error'] = {
                 'tick': self.tick,
                 'exploit': avg_mae_exploit,
                 'explor': avg_mae_explor
             }
-            
+
             self.belief_error_data.append((self.tick, avg_mae_exploit, avg_mae_explor))
 
             # --- Within-Type Belief Variance ---
@@ -2137,14 +2153,14 @@ class DisasterModel(Model):
 
             var_exploit = np.var(exploit_beliefs_levels) if exploit_beliefs_levels else 0
             var_explor = np.var(explor_beliefs_levels) if explor_beliefs_levels else 0
-            
+
             # Update last metrics
             self._last_metrics['belief_variance'] = {
                 'tick': self.tick,
                 'exploit': var_exploit,
                 'explor': var_explor
             }
-            
+
             self.belief_variance_data.append((self.tick, var_exploit, var_explor))
 
             # --- AECI Calculation ---
@@ -2157,16 +2173,16 @@ class DisasterModel(Model):
                     if self.debug_mode:
                         print(f"Warning: Agent {agent.unique_id} missing call counters")
                     continue
-                    
+
                 # Ensure no negative values
                 agent.accum_calls_ai = max(0, agent.accum_calls_ai)
                 agent.accum_calls_total = max(0, agent.accum_calls_total)
-                
+
                 # Calculate AECI with robust error handling
                 if agent.accum_calls_total > 0:
                     # Ensure ratio is properly bounded between 0 and 1
                     ratio = max(0.0, min(1.0, agent.accum_calls_ai / agent.accum_calls_total))
-                    
+
                     if agent.agent_type == "exploitative":
                         aeci_exp.append(ratio)
                     else:  # exploratory
@@ -2179,7 +2195,7 @@ class DisasterModel(Model):
             # Ensure averages are also properly bounded
             avg_aeci_exp = max(0.0, min(1.0, avg_aeci_exp))
             avg_aeci_expl = max(0.0, min(1.0, avg_aeci_expl))
-            
+
             # Update last metrics
             self._last_metrics['aeci'] = {
                 'tick': self.tick,
@@ -2205,7 +2221,7 @@ class DisasterModel(Model):
                 'exploit': self.running_aeci_exp,
                 'explor': self.running_aeci_expl
             }
-            
+
             self.running_aeci_data.append((self.tick, self.running_aeci_exp, self.running_aeci_expl))
 
             # --- Retainment Metrics ---
@@ -2213,41 +2229,54 @@ class DisasterModel(Model):
             retain_aeci_expl_list = []
             retain_seci_exp_list = []
             retain_seci_expl_list = []
+
+            if self.tick % 10 == 0 and self.debug_mode:
+                print(f"\n--- Retainment Diagnostics at Tick {self.tick} ---")
+                for agent_id, agent in list(self.humans.items())[:3]:  # Sample first 3 agents
+                    print(f"Agent {agent_id} ({agent.agent_type}) retainment stats:")
+                    print(f"  accepted_human: {agent.accepted_human}, accepted_friend: {agent.accepted_friend}, accepted_ai: {agent.accepted_ai}")
+                    total = agent.accepted_human + agent.accepted_ai
+                    if total > 0:
+                        print(f"  retain_aeci: {agent.accepted_ai/total:.2f}, retain_seci: {agent.accepted_friend/total:.2f}")
+                    else:
+                        print("  No acceptances recorded")
+
             for agent in self.humans.values():
                 total_accepted = agent.accepted_human + agent.accepted_ai
                 total_accepted = total_accepted if total_accepted > 0 else 1
-                retain_aeci_val = agent.accepted_ai / total_accepted
-                retain_seci_val = agent.accepted_friend / total_accepted
+                retain_aeci_val = agent.accepted_ai / total_accepted if total_accepted > 0 else 0
+                retain_seci_val = agent.accepted_friend / total_accepted if total_accepted > 0 else 0
 
+                
                 if agent.agent_type == "exploitative":
                     retain_aeci_exp_list.append(retain_aeci_val)
                     retain_seci_exp_list.append(retain_seci_val)
                 else:
                     retain_aeci_expl_list.append(retain_aeci_val)
                     retain_seci_expl_list.append(retain_seci_val)
-            
+
             retain_aeci_exp_mean = np.mean(retain_aeci_exp_list) if retain_aeci_exp_list else 0
             retain_aeci_expl_mean = np.mean(retain_aeci_expl_list) if retain_aeci_expl_list else 0
-            
+
             # Update last metrics
             self._last_metrics['retain_aeci'] = {
                 'tick': self.tick,
                 'exploit': retain_aeci_exp_mean,
                 'explor': retain_aeci_expl_mean
             }
-            
+
             self.retain_aeci_data.append((self.tick, retain_aeci_exp_mean, retain_aeci_expl_mean))
-            
+
             retain_seci_exp_mean = np.mean(retain_seci_exp_list) if retain_seci_exp_list else 0
             retain_seci_expl_mean = np.mean(retain_seci_expl_list) if retain_seci_expl_list else 0
-            
+
             # Update last metrics
             self._last_metrics['retain_seci'] = {
                 'tick': self.tick,
                 'exploit': retain_seci_exp_mean,
                 'explor': retain_seci_expl_mean
             }
-            
+
             self.retain_seci_data.append((self.tick, retain_seci_exp_mean, retain_seci_expl_mean))
 
             # --- Trust Statistics ---
@@ -2264,21 +2293,21 @@ class DisasterModel(Model):
                     trust_exp.append((ai_mean, friend_mean, nonfriend_mean))
                 else:
                     trust_expl.append((ai_mean, friend_mean, nonfriend_mean))
-            
+
             if trust_exp:
                 ai_exp_mean = np.mean([x[0] for x in trust_exp])
                 friend_exp_mean = np.mean([x[1] for x in trust_exp])
                 nonfriend_exp_mean = np.mean([x[2] for x in trust_exp])
             else:
                 ai_exp_mean, friend_exp_mean, nonfriend_exp_mean = 0, 0, 0
-            
+
             if trust_expl:
                 ai_expl_mean = np.mean([x[0] for x in trust_expl])
                 friend_expl_mean = np.mean([x[1] for x in trust_expl])
                 nonfriend_expl_mean = np.mean([x[2] for x in trust_expl])
             else:
                 ai_expl_mean, friend_expl_mean, nonfriend_expl_mean = 0, 0, 0
-            
+
             # Update last metrics
             self._last_metrics['trust_stats'] = {
                 'tick': self.tick,
@@ -2289,91 +2318,95 @@ class DisasterModel(Model):
                 'friend_expl': friend_expl_mean,
                 'nonfriend_expl': nonfriend_expl_mean
             }
-            
+
             self.trust_stats.append((self.tick, ai_exp_mean, friend_exp_mean, nonfriend_exp_mean,
                                     ai_expl_mean, friend_expl_mean, nonfriend_expl_mean))
 
             # Reset call counters after computing AECI metrics.
             for agent in self.humans.values():
                 agent.accum_calls_ai = 0
+                agent.accepted_friend = 0 
                 agent.accum_calls_human = 0
                 agent.accum_calls_total = 0
+                agent.accepted_human = 0
+                agent.accepted_ai = 0
+                
         else:
             # For ticks between calculations, use the last calculated values
-            
+
             # For SECI - use last calculated values
             self.seci_data.append((
                 self.tick,
                 self._last_metrics['seci']['exploit'],
                 self._last_metrics['seci']['explor']
             ))
-            
+
             # For AECI - use last calculated values
             self.aeci_data.append((
                 self.tick,
                 self._last_metrics['aeci']['exploit'],
                 self._last_metrics['aeci']['explor']
             ))
-            
+
             # For component_seci - use last calculated value
             self.component_seci_data.append((
-                self.tick, 
+                self.tick,
                 self._last_metrics['component_seci']['value']
             ))
-            
+
             # For aeci_variance - use last calculated value
             self.aeci_variance_data.append((
-                self.tick, 
+                self.tick,
                 self._last_metrics['aeci_variance']['value']
             ))
-            
+
             # For component_aeci - use last calculated value
             self.component_aeci_data.append((
-                self.tick, 
+                self.tick,
                 self._last_metrics['component_aeci']['value']
             ))
-            
+
             # For component_ai_trust_variance - use last calculated value
             self.component_ai_trust_variance_data.append((
-                self.tick, 
+                self.tick,
                 self._last_metrics['component_ai_trust_variance']['value']
             ))
-            
+
             # For belief_error - use last calculated values
             self.belief_error_data.append((
                 self.tick,
                 self._last_metrics['belief_error']['exploit'],
                 self._last_metrics['belief_error']['explor']
             ))
-            
+
             # For belief_variance - use last calculated values
             self.belief_variance_data.append((
                 self.tick,
                 self._last_metrics['belief_variance']['exploit'],
                 self._last_metrics['belief_variance']['explor']
             ))
-            
+
             # For retain_aeci - use last calculated values
             self.retain_aeci_data.append((
                 self.tick,
                 self._last_metrics['retain_aeci']['exploit'],
                 self._last_metrics['retain_aeci']['explor']
             ))
-            
+
             # For retain_seci - use last calculated values
             self.retain_seci_data.append((
                 self.tick,
                 self._last_metrics['retain_seci']['exploit'],
                 self._last_metrics['retain_seci']['explor']
             ))
-            
+
             # For running_aeci - use last calculated values
             self.running_aeci_data.append((
                 self.tick,
                 self._last_metrics['running_aeci']['exploit'],
                 self._last_metrics['running_aeci']['explor']
             ))
-            
+
             # For trust_stats - use last calculated values
             self.trust_stats.append((
                 self.tick,
@@ -2869,7 +2902,7 @@ def aggregate_simulation_results(num_runs, base_params):
 # Plotting Functions
 #########################################
 
-# helper function 
+# helper function
 def _plot_mean_iqr(ax, ticks, data_array, data_index, label, color, linestyle='-'):
     """Helper to plot mean and IQR band."""
     # --- Robust Check ---
@@ -3004,9 +3037,9 @@ def safe_plot(ax, data_array, col_idx, label, color, linestyle='-', is_ratio=Tru
             lower = np.minimum(mean, p25)
             upper = np.maximum(mean, p75)
             
-            # Plot
+            # Plot with MORE VISIBLE percentile bands
             ax.plot(plot_ticks, mean, label=label, color=color, linestyle=linestyle)
-            ax.fill_between(plot_ticks, lower, upper, color=color, alpha=0.2)
+            ax.fill_between(plot_ticks, lower, upper, color=color, alpha=0.4)  # INCREASED from 0.2 to 0.4
             
             # Set y-limits for ratio metrics
             if is_ratio:
@@ -3241,135 +3274,142 @@ def plot_max_aeci_variance_by_alignment(results_dict, alignment_values, title_su
 
 #########################################
 # Echo chamber plotting functions
-def plot_final_echo_indices_vs_alignment(results_b, alignment_values, title_suffix="Exp B"):
-    """Plots final mean values of echo chamber indices vs AI alignment."""
+def plot_summary_echo_indices_vs_alignment(results_b, alignment_values, title_suffix="Exp B"):
+    """Plots the mean values of echo chamber indices vs AI alignment as boxplots."""
     num_params = len(alignment_values)
-    bar_width = 0.15
-
-    index = np.arange(num_params)
-
-    # Initialize data structures
-    final_seci_exploit_mean, final_seci_exploit_err = [], [[],[]]
-    final_seci_explor_mean, final_seci_explor_err = [], [[],[]]
-    final_aeci_var_mean, final_aeci_var_err = [], [[],[]] # AI Echo Chamber
-    final_aeci_call_exploit_mean, final_aeci_call_exploit_err = [], [[],[]] # AI Call ratio
-    final_aeci_call_explor_mean, final_aeci_call_explor_err = [], [[],[]]
-    final_comp_ai_trust_var_mean, final_comp_ai_trust_var_err = [], [[],[]]
-
-    for align in alignment_values:
-        res = results_b.get(align)
-        if not res: continue
-
-        # Helper to extract final mean and IQR error across runs
-        def get_final_stats(data_array, col_index):
-            if data_array is None or not isinstance(data_array, np.ndarray) or data_array.size == 0:
-                return 0, [0, 0]
-
-            if data_array.ndim < 3 or data_array.shape[1] == 0 or col_index >= data_array.shape[2]:
-                return 0, [0, 0]
-
-            # Get final values for all runs
-            final_vals = data_array[:, -1, col_index]
-
-            # Handle ratio metrics - clip to [0,1]
-            if any(x in str(col_index) for x in ['aeci', 'seci']) or col_index in [1, 2]:
-                final_vals = np.clip(final_vals, 0.0, 1.0)
-
-            # Calculate mean and percentiles
-            mean = np.mean(final_vals)
-            p25 = np.percentile(final_vals, 25)
-            p75 = np.percentile(final_vals, 75)
-
-            # Return mean and error lengths [lower, upper]
-            return mean, [max(0, mean - p25), max(0, p75 - mean)]
-
-        # Extract final values with percentiles
-        mean, err = get_final_stats(res.get("seci"), 1)
-        final_seci_exploit_mean.append(mean)
-        final_seci_exploit_err[0].append(err[0])
-        final_seci_exploit_err[1].append(err[1])
-
-        mean, err = get_final_stats(res.get("seci"), 2)
-        final_seci_explor_mean.append(mean)
-        final_seci_explor_err[0].append(err[0])
-        final_seci_explor_err[1].append(err[1])
-
-        mean, err = get_final_stats(res.get("aeci_variance"), 1)
-        final_aeci_var_mean.append(mean)
-        final_aeci_var_err[0].append(err[0])
-        final_aeci_var_err[1].append(err[1])
-
-        mean, err = get_final_stats(res.get("aeci"), 1)
-        final_aeci_call_exploit_mean.append(mean)
-        final_aeci_call_exploit_err[0].append(err[0])
-        final_aeci_call_exploit_err[1].append(err[1])
-
-        mean, err = get_final_stats(res.get("aeci"), 2)
-        final_aeci_call_explor_mean.append(mean)
-        final_aeci_call_explor_err[0].append(err[0])
-        final_aeci_call_explor_err[1].append(err[1])
-
-        mean, err = get_final_stats(res.get("component_ai_trust_variance"), 1)
-        final_comp_ai_trust_var_mean.append(mean)
-        final_comp_ai_trust_var_err[0].append(err[0])
-        final_comp_ai_trust_var_err[1].append(err[1])
-
-    # Setup plot
+    boxplot_width = 0.15
+    
     fig, axes = plt.subplots(2, 2, figsize=(14, 10), sharex=True)
-    fig.suptitle(f"Final Echo Chamber Indices vs AI Alignment ({title_suffix})", fontsize=16)
-
-    # Plot Final SECI with percentile error bars
-    axes[0, 0].bar(index - bar_width/2, final_seci_exploit_mean, bar_width,
-                   yerr=final_seci_exploit_err, capsize=4, label='Exploit', color='maroon')
-    axes[0, 0].bar(index + bar_width/2, final_seci_explor_mean, bar_width,
-                   yerr=final_seci_explor_err, capsize=4, label='Explor', color='salmon')
-    axes[0, 0].set_ylabel("Final Mean SECI")
-    axes[0, 0].set_title("Social Echo Chamber (SECI)")
-    axes[0, 0].legend()
-    axes[0, 0].grid(True, axis='y', linestyle='--', alpha=0.6)
-    axes[0, 0].set_ylim(0, 1)  # Set bounds for SECI
-
-    # Plot Final AI Echo Chamber (AECI-Variance) with percentile error bars
-    axes[0, 1].bar(index, final_aeci_var_mean, bar_width*1.5,
-                   yerr=final_aeci_var_err, capsize=4, label='AI Reliant Group', color='magenta')
-    axes[0, 1].set_ylabel("Final Mean AI Bel. Var. Reduction")
-    axes[0, 1].set_title("AI Echo Chamber (AECI-Var)")
-    axes[0, 1].legend()
-    axes[0, 1].grid(True, axis='y', linestyle='--', alpha=0.6)
-    axes[0, 1].set_ylim(0, 1)  # Set bounds for variance reduction
-
-    # Plot Final AI Call Ratio with percentile error bars
-    axes[1, 0].bar(index - bar_width/2, final_aeci_call_exploit_mean, bar_width,
-                   yerr=final_aeci_call_exploit_err, capsize=4, label='Exploit', color='darkblue')
-    axes[1, 0].bar(index + bar_width/2, final_aeci_call_explor_mean, bar_width,
-                   yerr=final_aeci_call_explor_err, capsize=4, label='Explor', color='skyblue')
-    axes[1, 0].set_ylabel("Final Mean AI Call Ratio")
-    axes[1, 0].set_title("AI Usage (AECI Call Ratio)")
-    axes[1, 0].set_xlabel("AI Alignment Level")
-    axes[1, 0].legend()
-    axes[1, 0].grid(True, axis='y', linestyle='--', alpha=0.6)
-    # Ensure y-limits are appropriate - AI call ratio should be between 0 and 1
-    axes[1, 0].set_ylim(0, 1)
-
-    # Plot Component AI Trust Variance with percentile error bars
-    axes[1, 1].bar(index, final_comp_ai_trust_var_mean, bar_width*1.5,
-                   yerr=final_comp_ai_trust_var_err, capsize=4, label='Comp. AI Trust Var.', color='cyan')
-    axes[1, 1].set_ylabel("Final Mean Variance")
-    axes[1, 1].set_title("Component AI Trust Variance")
-    axes[1, 1].set_xlabel("AI Alignment Level")
-    axes[1, 1].legend()
-    axes[1, 1].grid(True, axis='y', linestyle='--', alpha=0.6)
-    axes[1, 1].set_ylim(bottom=0)  # Variance should be non-negative
-
+    fig.suptitle(f"Echo Chamber Indices vs AI Alignment ({title_suffix})", fontsize=16)
+    
+    # For each metric, we'll gather data across all timestamps for each alignment level
+    seci_exploit_data = []
+    seci_explor_data = []
+    aeci_var_data = []
+    aeci_call_exploit_data = []
+    aeci_call_explor_data = []
+    comp_ai_trust_var_data = []
+    
+    # Collect data for each alignment level
+    alignment_labels = []
+    for align in alignment_values:
+        alignment_labels.append(str(align))
+        res = results_b.get(align)
+        if not res:
+            # Add empty data for this alignment level to keep positions consistent
+            seci_exploit_data.append([])
+            seci_explor_data.append([])
+            aeci_var_data.append([])
+            aeci_call_exploit_data.append([])
+            aeci_call_explor_data.append([])
+            comp_ai_trust_var_data.append([])
+            continue
+            
+        # Extract time-series data and calculate means across all time steps
+        def get_all_values(data_array, col_index):
+            if data_array is None or not isinstance(data_array, np.ndarray) or data_array.size == 0:
+                return []
+                
+            if data_array.ndim < 3 or data_array.shape[1] == 0 or col_index >= data_array.shape[2]:
+                return []
+                
+            # Get all values for all runs and all time steps
+            # Reshape to flatten across runs and time steps
+            values = data_array[:, :, col_index].flatten()
+            
+            # Handle NaNs and infinities
+            values = values[~np.isnan(values) & ~np.isinf(values)]
+            
+            # Clip ratio metrics to [0,1]
+            if any(x in str(col_index) for x in ['aeci', 'seci']) or col_index in [1, 2]:
+                values = np.clip(values, 0.0, 1.0)
+                
+            return values
+            
+        # Collect data for each metric
+        seci_exploit_data.append(get_all_values(res.get("seci"), 1))
+        seci_explor_data.append(get_all_values(res.get("seci"), 2))
+        aeci_var_data.append(get_all_values(res.get("aeci_variance"), 1))
+        aeci_call_exploit_data.append(get_all_values(res.get("aeci"), 1))
+        aeci_call_explor_data.append(get_all_values(res.get("aeci"), 2))
+        comp_ai_trust_var_data.append(get_all_values(res.get("component_ai_trust_variance"), 1))
+    
+    # Plot SECI boxplots
+    ax = axes[0, 0]
+    positions = np.arange(len(alignment_values))
+    bplot_exploit = ax.boxplot(seci_exploit_data, positions=positions-boxplot_width/2, 
+                             widths=boxplot_width, patch_artist=True, 
+                             boxprops=dict(facecolor='maroon', alpha=0.7),
+                             flierprops=dict(marker='o', markerfacecolor='maroon', markersize=3, alpha=0.7),
+                             medianprops=dict(color='black'))
+    bplot_explor = ax.boxplot(seci_explor_data, positions=positions+boxplot_width/2, 
+                             widths=boxplot_width, patch_artist=True,
+                             boxprops=dict(facecolor='salmon', alpha=0.7),
+                             flierprops=dict(marker='o', markerfacecolor='salmon', markersize=3, alpha=0.7),
+                             medianprops=dict(color='black'))
+    ax.set_ylabel("SECI Value")
+    ax.set_title("Social Echo Chamber (SECI)")
+    ax.legend([bplot_exploit["boxes"][0], bplot_explor["boxes"][0]], ['Exploit', 'Explor'], loc='best')
+    ax.grid(True, axis='y', linestyle='--', alpha=0.6)
+    ax.set_ylim(0, 1)
+    
+    # Plot AECI Variance boxplots
+    ax = axes[0, 1]
+    bplot_aeci_var = ax.boxplot(aeci_var_data, positions=positions, 
+                              widths=boxplot_width*1.5, patch_artist=True,
+                              boxprops=dict(facecolor='magenta', alpha=0.7),
+                              flierprops=dict(marker='o', markerfacecolor='magenta', markersize=3, alpha=0.7),
+                              medianprops=dict(color='black'))
+    ax.set_ylabel("AI Belief Variance Reduction")
+    ax.set_title("AI Echo Chamber (AECI-Var)")
+    ax.legend([bplot_aeci_var["boxes"][0]], ['AI Reliant Group'], loc='best')
+    ax.grid(True, axis='y', linestyle='--', alpha=0.6)
+    ax.set_ylim(0, 1)
+    
+    # Plot AI Call Ratio boxplots
+    ax = axes[1, 0]
+    bplot_call_exploit = ax.boxplot(aeci_call_exploit_data, positions=positions-boxplot_width/2, 
+                                  widths=boxplot_width, patch_artist=True,
+                                  boxprops=dict(facecolor='darkblue', alpha=0.7),
+                                  flierprops=dict(marker='o', markerfacecolor='darkblue', markersize=3, alpha=0.7),
+                                  medianprops=dict(color='black'))
+    bplot_call_explor = ax.boxplot(aeci_call_explor_data, positions=positions+boxplot_width/2, 
+                                 widths=boxplot_width, patch_artist=True,
+                                 boxprops=dict(facecolor='skyblue', alpha=0.7),
+                                 flierprops=dict(marker='o', markerfacecolor='skyblue', markersize=3, alpha=0.7),
+                                 medianprops=dict(color='black'))
+    ax.set_ylabel("AI Call Ratio")
+    ax.set_title("AI Usage (AECI Call Ratio)")
+    ax.legend([bplot_call_exploit["boxes"][0], bplot_call_explor["boxes"][0]], ['Exploit', 'Explor'], loc='best')
+    ax.grid(True, axis='y', linestyle='--', alpha=0.6)
+    ax.set_ylim(0, 1)
+    
+    # Plot Component AI Trust Variance boxplots
+    ax = axes[1, 1]
+    bplot_ai_trust_var = ax.boxplot(comp_ai_trust_var_data, positions=positions, 
+                                   widths=boxplot_width*1.5, patch_artist=True,
+                                   boxprops=dict(facecolor='cyan', alpha=0.7),
+                                   flierprops=dict(marker='o', markerfacecolor='cyan', markersize=3, alpha=0.7),
+                                   medianprops=dict(color='black'))
+    ax.set_ylabel("Component AI Trust Variance")
+    ax.set_title("AI Trust Clustering")
+    ax.legend([bplot_ai_trust_var["boxes"][0]], ['Component AI Trust Var.'], loc='best')
+    ax.grid(True, axis='y', linestyle='--', alpha=0.6)
+    ax.set_ylim(bottom=0)
+    
+    # Set common x-axis properties
     for ax_row in axes:
         for ax in ax_row:
-            ax.set_xticks(index)
-            ax.set_xticklabels(alignment_values)
-
+            ax.set_xticks(positions)
+            ax.set_xticklabels(alignment_labels)
+            ax.set_xlabel("AI Alignment Level")
+    
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-    save_path = f"agent_model_results/summary_echo_{title_suffix}.png"
+    save_path = f"agent_model_results/boxplot_echo_{title_suffix}.png"
     plt.savefig(save_path.replace('(','').replace(')','').replace('=','_'))
     plt.close(fig)
+    
+    return fig
 
 def plot_final_performance_vs_alignment(results_b, alignment_values, title_suffix="Exp B"):
     """Plots final mean performance metrics vs AI alignment with percentile bands."""
@@ -3963,59 +4003,80 @@ def plot_simulation_overview(results_dict, title_suffix=""):
         exploit_incorrect = assist_stats.get("exploit_incorrect", {}).get("mean", 0)
         explor_correct = assist_stats.get("explor_correct", {}).get("mean", 0)
         explor_incorrect = assist_stats.get("explor_incorrect", {}).get("mean", 0)
-        
+
         # Calculate totals
         exploit_total = exploit_correct + exploit_incorrect
         explor_total = explor_correct + explor_incorrect
-        
+
         # Use a different approach with large text and clear percentages
         x = np.arange(len(labels))
         width = 0.8  # Wider bars for visibility
-        
+
         # Create stacked bar chart
         ax.bar(x, [exploit_correct, explor_correct], width, color='green', label='Correct')
-        ax.bar(x, [exploit_incorrect, explor_incorrect], width, 
+        ax.bar(x, [exploit_incorrect, explor_incorrect], width,
               bottom=[exploit_correct, explor_correct], color='red', label='Incorrect')
-        
+
         # Add large percentage labels INSIDE the bars
-        for i, (correct, total) in enumerate(zip([exploit_correct, explor_correct], 
+        for i, (correct, total) in enumerate(zip([exploit_correct, explor_correct],
                                               [exploit_total, explor_total])):
             if total > 0:
                 pct = correct / total * 100
                 # Position text in middle of green section
                 if correct > 0:
-                    ax.text(i, correct/2, f"{pct:.1f}%", ha='center', va='center', 
+                    ax.text(i, correct/2, f"{pct:.1f}%", ha='center', va='center',
                           color='white', fontweight='bold', fontsize=12)
-                
+
                 # Position text in middle of red section if large enough
                 incorrect = total - correct
                 if incorrect > total * 0.15:
-                    ax.text(i, correct + incorrect/2, f"{100-pct:.1f}%", 
-                          ha='center', va='center', color='white', 
+                    ax.text(i, correct + incorrect/2, f"{100-pct:.1f}%",
+                          ha='center', va='center', color='white',
                           fontweight='bold', fontsize=12)
-        
+
         # Add totals as text at bottom of chart
         for i, total in enumerate([exploit_total, explor_total]):
-            ax.text(i, -total*0.1, f"Total: {total:.1f}", ha='center', va='top', 
+            ax.text(i, -total*0.1, f"Total: {total:.1f}", ha='center', va='top',
                   fontweight='bold', fontsize=10)
-        
+
         ax.set_ylabel('Mean Tokens per Run')
         ax.set_title('Assistance Quality', fontsize=12)
         ax.set_xticks(x)
         ax.set_xticklabels(labels, fontsize=10)
         ax.legend(loc='upper right', fontsize=10)
-        
+
         # Ensure y-limits accommodate all elements
         max_total = max(exploit_total, explor_total)
         ax.set_ylim(0, max_total * 1.2)  # Extra room at top
     else:
-        ax.text(0.5, 0.5, 'Assistance data missing', ha='center', va='center', 
-              fontsize=12, bbox=dict(facecolor='wheat', alpha=0.5))  
+        ax.text(0.5, 0.5, 'Assistance data missing', ha='center', va='center',
+              fontsize=12, bbox=dict(facecolor='wheat', alpha=0.5))
 
 
 # ---  PLOT 2: ECHO CHAMBERS ---
 def plot_echo_chamber_indices(results_dict, title_suffix=""):
     """Plots various echo chamber and information flow metrics."""
+
+    print(f"\nDiagnostics for Information Dynamics Plot {title_suffix}")
+    
+    # Examine each data array and print statistics
+    for key in ["seci", "aeci", "retain_seci", "retain_aeci", "component_seci", 
+               "aeci_variance", "component_aeci", "component_ai_trust_variance"]:
+        data = results_dict.get(key)
+        if data is not None and isinstance(data, np.ndarray) and data.ndim >= 2:
+            print(f"{key}: shape={data.shape}")
+            
+            # For non-empty arrays, print sample statistics
+            if data.shape[0] > 0 and data.shape[1] > 0 and data.ndim >= 3:
+                # Print first and last timepoint stats for key columns
+                for col in range(min(data.shape[2], 3)):
+                    first_vals = data[:, 0, col]
+                    last_vals = data[:, -1, col]
+                    print(f"  Col {col}: First tick mean={np.nanmean(first_vals):.3f}, Last tick mean={np.nanmean(last_vals):.3f}")
+                    print(f"  Col {col}: Value range: [{np.nanmin(data[:, :, col]):.3f}, {np.nanmax(data[:, :, col]):.3f}]")
+        else:
+            print(f"{key}: Missing or invalid data")
+
     fig, axes = plt.subplots(2, 2, figsize=(15, 10), sharex=True)
     fig.suptitle(f"Information Dynamics & Echo Chambers {title_suffix}", fontsize=16)
 
@@ -4141,29 +4202,29 @@ def plot_echo_chamber_indices(results_dict, title_suffix=""):
             plot_success = safe_plot(ax, retain_seci, 1, "Retain Friend (Exploit)", "green", ticks=ticks)
             if not plot_success:
                 print("WARNING: Failed to plot Retain Friend (Exploit)")
-                
+
             plot_success = safe_plot(ax, retain_seci, 2, "Retain Friend (Explor)", "lightgreen", linestyle='--', ticks=ticks)
             if not plot_success:
                 print("WARNING: Failed to plot Retain Friend (Explor)")
-                
+
             plot_success = safe_plot(ax, retain_aeci, 1, "Retain AI (Exploit)", "purple", ticks=ticks)
             if not plot_success:
                 print("WARNING: Failed to plot Retain AI (Exploit)")
-                
+
             plot_success = safe_plot(ax, retain_aeci, 2, "Retain AI (Explor)", "plum", linestyle='--', ticks=ticks)
             if not plot_success:
                 print("WARNING: Failed to plot Retain AI (Explor)")
         else:
             print(f"WARNING: Retainment data has wrong dimensions/shape: {retain_seci_shape}")
             # Fallback text
-            ax.text(0.5, 0.5, "Retainment data has invalid shape", 
+            ax.text(0.5, 0.5, "Retainment data has invalid shape",
                    ha='center', va='center', transform=ax.transAxes)
     else:
         print("WARNING: Retainment data missing or invalid")
         # Add info text to empty subplot
-        ax.text(0.5, 0.5, "No retainment data available", 
+        ax.text(0.5, 0.5, "No retainment data available",
                ha='center', va='center', transform=ax.transAxes)
-    
+
     # Add event lines if available
     add_event_lines(ax, avg_event_ticks)
     ax.set_title("Information Retainment (Share Accepted)")
@@ -4333,7 +4394,7 @@ def plot_ai_trust_vs_alignment(model, save_dir="analysis_plots"):
 def plot_assistance_bars(assist_stats, raw_assist_counts, title_suffix=""):
     """Plots assistance metrics with improved bar sizing and spacing."""
     labels = ['Exploitative', 'Exploratory']
-    
+
     # Extract data safely
     mean_correct = [
         assist_stats.get("exploit_correct", {}).get("mean", 0),
@@ -4343,11 +4404,11 @@ def plot_assistance_bars(assist_stats, raw_assist_counts, title_suffix=""):
         assist_stats.get("exploit_incorrect", {}).get("mean", 0),
         assist_stats.get("explor_incorrect", {}).get("mean", 0)
     ]
-    
+
     # Calculate errors with proper error handling
     errors_correct = [[0, 0], [0, 0]]
     errors_incorrect = [[0, 0], [0, 0]]
-    
+
     # Helper for error calculation
     def calculate_errors(data, idx):
         if not data or len(data) == 0:
@@ -4359,38 +4420,38 @@ def plot_assistance_bars(assist_stats, raw_assist_counts, title_suffix=""):
             return [max(0, mean_val - p25), max(0, p75 - mean_val)]
         except Exception:
             return [0, 0]
-    
+
     # Calculate errors if data exists
     if raw_assist_counts:
         errors_correct[0] = calculate_errors(raw_assist_counts.get("exploit_correct", []), 0)
         errors_correct[1] = calculate_errors(raw_assist_counts.get("explor_correct", []), 0)
         errors_incorrect[0] = calculate_errors(raw_assist_counts.get("exploit_incorrect", []), 0)
         errors_incorrect[1] = calculate_errors(raw_assist_counts.get("explor_incorrect", []), 0)
-    
+
     # Format error bars for matplotlib
     yerr_correct = np.array(errors_correct).T
     yerr_incorrect = np.array(errors_incorrect).T
-    
+
     # Create figure with adequate spacing
     fig, ax = plt.subplots(figsize=(10, 6))
-    
+
     # Set positions for bars - increased spacing
     x = np.arange(len(labels))
     width = 0.35  # Increased bar width
-    
+
     # Create bars with proper spacing
     rects1 = ax.bar(x - width/2, mean_correct, width, yerr=yerr_correct, capsize=5,
                    label='Mean Correct Tokens', color='forestgreen')
     rects2 = ax.bar(x + width/2, mean_incorrect, width, yerr=yerr_incorrect, capsize=5,
                    label='Mean Incorrect Tokens', color='firebrick')
-    
+
     # Add labels and formatting
     ax.set_ylabel('Mean Cumulative Tokens per Run')
     ax.set_title(f'Token Assistance Summary {title_suffix}')
     ax.set_xticks(x)
     ax.set_xticklabels(labels)
     ax.legend()
-    
+
     # Add value labels with better positioning
     for i, rect in enumerate(rects1):
         height = rect.get_height()
@@ -4399,7 +4460,7 @@ def plot_assistance_bars(assist_stats, raw_assist_counts, title_suffix=""):
                     xytext=(0, 3),  # 3 points vertical offset
                     textcoords="offset points",
                     ha='center', va='bottom')
-    
+
     for i, rect in enumerate(rects2):
         height = rect.get_height()
         ax.annotate(f'{mean_incorrect[i]:.1f}',
@@ -4407,13 +4468,13 @@ def plot_assistance_bars(assist_stats, raw_assist_counts, title_suffix=""):
                     xytext=(0, 3),  # 3 points vertical offset
                     textcoords="offset points",
                     ha='center', va='bottom')
-    
+
     # Add grid for readability
     ax.grid(axis='y', linestyle='--', alpha=0.7)
-    
+
     # Ensure adequate spacing
     plt.tight_layout()
-    
+
     # Save figure
     save_path = f"agent_model_results/assistance_bars_{title_suffix}.png"
     save_path = save_path.replace('(','').replace(')','').replace('=','_')
@@ -4867,6 +4928,11 @@ if __name__ == "__main__":
         plot_final_echo_indices_vs_alignment(results_b, sorted(list(results_b.keys())), title_suffix="Tipping Points")
         plot_final_performance_vs_alignment(results_b, sorted(list(results_b.keys())), title_suffix="Tipping Points")
 
+        # New boxplot summaries across all time steps
+        print(f"\n--- Plotting Boxplot Summaries for {param_name_b} ---")
+        plot_summary_echo_indices_vs_alignment(results_b, sorted(list(results_b.keys())), title_suffix="Tipping Points")
+        plot_summary_performance_vs_alignment(results_b, sorted(list(results_b.keys())), title_suffix="Tipping Points")
+
     # --- Plot Aggregated Time Evolution for EACH Alignment Level ---
     print(f"\n--- Plotting Aggregated Time Evolution for {param_name_b} ---")
     for align in alignment_values:
@@ -4897,7 +4963,7 @@ if __name__ == "__main__":
          # Call the specific summary plot functions for this experiment
          plot_final_echo_indices_vs_alignment(results_b, alignment_values, title_suffix="Exp B")
          plot_final_performance_vs_alignment(results_b, alignment_values, title_suffix="Exp B")
-         
+
     ##############################################
     # Experiment C: Vary Disaster Dynamics and Shock Magnitude
     ##############################################
