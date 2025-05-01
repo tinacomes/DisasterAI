@@ -18,6 +18,9 @@ import math
 from mesa import Agent, Model
 from mesa.space import MultiGrid
 
+save_dir = "agent_model_results"
+os.makedirs(save_dir, exist_ok=True)
+
 #########################################
 # Helper Classes and Agent Definitions
 #########################################
@@ -96,8 +99,8 @@ class HumanAgent(Agent):
         # --- Belief Update Parameters ---
         # These control how beliefs change when info is ACCEPTED (separate from Q-learning)
         self.D = 2.0 if agent_type == "exploitative" else 4 # Acceptance threshold parameter
-        self.delta = 3.0 if agent_type == "exploitative" else 1.5 # Acceptance sensitivity parameter
-        self.belief_learning_rate = 0.8 if agent_type == "exploratory" else 0.5 # How much belief shifts towards accepted info
+        self.delta = 3.5 if agent_type == "exploitative" else 1.2 # Acceptance sensitivity parameter
+        self.belief_learning_rate = 0.9 if agent_type == "exploratory" else 0.4 # How much belief shifts towards accepted info
 
         # --- Other Parameters & Counters ---
         self.trust_update_mode = model.trust_update_mode # Affects trust increment size? Seems used in removed code? Check usage.
@@ -420,26 +423,39 @@ class HumanAgent(Agent):
             if self.model.debug_mode:
                 print(f"Agent {self.unique_id} ({self.agent_type}): No L{min_level_to_explore}+ targets found. Using fallback.")
 
-            # Look for cells with lowest confidence
-            min_conf = 1.1
-            lowest_conf_cells = []
-
+            # NEW APPROACH: Look for L0 cells with highest uncertainty (lowest confidence)
+            l0_candidates = []
+            
             for cell, belief_info in self.beliefs.items():
                 if isinstance(belief_info, dict):
                     # Check if cell coordinates are valid
                     if not (0 <= cell[0] < self.model.width and 0 <= cell[1] < self.model.height):
                         continue
-
+                    
+                    level = belief_info.get('level', 0)
                     conf = belief_info.get('confidence', 1.0)
-                    if conf < min_conf:
-                        min_conf = conf
-                        lowest_conf_cells = [cell]
-                    elif conf == min_conf:
-                        lowest_conf_cells.append(cell)
-
-            if lowest_conf_cells:
-                fallback_cell = random.choice(lowest_conf_cells)
-                candidates = [{'cell': fallback_cell, 'score': -1, 'level': '?', 'conf': min_conf}]
+                    
+                    # Focus on L0 cells now
+                    if level == 0:
+                        uncertainty = 1.0 - conf
+                        # For L0 cells, score is purely based on uncertainty
+                        l0_candidates.append({
+                            'cell': cell, 
+                            'score': uncertainty,  # Higher uncertainty = higher score 
+                            'level': level, 
+                            'conf': conf
+                        })
+            
+            # Sort L0 candidates by uncertainty (highest first)
+            if l0_candidates:
+                l0_candidates.sort(key=lambda x: x['score'], reverse=True)
+                # Take the top candidate(s)
+                candidates = l0_candidates[:num_targets]
+                
+                if self.model.debug_mode:
+                    print(f"  Found {len(l0_candidates)} L0 candidates, using highest uncertainty ones")
+                    for c in candidates[:min(3, len(candidates))]:
+                        print(f"  L0 Candidate: Cell:{c['cell']} Uncertainty:{c['score']:.3f} Conf:{c['conf']:.2f}")
             else:
                 # Ultimate fallback: pick some random cells
                 random_cells = []
@@ -473,7 +489,7 @@ class HumanAgent(Agent):
             if self.model.debug_mode:
                 print(f"Agent {self.unique_id}: No exploration candidates found at all, using position as target")
             self.exploration_targets = [self.pos]  # Use current position as a last resort
-
+            
     def apply_trust_decay(self):
         """Applies a slow decay to all trust relationships."""
         #  Make decay rates more distinct and agent-specific
@@ -526,7 +542,7 @@ class HumanAgent(Agent):
             # Convert confidence to precision with agent-specific scaling
             if self.agent_type == "exploitative":
                 # Exploiters have higher prior precision (stronger resistance to change)
-                prior_precision = 1.5 * prior_confidence / (1 - prior_confidence + 1e-6)
+                prior_precision = 1.8 * prior_confidence / (1 - prior_confidence + 1e-6)
             else:
                 # Explorers have lower prior precision (more open to new information)
                 prior_precision = 0.8 * prior_confidence / (1 - prior_confidence + 1e-6)
@@ -588,14 +604,14 @@ class HumanAgent(Agent):
                 # Exploitative agents give more weight to consistent information
                 if abs(posterior_level - prior_level) <= 1:
                     # Information confirms existing belief - stronger boost
-                    confirmation_boost = min(0.2, 0.25 * prior_confidence)
+                    confirmation_boost = min(0.3, 0.35 * prior_confidence)
                     posterior_confidence = min(0.98, posterior_confidence + confirmation_boost)
             else:  # exploratory
                 # Exploratory agents are more accepting of new information
                 if abs(posterior_level - prior_level) >= 2:
                     # Information significantly differs from prior
                     # Don't reduce confidence as much - they value the new information
-                    posterior_confidence = max(0.3, posterior_confidence * 0.95)
+                    posterior_confidence = max(0.2, posterior_confidence * 0.95)
 
                 # Explorers gain extra confidence when source is trusted and reported level is high
                 if source_trust > 0.6 and reported_level >= 3:
@@ -2936,19 +2952,6 @@ def _plot_mean_iqr(ax, ticks, data_array, data_index, label, color, linestyle='-
 def safe_plot(ax, data_array, col_idx, label, color, linestyle='-', is_ratio=True, ticks=None):
     """
     Safely plots data with proper error handling and diagnostics.
-    
-    Parameters:
-    ax - matplotlib axis to plot on
-    data_array - numpy array of shape (runs, ticks, metrics)
-    col_idx - index of the metric to plot
-    label - label for the plot legend
-    color - color for the line
-    linestyle - line style
-    is_ratio - whether the data is a ratio (bounded in [0,1])
-    ticks - x-axis values (if None, uses range)
-    
-    Returns:
-    bool - True if plotting succeeded, False otherwise
     """
     # Check if data exists
     if data_array is None:
@@ -3221,6 +3224,309 @@ def plot_grid_state(model, tick, save_dir="grid_plots"):
     filepath = os.path.join(save_dir, f"grid_state_tick_{tick:04d}.png")
     plt.savefig(filepath)
     plt.close(fig) # Close figure to free memory
+
+def plot_summary_echo_indices_vs_alignment(results_b, alignment_values, title_suffix="Exp B"):
+    """Plots the mean values of echo chamber indices vs AI alignment as boxplots.
+    This function aggregates data across the entire simulation run, not just final values."""
+    num_params = len(alignment_values)
+    boxplot_width = 0.15
+    
+    fig, axes = plt.subplots(2, 2, figsize=(14, 10), sharex=True)
+    fig.suptitle(f"Echo Chamber Indices vs AI Alignment ({title_suffix})", fontsize=16)
+    
+    # For each metric, we'll gather data across all timestamps for each alignment level
+    seci_exploit_data = []
+    seci_explor_data = []
+    aeci_var_data = []
+    aeci_call_exploit_data = []
+    aeci_call_explor_data = []
+    comp_ai_trust_var_data = []
+    
+    # Collect data for each alignment level
+    alignment_labels = []
+    for align in alignment_values:
+        alignment_labels.append(str(align))
+        res = results_b.get(align)
+        if not res:
+            # Add empty data for this alignment level to keep positions consistent
+            seci_exploit_data.append([])
+            seci_explor_data.append([])
+            aeci_var_data.append([])
+            aeci_call_exploit_data.append([])
+            aeci_call_explor_data.append([])
+            comp_ai_trust_var_data.append([])
+            continue
+            
+        # Extract time-series data and calculate means across all time steps
+        def get_all_values(data_array, col_index):
+            if data_array is None or not isinstance(data_array, np.ndarray) or data_array.size == 0:
+                return []
+                
+            if data_array.ndim < 3 or data_array.shape[1] == 0 or col_index >= data_array.shape[2]:
+                return []
+                
+            # Get all values for all runs and all time steps
+            # Reshape to flatten across runs and time steps
+            values = data_array[:, :, col_index].flatten()
+            
+            # Handle NaNs and infinities
+            values = values[~np.isnan(values) & ~np.isinf(values)]
+            
+            # Clip ratio metrics to [0,1]
+            if any(x in str(col_index) for x in ['aeci', 'seci']) or col_index in [1, 2]:
+                values = np.clip(values, 0.0, 1.0)
+                
+            return values
+            
+        # Collect data for each metric
+        seci_exploit_data.append(get_all_values(res.get("seci"), 1))
+        seci_explor_data.append(get_all_values(res.get("seci"), 2))
+        aeci_var_data.append(get_all_values(res.get("aeci_variance"), 1))
+        aeci_call_exploit_data.append(get_all_values(res.get("aeci"), 1))
+        aeci_call_explor_data.append(get_all_values(res.get("aeci"), 2))
+        comp_ai_trust_var_data.append(get_all_values(res.get("component_ai_trust_variance"), 1))
+    
+    # Plot SECI boxplots
+    ax = axes[0, 0]
+    positions = np.arange(len(alignment_values))
+    bplot_exploit = ax.boxplot(seci_exploit_data, positions=positions-boxplot_width/2, 
+                             widths=boxplot_width, patch_artist=True, 
+                             boxprops=dict(facecolor='maroon', alpha=0.7),
+                             flierprops=dict(marker='o', markerfacecolor='maroon', markersize=3, alpha=0.7),
+                             medianprops=dict(color='black'))
+    bplot_explor = ax.boxplot(seci_explor_data, positions=positions+boxplot_width/2, 
+                             widths=boxplot_width, patch_artist=True,
+                             boxprops=dict(facecolor='salmon', alpha=0.7),
+                             flierprops=dict(marker='o', markerfacecolor='salmon', markersize=3, alpha=0.7),
+                             medianprops=dict(color='black'))
+    ax.set_ylabel("SECI Value")
+    ax.set_title("Social Echo Chamber (SECI)")
+    ax.legend([bplot_exploit["boxes"][0], bplot_explor["boxes"][0]], ['Exploit', 'Explor'], loc='best')
+    ax.grid(True, axis='y', linestyle='--', alpha=0.6)
+    ax.set_ylim(0, 1)
+    
+    # Plot AECI Variance boxplots
+    ax = axes[0, 1]
+    bplot_aeci_var = ax.boxplot(aeci_var_data, positions=positions, 
+                              widths=boxplot_width*1.5, patch_artist=True,
+                              boxprops=dict(facecolor='magenta', alpha=0.7),
+                              flierprops=dict(marker='o', markerfacecolor='magenta', markersize=3, alpha=0.7),
+                              medianprops=dict(color='black'))
+    ax.set_ylabel("AI Belief Variance Reduction")
+    ax.set_title("AI Echo Chamber (AECI-Var)")
+    ax.legend([bplot_aeci_var["boxes"][0]], ['AI Reliant Group'], loc='best')
+    ax.grid(True, axis='y', linestyle='--', alpha=0.6)
+    ax.set_ylim(0, 1)
+    
+    # Plot AI Call Ratio boxplots
+    ax = axes[1, 0]
+    bplot_call_exploit = ax.boxplot(aeci_call_exploit_data, positions=positions-boxplot_width/2, 
+                                  widths=boxplot_width, patch_artist=True,
+                                  boxprops=dict(facecolor='darkblue', alpha=0.7),
+                                  flierprops=dict(marker='o', markerfacecolor='darkblue', markersize=3, alpha=0.7),
+                                  medianprops=dict(color='black'))
+    bplot_call_explor = ax.boxplot(aeci_call_explor_data, positions=positions+boxplot_width/2, 
+                                 widths=boxplot_width, patch_artist=True,
+                                 boxprops=dict(facecolor='skyblue', alpha=0.7),
+                                 flierprops=dict(marker='o', markerfacecolor='skyblue', markersize=3, alpha=0.7),
+                                 medianprops=dict(color='black'))
+    ax.set_ylabel("AI Call Ratio")
+    ax.set_title("AI Usage (AECI Call Ratio)")
+    ax.legend([bplot_call_exploit["boxes"][0], bplot_call_explor["boxes"][0]], ['Exploit', 'Explor'], loc='best')
+    ax.grid(True, axis='y', linestyle='--', alpha=0.6)
+    ax.set_ylim(0, 1)
+    
+    # Plot Component AI Trust Variance boxplots
+    ax = axes[1, 1]
+    bplot_ai_trust_var = ax.boxplot(comp_ai_trust_var_data, positions=positions, 
+                                   widths=boxplot_width*1.5, patch_artist=True,
+                                   boxprops=dict(facecolor='cyan', alpha=0.7),
+                                   flierprops=dict(marker='o', markerfacecolor='cyan', markersize=3, alpha=0.7),
+                                   medianprops=dict(color='black'))
+    ax.set_ylabel("Component AI Trust Variance")
+    ax.set_title("AI Trust Clustering")
+    ax.legend([bplot_ai_trust_var["boxes"][0]], ['Component AI Trust Var.'], loc='best')
+    ax.grid(True, axis='y', linestyle='--', alpha=0.6)
+    ax.set_ylim(bottom=0)
+    
+    # Set common x-axis properties
+    for ax_row in axes:
+        for ax in ax_row:
+            ax.set_xticks(positions)
+            ax.set_xticklabels(alignment_labels)
+            ax.set_xlabel("AI Alignment Level")
+    
+    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+    save_path = f"agent_model_results/boxplot_echo_{title_suffix}.png"
+    plt.savefig(save_path.replace('(','').replace(')','').replace('=','_'))
+    plt.close(fig)
+    
+    return fig
+
+def plot_summary_performance_vs_alignment(results_b, alignment_values, title_suffix="Exp B"):
+    """Plots summary performance metrics vs AI alignment across the entire simulation."""
+    num_params = len(alignment_values)
+    boxplot_width = 0.15
+    
+    fig, axes = plt.subplots(1, 3, figsize=(18, 6), sharex=True)
+    fig.suptitle(f"Performance Metrics vs AI Alignment ({title_suffix})", fontsize=16)
+    
+    # For each metric, we'll gather data across all timestamps for each alignment level
+    mae_exploit_data = []
+    mae_explor_data = []
+    unmet_needs_data = []
+    exploit_correct_ratio_data = []
+    explor_correct_ratio_data = []
+    
+    # Collect data for each alignment level
+    alignment_labels = []
+    for align in alignment_values:
+        alignment_labels.append(str(align))
+        res = results_b.get(align)
+        if not res:
+            # Add empty data for this alignment level to keep positions consistent
+            mae_exploit_data.append([])
+            mae_explor_data.append([])
+            unmet_needs_data.append([])
+            exploit_correct_ratio_data.append([])
+            explor_correct_ratio_data.append([])
+            continue
+            
+        # Helper for extracting MAE data
+        def get_all_mae_values(data_array, col_index):
+            if data_array is None or not isinstance(data_array, np.ndarray) or data_array.size == 0:
+                return []
+                
+            if data_array.ndim < 3 or data_array.shape[1] == 0 or col_index >= data_array.shape[2]:
+                return []
+                
+            # Get all values for all runs and all time steps
+            values = data_array[:, :, col_index].flatten()
+            
+            # Handle NaNs and infinities
+            values = values[~np.isnan(values) & ~np.isinf(values)]
+            
+            # MAE should be non-negative
+            values = np.clip(values, 0.0, None)
+                
+            return values
+        
+        # Helper for extracting unmet needs data
+        def get_all_unmet_values(unmet_list):
+            if not unmet_list:
+                return []
+            
+            # Flatten all unmet needs data across runs and time steps
+            all_values = []
+            for run_data in unmet_list:
+                if run_data and len(run_data) > 0:
+                    all_values.extend(run_data)
+            
+            # Handle NaNs and infinities
+            all_values = np.array(all_values)
+            all_values = all_values[~np.isnan(all_values) & ~np.isinf(all_values)]
+            
+            # Unmet needs should be non-negative
+            all_values = np.clip(all_values, 0.0, None)
+            
+            return all_values
+            
+        # Helper for extracting correct token ratio
+        def get_all_correct_ratio_values(raw_counts, correct_key, incorrect_key):
+            correct_list = raw_counts.get(correct_key, [])
+            incorrect_list = raw_counts.get(incorrect_key, [])
+            
+            if not correct_list or not incorrect_list:
+                return []
+                
+            # Calculate ratios for each run
+            ratios = []
+            for i in range(min(len(correct_list), len(incorrect_list))):
+                total = correct_list[i] + incorrect_list[i]
+                if total > 0:
+                    ratios.append(correct_list[i] / total)
+            
+            # Handle NaNs and infinities
+            ratios = np.array(ratios)
+            ratios = ratios[~np.isnan(ratios) & ~np.isinf(ratios)]
+            
+            # Clip ratios to [0,1]
+            ratios = np.clip(ratios, 0.0, 1.0)
+            
+            return ratios
+            
+        # Collect data for each metric
+        mae_exploit_data.append(get_all_mae_values(res.get("belief_error"), 1))
+        mae_explor_data.append(get_all_mae_values(res.get("belief_error"), 2))
+        unmet_needs_data.append(get_all_unmet_values(res.get("unmet_needs_evol")))
+        
+        raw_counts = res.get("raw_assist_counts", {})
+        exploit_correct_ratio_data.append(get_all_correct_ratio_values(raw_counts, "exploit_correct", "exploit_incorrect"))
+        explor_correct_ratio_data.append(get_all_correct_ratio_values(raw_counts, "explor_correct", "explor_incorrect"))
+    
+    # Plot Belief Error (MAE) boxplots
+    ax = axes[0]
+    positions = np.arange(len(alignment_values))
+    bplot_mae_exploit = ax.boxplot(mae_exploit_data, positions=positions-boxplot_width/2, 
+                                 widths=boxplot_width, patch_artist=True, 
+                                 boxprops=dict(facecolor='red', alpha=0.7),
+                                 flierprops=dict(marker='o', markerfacecolor='red', markersize=3, alpha=0.7),
+                                 medianprops=dict(color='black'))
+    bplot_mae_explor = ax.boxplot(mae_explor_data, positions=positions+boxplot_width/2, 
+                                widths=boxplot_width, patch_artist=True,
+                                boxprops=dict(facecolor='blue', alpha=0.7),
+                                flierprops=dict(marker='o', markerfacecolor='blue', markersize=3, alpha=0.7),
+                                medianprops=dict(color='black'))
+    ax.set_ylabel("Belief Error (MAE)")
+    ax.set_title("Belief Accuracy")
+    ax.legend([bplot_mae_exploit["boxes"][0], bplot_mae_explor["boxes"][0]], ['Exploit', 'Explor'], loc='best')
+    ax.grid(True, axis='y', linestyle='--', alpha=0.6)
+    ax.set_ylim(bottom=0)
+    
+    # Plot Unmet Needs boxplots
+    ax = axes[1]
+    bplot_unmet = ax.boxplot(unmet_needs_data, positions=positions, 
+                           widths=boxplot_width*1.5, patch_artist=True,
+                           boxprops=dict(facecolor='purple', alpha=0.7),
+                           flierprops=dict(marker='o', markerfacecolor='purple', markersize=3, alpha=0.7),
+                           medianprops=dict(color='black'))
+    ax.set_ylabel("Unmet Needs Count")
+    ax.set_title("Disaster Response Gap")
+    ax.legend([bplot_unmet["boxes"][0]], ['Unmet Needs'], loc='best')
+    ax.grid(True, axis='y', linestyle='--', alpha=0.6)
+    ax.set_ylim(bottom=0)
+    
+    # Plot Correct Token Ratio boxplots
+    ax = axes[2]
+    bplot_correct_exploit = ax.boxplot(exploit_correct_ratio_data, positions=positions-boxplot_width/2, 
+                                     widths=boxplot_width, patch_artist=True,
+                                     boxprops=dict(facecolor='red', alpha=0.7),
+                                     flierprops=dict(marker='o', markerfacecolor='red', markersize=3, alpha=0.7),
+                                     medianprops=dict(color='black'))
+    bplot_correct_explor = ax.boxplot(explor_correct_ratio_data, positions=positions+boxplot_width/2, 
+                                    widths=boxplot_width, patch_artist=True,
+                                    boxprops=dict(facecolor='blue', alpha=0.7),
+                                    flierprops=dict(marker='o', markerfacecolor='blue', markersize=3, alpha=0.7),
+                                    medianprops=dict(color='black'))
+    ax.set_ylabel("Correct Token Ratio")
+    ax.set_title("Assistance Quality")
+    ax.legend([bplot_correct_exploit["boxes"][0], bplot_correct_explor["boxes"][0]], ['Exploit', 'Explor'], loc='best')
+    ax.grid(True, axis='y', linestyle='--', alpha=0.6)
+    ax.set_ylim(0, 1)
+    
+    # Set common x-axis properties
+    for ax in axes:
+        ax.set_xticks(positions)
+        ax.set_xticklabels(alignment_labels)
+        ax.set_xlabel("AI Alignment Level")
+    
+    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+    save_path = f"agent_model_results/boxplot_perf_{title_suffix}.png"
+    plt.savefig(save_path.replace('(','').replace(')','').replace('=','_'))
+    plt.close(fig)
+    
+    return fig
+
 
 def plot_max_aeci_variance_by_alignment(results_dict, alignment_values, title_suffix=""):
     """Plots the maximum AECI variance observed in each run for different alignment levels."""
@@ -3875,7 +4181,13 @@ def plot_trust_evolution(trust_stats_array, title_suffix=""):
     axes[1].set_ylim(0, 1)  # Trust must be in [0,1]
 
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-    plt.show()
+    
+    # Save 
+    save_path = f"agent_model_results/trust_evolution_{title_suffix}.png"
+    plt.savefig(save_path.replace('(','').replace(')','').replace('=','_'))
+    plt.close(fig)
+
+    return fig
 
 def _plot_mean_iqr(ax, ticks, data_array, data_index, label, color, linestyle='-'):
     """Helper to plot mean and IQR band."""
@@ -3950,10 +4262,44 @@ def plot_simulation_overview(results_dict, title_suffix=""):
          if unmet_needs_list and unmet_needs_list[0]: ticks = np.arange(len(unmet_needs_list[0]))
          else: print("Warning: Cannot determine ticks for overview plot."); return
 
+    # Updated helper function for better bands
+    def _enhanced_plot_mean_iqr(ax, data_array, col_idx, label, color, linestyle='-'):
+        """Helper to plot mean and IQR band with enhanced visibility."""
+        if data_array is None or not isinstance(data_array, np.ndarray) or data_array.size == 0:
+            return
+            
+        if data_array.ndim < 3 or col_idx >= data_array.shape[2]:
+            return
+            
+        try:
+            # Extract values for all runs
+            values = data_array[:, :, col_idx]
+            
+            # Handle NaNs and infinities
+            values = np.where(np.isnan(values) | np.isinf(values), 0, values)
+            
+            # Calculate statistics
+            mean = np.mean(values, axis=0)
+            p25 = np.percentile(values, 25, axis=0)
+            p75 = np.percentile(values, 75, axis=0)
+            
+            # Ensure bounds are properly ordered
+            lower = np.minimum(mean, p25)
+            upper = np.maximum(mean, p75)
+            
+            # Plot with enhanced visibility for bands
+            ax.plot(ticks, mean, label=label, color=color, linestyle=linestyle)
+            ax.fill_between(ticks, lower, upper, color=color, alpha=0.4)  # Increased from 0.2 to 0.4
+            
+            return True
+        except Exception as e:
+            print(f"Error plotting {label}: {e}")
+            return False
+
     # --- Subplot 1: Belief Error (MAE) ---
     ax = axes[0, 0]
-    _plot_mean_iqr(ax, ticks, belief_error, 1, "MAE Exploit", "red")
-    _plot_mean_iqr(ax, ticks, belief_error, 2, "MAE Explor", "blue")
+    _enhanced_plot_mean_iqr(ax, belief_error, 1, "MAE Exploit", "red")
+    _enhanced_plot_mean_iqr(ax, belief_error, 2, "MAE Explor", "blue")
     ax.set_title("Avg. Belief MAE")
     ax.set_ylabel("MAE")
     ax.grid(True, linestyle='--', alpha=0.6)
@@ -3962,8 +4308,8 @@ def plot_simulation_overview(results_dict, title_suffix=""):
 
     # --- Subplot 2: Belief Variance ---
     ax = axes[0, 1]
-    _plot_mean_iqr(ax, ticks, belief_variance, 1, "Var Exploit", "red")
-    _plot_mean_iqr(ax, ticks, belief_variance, 2, "Var Explor", "blue")
+    _enhanced_plot_mean_iqr(ax, belief_variance, 1, "Var Exploit", "red")
+    _enhanced_plot_mean_iqr(ax, belief_variance, 2, "Var Explor", "blue")
     ax.set_title("Within-Type Belief Variance")
     ax.set_ylabel("Variance")
     ax.grid(True, linestyle='--', alpha=0.6)
@@ -3985,7 +4331,7 @@ def plot_simulation_overview(results_dict, title_suffix=""):
                  upper = np.nanpercentile(unmet_array, 75, axis=0)
                  plot_ticks_needs = np.arange(T_needs) # Use length determined from this data
                  ax.plot(plot_ticks_needs, mean, label="Unmet Need", color="purple")
-                 ax.fill_between(plot_ticks_needs, lower, upper, color="purple", alpha=0.2)
+                 ax.fill_between(plot_ticks_needs, lower, upper, color="purple", alpha=0.4)  # Increased alpha
              else: ax.text(0.5, 0.5, 'No unmet needs data', ha='center', va='center')
          except Exception as e: print(f"Warning: Could not plot unmet needs: {e}")
     ax.set_title("Unmet Need Count")
@@ -3995,10 +4341,10 @@ def plot_simulation_overview(results_dict, title_suffix=""):
     ax.legend(fontsize='small')
     ax.set_ylim(bottom=0)
 
-    # --- Subplot 4: Assistance Quality (Bar plot of final totals) ---
+    # --- Subplot 4: Redesigned Assistance Quality ---
     ax = axes[1, 1]
     if assist_stats and raw_counts:
-        labels = ['Exploitative', 'Exploratory']
+        # Extract data
         exploit_correct = assist_stats.get("exploit_correct", {}).get("mean", 0)
         exploit_incorrect = assist_stats.get("exploit_incorrect", {}).get("mean", 0)
         explor_correct = assist_stats.get("explor_correct", {}).get("mean", 0)
@@ -4008,49 +4354,62 @@ def plot_simulation_overview(results_dict, title_suffix=""):
         exploit_total = exploit_correct + exploit_incorrect
         explor_total = explor_correct + explor_incorrect
 
-        # Use a different approach with large text and clear percentages
-        x = np.arange(len(labels))
-        width = 0.8  # Wider bars for visibility
-
-        # Create stacked bar chart
-        ax.bar(x, [exploit_correct, explor_correct], width, color='green', label='Correct')
-        ax.bar(x, [exploit_incorrect, explor_incorrect], width,
-              bottom=[exploit_correct, explor_correct], color='red', label='Incorrect')
-
-        # Add large percentage labels INSIDE the bars
-        for i, (correct, total) in enumerate(zip([exploit_correct, explor_correct],
-                                              [exploit_total, explor_total])):
-            if total > 0:
-                pct = correct / total * 100
-                # Position text in middle of green section
-                if correct > 0:
-                    ax.text(i, correct/2, f"{pct:.1f}%", ha='center', va='center',
-                          color='white', fontweight='bold', fontsize=12)
-
-                # Position text in middle of red section if large enough
-                incorrect = total - correct
-                if incorrect > total * 0.15:
-                    ax.text(i, correct + incorrect/2, f"{100-pct:.1f}%",
-                          ha='center', va='center', color='white',
-                          fontweight='bold', fontsize=12)
-
-        # Add totals as text at bottom of chart
-        for i, total in enumerate([exploit_total, explor_total]):
-            ax.text(i, -total*0.1, f"Total: {total:.1f}", ha='center', va='top',
-                  fontweight='bold', fontsize=10)
-
-        ax.set_ylabel('Mean Tokens per Run')
-        ax.set_title('Assistance Quality', fontsize=12)
-        ax.set_xticks(x)
-        ax.set_xticklabels(labels, fontsize=10)
-        ax.legend(loc='upper right', fontsize=10)
-
-        # Ensure y-limits accommodate all elements
-        max_total = max(exploit_total, explor_total)
-        ax.set_ylim(0, max_total * 1.2)  # Extra room at top
+        # Use a pie chart approach instead of stacked bars for better clarity
+        fig_pie = plt.figure(figsize=(6, 6))
+        ax1 = fig_pie.add_subplot(121)
+        ax2 = fig_pie.add_subplot(122)
+        
+        # Exploitative pie
+        if exploit_total > 0:
+            exploit_labels = ['Correct', 'Incorrect']
+            exploit_values = [exploit_correct, exploit_incorrect]
+            exploit_colors = ['green', 'red']
+            ax1.pie(exploit_values, labels=exploit_labels, colors=exploit_colors, 
+                   autopct='%1.1f%%', startangle=90)
+            ax1.set_title(f'Exploitative\nTotal: {exploit_total:.1f}')
+        else:
+            ax1.text(0.5, 0.5, 'No data', ha='center', va='center')
+            ax1.set_title('Exploitative')
+            
+        # Exploratory pie
+        if explor_total > 0:
+            explor_labels = ['Correct', 'Incorrect']
+            explor_values = [explor_correct, explor_incorrect]
+            explor_colors = ['green', 'red']
+            ax2.pie(explor_values, labels=explor_labels, colors=explor_colors, 
+                   autopct='%1.1f%%', startangle=90)
+            ax2.set_title(f'Exploratory\nTotal: {explor_total:.1f}')
+        else:
+            ax2.text(0.5, 0.5, 'No data', ha='center', va='center')
+            ax2.set_title('Exploratory')
+            
+        # Save pie chart
+        fig_pie.suptitle("Assistance Quality")
+        pie_path = f"agent_model_results/assistance_quality_pie_{title_suffix}.png"
+        plt.savefig(pie_path.replace('(','').replace(')','').replace('=','_'))
+        plt.close(fig_pie)
+        
+        # Load the saved pie chart as an image to display in the subplot
+        try:
+            from PIL import Image
+            img = Image.open(pie_path.replace('(','').replace(')','').replace('=','_'))
+            ax.imshow(img)
+            ax.axis('off')
+        except Exception as e:
+            # Fallback to simple text if image loading fails
+            ax.text(0.5, 0.5, 'See assistance quality pie chart', ha='center', va='center')
+            ax.set_title('Assistance Quality')
+            ax.axis('off')
     else:
         ax.text(0.5, 0.5, 'Assistance data missing', ha='center', va='center',
               fontsize=12, bbox=dict(facecolor='wheat', alpha=0.5))
+              
+    # Save the main overview plot
+    save_path = f"agent_model_results/simulation_overview_{title_suffix}.png"
+    plt.savefig(save_path.replace('(','').replace(')','').replace('=','_'))
+    plt.close(fig)
+    
+    return fig
 
 
 # ---  PLOT 2: ECHO CHAMBERS ---
@@ -4350,7 +4709,11 @@ def plot_seci_aeci_evolution(seci_array, aeci_array, title_suffix=""):
     axes[1].set_ylim(0, 1)  # Force y-axis limits to [0,1]
 
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-    plt.show()
+    save_path = f"agent_model_results/seci_aeci_evolution_{title_suffix}.png"
+    plt.savefig(save_path.replace('(','').replace(')','').replace('=','_'))
+    plt.close(fig)
+    
+    return fig
 
 def plot_ai_trust_vs_alignment(model, save_dir="analysis_plots"):
     """Plot AI trust by agent type with respect to AI alignment level."""
@@ -4567,7 +4930,11 @@ def plot_retainment_comparison(seci_data, aeci_data, retain_seci_data, retain_ae
 
     plt.suptitle(f"Retainment Comparison {title_suffix} (Mean +/- IQR)")
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-    plt.show()
+    save_path = f"agent_model_results/retainment_comparison_{title_suffix}.png"
+    plt.savefig(save_path.replace('(','').replace(')','').replace('=','_'))
+    plt.close(fig)
+    
+    return fig
 
 def plot_correct_token_shares_bars(results, share_values):
     """Plots mean correct token share as bars with IQR error bars."""
@@ -4582,7 +4949,6 @@ def plot_correct_token_shares_bars(results, share_values):
     num_param_values = len(share_values)
     x_pos = np.arange(num_param_values)
     width = 0.35 # Define the width for the bars
-
 
     for share in share_values:
         # Access raw counts per run safely using .get()
@@ -4657,23 +5023,31 @@ def plot_correct_token_shares_bars(results, share_values):
     error_bars_exploit = [lower_errors_exploit, upper_errors_exploit]
     error_bars_explor = [lower_errors_explor, upper_errors_explor]
 
-
-    plt.figure(figsize=(8, 6))
+    # Create the figure object explicitly
+    fig, ax = plt.subplots(figsize=(8, 6))
+    
     # Plot bars for Exploitative
-    plt.bar(x_pos - width/2, mean_shares_exploit, yerr=error_bars_exploit, capsize=5, color='skyblue', label='Mean Exploit Share') # Grouped bar position
+    ax.bar(x_pos - width/2, mean_shares_exploit, yerr=error_bars_exploit, capsize=5, color='skyblue', label='Mean Exploit Share') # Grouped bar position
     # Plot bars for Exploratory
-    plt.bar(x_pos + width/2, mean_shares_explor, yerr=error_bars_explor, capsize=5, color='springgreen', label='Mean Explor Share') # Grouped bar position
+    ax.bar(x_pos + width/2, mean_shares_explor, yerr=error_bars_explor, capsize=5, color='springgreen', label='Mean Explor Share') # Grouped bar position
 
     # Add bars for Exploratory if calculated (use x_pos + width/2 etc. for grouping)
 
-    plt.xlabel("Share Exploitative Agents")
-    plt.ylabel("Share of Correctly Targeted Tokens")
-    plt.title("Correct Token Share vs. Agent Mix (Mean & IQR)") # Combined title
-    plt.xticks(x_pos, share_values) # Set x-axis labels to be the share values
-    plt.legend()
-    plt.ylim(0, 1)
-    plt.grid(True, axis='y', linestyle='--', alpha=0.6)
-    plt.show()
+    ax.set_xlabel("Share Exploitative Agents")
+    ax.set_ylabel("Share of Correctly Targeted Tokens")
+    ax.set_title("Correct Token Share vs. Agent Mix (Mean & IQR)") # Combined title
+    ax.set_xticks(x_pos)
+    ax.set_xticklabels(share_values) # Set x-axis labels to be the share values
+    ax.legend()
+    ax.set_ylim(0, 1)
+    ax.grid(True, axis='y', linestyle='--', alpha=0.6)
+    
+    # Save instead of displaying
+    save_path = f"agent_model_results/correct_token_shares.png"
+    plt.savefig(save_path)
+    plt.close(fig)
+    
+    return fig
 
 
 def plot_belief_error_evolution(belief_error_array, title_suffix=""):
@@ -4711,9 +5085,14 @@ def plot_belief_error_evolution(belief_error_array, title_suffix=""):
     plt.grid(True, linestyle='--', alpha=0.6)
     plt.ylim(bottom=0)
     plt.tight_layout()
-    plt.show()
 
-# --- New Plot Function 5 ---
+    save_path = f"agent_model_results/belief_error_evolution_{title_suffix}.png"
+    plt.savefig(save_path.replace('(','').replace(')','').replace('=','_'))
+    plt.close(fig)
+    
+    return fig
+
+# ---  Plot Function 5 ---
 def plot_belief_variance_evolution(belief_variance_array, title_suffix=""):
     """Plots Within-Type Belief Variance evolution with Mean +/- IQR bands."""
     # Input validation
@@ -4749,9 +5128,13 @@ def plot_belief_variance_evolution(belief_variance_array, title_suffix=""):
     plt.grid(True, linestyle='--', alpha=0.6)
     plt.ylim(bottom=0)
     plt.tight_layout()
-    plt.show()
+    save_path = f"agent_model_results/belief_variance_evolution_{title_suffix}.png"
+    plt.savefig(save_path.replace('(','').replace(')','').replace('=','_'))
+    plt.close(fig)
+    
+    return fig
 
-# --- New Plot Function 6 ---
+# ---  Plot Function 6 ---
 def plot_unmet_need_evolution(unmet_needs_data, title_suffix=""):
     """Plots Unmet Need count evolution with Mean +/- IQR bands."""
     # unmet_needs_data is expected to be a list of lists/arrays (one per run)
@@ -4814,7 +5197,11 @@ def plot_unmet_need_evolution(unmet_needs_data, title_suffix=""):
     plt.grid(True, linestyle='--', alpha=0.6)
     plt.ylim(bottom=0)  # Unmet needs cannot be negative
     plt.tight_layout()
-    plt.show()
+    save_path = f"agent_model_results/unmet_need_evolution_{title_suffix}.png"
+    plt.savefig(save_path.replace('(','').replace(')','').replace('=','_'))
+    plt.close(fig)
+    
+    return fig
 
 #########################################
 # Utility Function for CSV Export
@@ -4906,6 +5293,18 @@ if __name__ == "__main__":
     # Plot how correct token share changes with the parameter
     if results_a: # Check if results exist before plotting summary
         plot_correct_token_shares_bars(results_a, share_values)
+
+    # Add these lines to Experiment A's plotting section:
+    print("\n--- Plotting Boxplot Summaries for Experiment A ---")
+    # Create temporary versions of boxplot functions that work with share values instead of alignment values
+    plot_summary_echo_indices_by_share = lambda results, shares, suffix: plot_summary_echo_indices_vs_alignment(
+        results, shares, f"Share Exploitative {suffix}")
+    plot_summary_performance_by_share = lambda results, shares, suffix: plot_summary_performance_vs_alignment(
+        results, shares, f"Share Exploitative {suffix}")
+
+    # Call the adapted functions
+    plot_summary_echo_indices_by_share(results_a, share_values, "")
+    plot_summary_performance_by_share(results_a, share_values, "")
 
     ##############################################
     # Experiment B: Vary AI Alignment Level
