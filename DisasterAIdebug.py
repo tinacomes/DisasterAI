@@ -909,17 +909,22 @@ class HumanAgent(Agent):
                     # track AI source
                     self.last_queried_source_ids = [source_id]
 
-                    # Additional tracking for AI information to ensure it persists
+                    if not hasattr(self, 'ai_info_sources'):
+                        self.ai_info_sources = {}
+                        
+                    # Track which cells got info from which AI
                     for cell, reported_value in reports.items():
-                        if not hasattr(self, 'ai_info_sources'):
-                            self.ai_info_sources = {}
-                        self.ai_info_sources[cell] = source_id  # Track which AI provided info for which cell
+                        self.ai_info_sources[cell] = source_id
+                    
+                    # DEBUG PRINT to track AI source queries
+                    if self.model.debug_mode and random.random() < 0.1:  # 10% of the time
+                        print(f"DEBUG: Agent {self.unique_id} queried AI {source_id} for {len(reports)} cells")
 
                     self.accum_calls_ai += 1
                     self.accum_calls_total += 1
                 else:
-                    # Invalid AI agent
                     source_id = None
+                
 
             # Process reports and update beliefs
             belief_updates = 0
@@ -932,7 +937,7 @@ class HumanAgent(Agent):
                 # Convert to integer level if it's not already
                 reported_level = int(round(reported_value))
 
-                # Use the Bayesian update function instead of the old P_accept logic
+                # Use the Bayesian update function 
                 significant_update = self.update_belief_bayesian(cell, reported_level, source_trust)
 
                 # Track if this was a significant belief update
@@ -946,7 +951,12 @@ class HumanAgent(Agent):
                             if source_id in self.friends:
                                 self.accepted_friend += 1
                         elif source_id.startswith("A_"):
+                            # INCREMENT AI ACCEPTANCE COUNTER HERE
                             self.accepted_ai += 1
+                            
+                            # DEBUG PRINT to track AI info acceptance
+                            if self.model.debug_mode and random.random() < 0.05:  # 5% of the time
+                                print(f"DEBUG: Agent {self.unique_id} accepted info from AI {source_id} for cell {cell}")
 
         except Exception as e:
             print(f"ERROR in Agent {self.unique_id} seek_information at tick {self.model.tick}: {e}")
@@ -2055,14 +2065,23 @@ class DisasterModel(Model):
 
             # --- Component SECI ---
             component_seci_list = []
+            print(f"DEBUG Tick {self.tick}: Social network has {len(list(nx.connected_components(self.social_network)))} components")
+
             for component_nodes in nx.connected_components(self.social_network):
                 if len(component_nodes) <= 1:
                     continue  # Skip components with only 1 node
+                    
+                # Debug component size
+                if self.debug_mode:
+                    print(f"DEBUG Tick {self.tick}: Processing component with {len(component_nodes)} nodes")
 
                 # Get all beliefs from this component
                 component_belief_levels = []
+                component_agent_ids = []
+                
                 for node_id in component_nodes:
                     agent_id = f"H_{node_id}"
+                    component_agent_ids.append(agent_id)
                     agent = self.humans.get(agent_id)
                     if agent and agent.beliefs:
                         for cell, belief_info in agent.beliefs.items():
@@ -2070,27 +2089,51 @@ class DisasterModel(Model):
                                 level = belief_info.get('level', 0)
                                 component_belief_levels.append(level)
 
-                if not component_belief_levels:
-                    continue  # Skip if no beliefs
+                # Only calculate SECI if we have beliefs
+                if len(component_belief_levels) > 0:
+                    if self.debug_mode:
+                        print(f"DEBUG Tick {self.tick}: Component has {len(component_belief_levels)} beliefs from {len(component_agent_ids)} agents")
+                        
+                    # Calculate global variance (all agents)
+                    all_belief_levels = []
+                    for agent in self.humans.values():
+                        for cell, belief_info in agent.beliefs.items():
+                            if isinstance(belief_info, dict):
+                                level = belief_info.get('level', 0)
+                                all_belief_levels.append(level)
 
-                # Calculate global variance (all agents)
-                all_belief_levels = []
-                for agent in self.humans.values():
-                    for cell, belief_info in agent.beliefs.items():
-                        if isinstance(belief_info, dict):
-                            level = belief_info.get('level', 0)
-                            all_belief_levels.append(level)
+                    # More robust variance calculation
+                    global_var = np.var(all_belief_levels) if len(all_belief_levels) > 1 else 1e-6
+                    component_var = np.var(component_belief_levels) if len(component_belief_levels) > 1 else global_var
+                    
+                    if self.debug_mode:
+                        print(f"DEBUG Tick {self.tick}: Global var: {global_var:.4f}, Component var: {component_var:.4f}")
 
-                global_var = np.var(all_belief_levels) if len(all_belief_levels) > 1 else 1e-6
-                component_var = np.var(component_belief_levels) if len(component_belief_levels) > 1 else global_var
+                    # Calculate component SECI more robustly
+                    if global_var > 1e-9:  # Avoid division by zero with small threshold
+                        component_seci_val = max(0, min(1, (global_var - component_var) / global_var))
+                        component_seci_list.append(component_seci_val)
+                        
+                        if self.debug_mode:
+                            print(f"DEBUG Tick {self.tick}: Component SECI: {component_seci_val:.4f}")
+                    else:
+                        if self.debug_mode:
+                            print(f"DEBUG Tick {self.tick}: Global variance too small, setting component SECI to 0")
+                        component_seci_list.append(0)
 
-                # Calculate component SECI
-                if global_var > 1e-9:
-                    component_seci_val = max(0, min(1, (global_var - component_var) / global_var))
-                else:
-                    component_seci_val = 0
+            # Calculate mean component SECI and store
+            component_seci_mean = np.mean(component_seci_list) if component_seci_list else 0
 
-                component_seci_list.append(component_seci_val)
+            # IMPORTANT DEBUG OUTPUT
+            print(f"Tick {self.tick}: Final Component SECI mean: {component_seci_mean:.4f} from {len(component_seci_list)} components")
+
+            # Update the last metrics dictionary and store in model data
+            self._last_metrics['component_seci'] = {
+                'tick': self.tick,
+                'value': component_seci_mean
+            }
+
+            self.component_seci_data.append((self.tick, component_seci_mean))
 
             # --- Component AI Trust Variance ---
             component_ai_trust_var_list = []
@@ -2445,45 +2488,103 @@ def run_simulation(params):
     return model
 
 def simulation_generator(num_runs, base_params):
+    """
+    Generator function that runs simulations and yields results one at a time.
+    Each iteration yields a tuple of (result_dict, model_object).
+    
+    Args:
+        num_runs (int): Number of simulation runs to perform
+        base_params (dict): Base parameters for the simulation model
+        
+    Yields:
+        tuple: (result_dict, model_object) for each run
+    """
     for seed in range(num_runs):
-        random.seed(seed)
-        np.random.seed(seed)
-        model = run_simulation(base_params)
-        result = {
-            "trust_stats": np.array(model.trust_stats),
-            "seci": np.array(model.seci_data),
-            "aeci": np.array(model.aeci_data),
-            "retain_aeci": np.array(model.retain_aeci_data),
-            "retain_seci": np.array(model.retain_seci_data),
-            "belief_error": np.array(model.belief_error_data),
-            "belief_variance": np.array(model.belief_variance_data),
-            "unmet_needs_evolution": model.unmet_needs_evolution,
-            "component_seci": np.array(getattr(model, 'component_seci_data', [])), # Use getattr for safety
-            "aeci_variance": np.array(getattr(model, 'aeci_variance_data', [])),
-            "component_aeci": np.array(getattr(model, 'component_aeci_data', [])),
-            "component_ai_trust_variance": np.array(getattr(model, 'component_ai_trust_variance_data', [])),
-            "event_ticks": list(getattr(model, 'event_ticks', [])) # Store as list
-        }
-            #"per_agent_tokens": model.unmet_needs_evolution,
-            #"assistance_exploit": {},  # Placeholder
-            #"assistance_explor": {},   # Placeholder
-            #"assistance_incorrect_exploit": {},  # Placeholder
-            #"assistance_incorrect_explor": {}    # Placeholder
+        try:
+            # Set seeds for reproducibility
+            random.seed(seed)
+            np.random.seed(seed)
+            
+            # Run the simulation with the given parameters
+            print(f"Starting simulation run {seed+1}/{num_runs}...")
+            model = run_simulation(base_params)
+            
+            # Extract all relevant data from the model
+            result = {
+                "trust_stats": np.array(model.trust_stats),
+                "seci": np.array(model.seci_data),
+                "aeci": np.array(model.aeci_data),
+                "retain_aeci": np.array(model.retain_aeci_data),
+                "retain_seci": np.array(model.retain_seci_data),
+                "belief_error": np.array(model.belief_error_data),
+                "belief_variance": np.array(model.belief_variance_data),
+                "unmet_needs_evolution": model.unmet_needs_evolution,
+                "component_seci": np.array(getattr(model, 'component_seci_data', [])),
+                "aeci_variance": np.array(getattr(model, 'aeci_variance_data', [])),
+                "component_aeci": np.array(getattr(model, 'component_aeci_data', [])),
+                "component_ai_trust_variance": np.array(getattr(model, 'component_ai_trust_variance_data', [])),
+                "event_ticks": list(getattr(model, 'event_ticks', []))
+            }
+            
+            # Yield the result and model object
+            yield result, model
+            
+            # Clean up to free memory
+            print(f"Completed simulation run {seed+1}/{num_runs}")
+            del model
+            gc.collect()
+            
+        except Exception as e:
+            print(f"Error in simulation run {seed+1}: {e}")
+            import traceback
+            traceback.print_exc()
+            # Yield empty result in case of error to keep the loop going
+            yield {}, None
 
-        yield result, model
-        del model
-        gc.collect()
 
-    component_seci_list, aeci_variance_list, component_aeci_list, component_ai_trust_variance_list = [], [], [], []
+def aggregate_simulation_results(num_runs, base_params):
+    """
+    Runs multiple simulations, aggregates results, and calculates summary statistics.
+
+    Args:
+        num_runs (int): Number of simulation runs to perform.
+        base_params (dict): Base dictionary of parameters for the model.
+
+    Returns:
+        dict: A dictionary containing aggregated results (stacked arrays for time-series,
+              summary stats for assistance, raw assistance counts, etc.).
+    """
+    # --- Initialize Lists for ALL metrics ---
+    trust_list, seci_list, aeci_list, retain_aeci_list, retain_seci_list = [], [], [], [], []
+    unmet_needs_evolution_list, belief_error_list, belief_variance_list = [], [], []
+    
+    # Lists for new metrics
+    component_seci_list, aeci_variance_list, component_aeci_list = [], [], []
+    component_ai_trust_variance_list = [], []
     event_ticks_list = [] # Collect event ticks from each run
+    max_aeci_variance_per_run = [] # max aeci var
 
     # --- Lists for Assistance Counts ---
     exploit_correct_per_run, exploit_incorrect_per_run = [], []
     explor_correct_per_run, explor_incorrect_per_run = [], []
 
-    for result, model in simulation_generator(num_runs, base_params):
-        # --- Append Original Metrics ---
-        trust_list.append(result.get("trust_stats", np.array([]))) # Use .get with default empty array
+    print(f"Starting aggregation for {num_runs} runs...")
+    
+    # Use a counter to track actual successful runs
+    successful_runs = 0
+    generator = simulation_generator(num_runs, base_params)
+    
+    # Iterate through the generator using a for loop
+    for result, model in generator:
+        successful_runs += 1
+        print(f"  Processing results from run {successful_runs}/{num_runs}...")
+        
+        if not result:  # Skip if result is empty (error case)
+            print(f"  Empty result for run {successful_runs}, skipping")
+            continue
+            
+        # --- Append All Metrics (using .get for safety) ---
+        trust_list.append(result.get("trust_stats", np.array([])))
         seci_list.append(result.get("seci", np.array([])))
         aeci_list.append(result.get("aeci", np.array([])))
         retain_aeci_list.append(result.get("retain_aeci", np.array([])))
@@ -2491,131 +2592,124 @@ def simulation_generator(num_runs, base_params):
         unmet_needs_evolution_list.append(result.get("unmet_needs_evolution", []))
         belief_error_list.append(result.get("belief_error", np.array([])))
         belief_variance_list.append(result.get("belief_variance", np.array([])))
-
-        # <<< APPEND New Metrics >>>
+        
+        # Append new metrics
         component_seci_list.append(result.get("component_seci", np.array([])))
         aeci_variance_list.append(result.get("aeci_variance", np.array([])))
         component_aeci_list.append(result.get("component_aeci", np.array([])))
         component_ai_trust_variance_list.append(result.get("component_ai_trust_variance", np.array([])))
-        event_ticks_list.append(result.get("event_ticks", [])) # Append the list of ticks
-
+        event_ticks_list.append(result.get("event_ticks", []))
+        
+        # Extract max AECI variance if available
+        aeci_variance_data = result.get("aeci_variance", np.array([]))
+        if isinstance(aeci_variance_data, np.ndarray) and aeci_variance_data.size > 0:
+            if aeci_variance_data.ndim >= 3 and aeci_variance_data.shape[1] > 0 and aeci_variance_data.shape[2] > 1:
+                # Extract values from column 1 (value column)
+                aeci_variance_values = aeci_variance_data[:, :, 1]
+                # Get maximum value across all time steps
+                max_variance = np.max(aeci_variance_values)
+                max_aeci_variance_per_run.append(max_variance)
+            else:
+                print(f"Warning: Invalid AECI variance data shape for run {successful_runs}")
+        else:
+            print(f"Warning: No AECI variance data for run {successful_runs}")
+            
         # --- Aggregate Assistance Counts ---
         run_exploit_correct, run_exploit_incorrect = 0, 0
         run_explor_correct, run_explor_incorrect = 0, 0
-        for agent in model.humans.values():
-            if agent.agent_type == "exploitative":
-                run_exploit_correct += agent.correct_targets
-                run_exploit_incorrect += agent.incorrect_targets
-            else:
-                run_explor_correct += agent.correct_targets
-                run_explor_incorrect += agent.incorrect_targets
+        
+        if model and hasattr(model, 'humans'):
+            for agent in model.humans.values():
+                if agent.agent_type == "exploitative":
+                    run_exploit_correct += agent.correct_targets
+                    run_exploit_incorrect += agent.incorrect_targets
+                else:  # Exploratory
+                    run_explor_correct += agent.correct_targets
+                    run_explor_incorrect += agent.incorrect_targets
+                    
         exploit_correct_per_run.append(run_exploit_correct)
         exploit_incorrect_per_run.append(run_exploit_incorrect)
         explor_correct_per_run.append(run_explor_correct)
         explor_incorrect_per_run.append(run_explor_incorrect)
-
-        del model
+        
+        print(f"  Finished processing run {successful_runs}/{num_runs}")
+        
+        # Make sure model is deleted to free memory
+        if model is not None:
+            del model
         gc.collect()
 
+    print(f"Completed {successful_runs} successful runs out of {num_runs} attempts")
+    print("Aggregating results...")
+
     # --- Stack Arrays ---
-    # Helper function (ensure this is defined globally or locally)
-    def safe_stack(data_list):
-        """Safely stacks a list of numpy arrays, handling empty lists/arrays and shape inconsistencies."""
-        if not data_list:
-            return np.array([])
+    trust_array = safe_stack(trust_list)
+    seci_array = safe_stack(seci_list)
+    aeci_array = safe_stack(aeci_list)
+    retain_aeci_array = safe_stack(retain_aeci_list)
+    retain_seci_array = safe_stack(retain_seci_list)
+    belief_error_array = safe_stack(belief_error_list)
+    belief_variance_array = safe_stack(belief_variance_list)
+    
+    # Stack new data arrays
+    component_seci_array = safe_stack(component_seci_list)
+    aeci_variance_array = safe_stack(aeci_variance_list)
+    component_aeci_array = safe_stack(component_aeci_list)
+    component_ai_trust_variance_array = safe_stack(component_ai_trust_variance_list)
 
-        # Filter out None values and empty arrays
-        valid_arrays = [item for item in data_list if isinstance(item, np.ndarray) and item.size > 0]
-
-        if not valid_arrays:
-            return np.array([])
-
-        # Check if all arrays have the same shape
-        first_shape = valid_arrays[0].shape
-        if all(arr.shape == first_shape for arr in valid_arrays):
-            return np.stack(valid_arrays, axis=0)
-
-        # Handle case where arrays might have different numbers of time steps
-        # Find arrays with same number of dimensions but possibly different lengths
-        same_ndim = [arr for arr in valid_arrays if arr.ndim == valid_arrays[0].ndim]
-
-        if not same_ndim:
-            return np.array([])
-
-        # For time series data (assumed to be shape (time_steps, metrics))
-        # Find the minimum number of time steps across all arrays
-        if valid_arrays[0].ndim >= 2:
-            min_time_steps = min(arr.shape[1] for arr in same_ndim)
-            # Truncate all arrays to this minimum length
-            truncated = [arr[:, :min_time_steps, ...] for arr in same_ndim]
-            return np.stack(truncated, axis=0)
-        else:
-            # For 1D arrays, just stack them if they have the same shape
-            if all(arr.shape == same_ndim[0].shape for arr in same_ndim):
-                return np.stack(same_ndim, axis=0)
-
-        # If we can't stack, return empty array
-        print("Warning: Could not stack arrays with inconsistent shapes")
-        return np.array([])
-
-    # Helper function for calculating mean/percentiles
-    def calculate_metric_stats(data_list):
-        # Handle case where simulation fails or produces no data
-        valid_data = [d for d in data_list if d is not None]
-        if not valid_data: return {"mean": 0, "lower": 0, "upper": 0}
-        return {
-            "mean": np.mean(valid_data),
-            "lower": np.percentile(valid_data, 25),
-            "upper": np.percentile(valid_data, 75)
-        }
-
-    # Calculate stats for assistance (using the lists populated with actual run totals)
+    # --- Calculate Assistance Stats ---
     assist_stats = {
         "exploit_correct": calculate_metric_stats(exploit_correct_per_run),
         "exploit_incorrect": calculate_metric_stats(exploit_incorrect_per_run),
         "explor_correct": calculate_metric_stats(explor_correct_per_run),
         "explor_incorrect": calculate_metric_stats(explor_incorrect_per_run)
     }
-
-    # Calculate ratio stats (Share of Correct Tokens) based on the *means*
+    
+    # --- Calculate Ratio Stats ---
     total_exploit_mean = assist_stats["exploit_correct"]["mean"] + assist_stats["exploit_incorrect"]["mean"]
     total_explor_mean = assist_stats["explor_correct"]["mean"] + assist_stats["explor_incorrect"]["mean"]
     ratio_stats = {
         "exploit_ratio": {
             "mean": assist_stats["exploit_correct"]["mean"] / total_exploit_mean if total_exploit_mean > 0 else 0,
-            # Calculating percentiles for ratios is complex; report mean ratio for now.
-            "lower": 0, "upper": 0
+            "lower": 0, "upper": 0  # Percentiles complex for ratios
         },
         "explor_ratio": {
             "mean": assist_stats["explor_correct"]["mean"] / total_explor_mean if total_explor_mean > 0 else 0,
             "lower": 0, "upper": 0
         }
     }
-    # --- End Calculate Stats ---
 
+    print("Aggregation complete.")
+
+    # --- Return Dictionary ---
     return {
+        # Original metrics
         "trust_stats": trust_array,
         "seci": seci_array,
         "aeci": aeci_array,
         "retain_aeci": retain_aeci_array,
         "retain_seci": retain_seci_array,
-        "belief_error": belief_error_array,         # ADDED
-        "belief_variance": belief_variance_array,   # ADDED
-        "assist": assist_stats,         # Contains mean/percentiles of raw counts
-        "assist_ratio": ratio_stats,   # Contains mean share of correct tokens
-        "unmet_needs_evol": unmet_needs_evolution_list, # Pass the list of lists
-        # --- ADD RAW ASSIST COUNTS ---
+        "belief_error": belief_error_array,
+        "belief_variance": belief_variance_array,
+        "unmet_needs_evol": unmet_needs_evolution_list,
+        
+        # Assistance metrics
+        "assist": assist_stats,
+        "assist_ratio": ratio_stats,
         "raw_assist_counts": {
-             "exploit_correct": exploit_correct_per_run,
-             "exploit_incorrect": exploit_incorrect_per_run,
-             "explor_correct": explor_correct_per_run,
-             "explor_incorrect": explor_incorrect_per_run
+            "exploit_correct": exploit_correct_per_run,
+            "exploit_incorrect": exploit_incorrect_per_run,
+            "explor_correct": explor_correct_per_run,
+            "explor_incorrect": explor_incorrect_per_run
         },
+        
+        # New aggregated metrics
         "component_seci": component_seci_array,
         "aeci_variance": aeci_variance_array,
+        "max_aeci_variance": max_aeci_variance_per_run,
         "component_aeci": component_aeci_array,
         "component_ai_trust_variance": component_ai_trust_variance_array,
-        "event_ticks_list": event_ticks_list # Pass list of lists for event ticks
+        "event_ticks_list": event_ticks_list
     }
 
 def experiment_alignment_tipping_point(base_params, alignment_values=None, num_runs=10):
@@ -4357,38 +4451,66 @@ def plot_simulation_overview(results_dict, title_suffix=""):
         explor_total = explor_correct + explor_incorrect
 
         # Use a pie chart approach instead of stacked bars for better clarity
-        fig_pie = plt.figure(figsize=(6, 6))
+        fig_pie = plt.figure(figsize=(12, 6))
+        fig_pie.suptitle(f"Assistance Quality {title_suffix}", fontsize=16)
+        
         ax1 = fig_pie.add_subplot(121)
         ax2 = fig_pie.add_subplot(122)
 
-        # Exploitative pie
+        # Exploitative pie with better label handling
         if exploit_total > 0:
             exploit_labels = ['Correct', 'Incorrect']
             exploit_values = [exploit_correct, exploit_incorrect]
             exploit_colors = ['green', 'red']
-            ax1.pie(exploit_values, labels=exploit_labels, colors=exploit_colors,
-                   autopct='%1.1f%%', startangle=90)
-            ax1.set_title(f'Exploitative\nTotal: {exploit_total:.1f}')
+            
+            # Create pie with explicit display of percentages outside the pie
+            wedges, _, autotexts = ax1.pie(exploit_values, colors=exploit_colors,
+                                        autopct='%1.1f%%', startangle=90,
+                                        pctdistance=0.85)
+            
+            # Add explicit legend with larger font
+            ax1.legend(wedges, exploit_labels, loc='center left', 
+                      bbox_to_anchor=(-0.3, 0.5), fontsize=12)
+            
+            # Make percentage text larger and bolder
+            for autotext in autotexts:
+                autotext.set_fontsize(11)
+                autotext.set_weight('bold')
+                
+            ax1.set_title(f'Exploitative\nTotal: {exploit_total:.1f}', fontsize=14)
         else:
-            ax1.text(0.5, 0.5, 'No data', ha='center', va='center')
-            ax1.set_title('Exploitative')
+            ax1.text(0.5, 0.5, 'No data', ha='center', va='center', fontsize=14)
+            ax1.set_title('Exploitative', fontsize=14)
 
-        # Exploratory pie
+        # Exploratory pie with similar improvements
         if explor_total > 0:
             explor_labels = ['Correct', 'Incorrect']
             explor_values = [explor_correct, explor_incorrect]
             explor_colors = ['green', 'red']
-            ax2.pie(explor_values, labels=explor_labels, colors=explor_colors,
-                   autopct='%1.1f%%', startangle=90)
-            ax2.set_title(f'Exploratory\nTotal: {explor_total:.1f}')
+            
+            wedges, _, autotexts = ax2.pie(explor_values, colors=explor_colors,
+                                        autopct='%1.1f%%', startangle=90,
+                                        pctdistance=0.85)
+            
+            ax2.legend(wedges, explor_labels, loc='center right', 
+                      bbox_to_anchor=(1.3, 0.5), fontsize=12)
+            
+            for autotext in autotexts:
+                autotext.set_fontsize(11)
+                autotext.set_weight('bold')
+                
+            ax2.set_title(f'Exploratory\nTotal: {explor_total:.1f}', fontsize=14)
         else:
-            ax2.text(0.5, 0.5, 'No data', ha='center', va='center')
-            ax2.set_title('Exploratory')
+            ax2.text(0.5, 0.5, 'No data', ha='center', va='center', fontsize=14)
+            ax2.set_title('Exploratory', fontsize=14)
 
+        # Add more spacing between subplots
+        plt.subplots_adjust(wspace=0.5)
+        
         # Save pie chart
-        fig_pie.suptitle("Assistance Quality")
         pie_path = f"agent_model_results/assistance_quality_pie_{title_suffix}.png"
-        plt.savefig(pie_path.replace('(','').replace(')','').replace('=','_'))
+        pie_path = pie_path.replace('(','').replace(')','').replace('=','_')
+        plt.savefig(pie_path, bbox_inches='tight')
         plt.close(fig_pie)
 
         # Load the saved pie chart as an image to display in the subplot
