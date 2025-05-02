@@ -1,3 +1,4 @@
+
 # Install mesa if not already installed
 !pip install mesa
 
@@ -1733,8 +1734,9 @@ class DisasterModel(Model):
         self.disaster_grid[...] = self.baseline_grid
 
         # Construct social network
-        self.initialize_social_network()
-        num_components = self.initialize_social_network()
+        components = self.initialize_social_network()  # Call only once and store result
+        num_components = len(components)  # Get the count from the returned components list
+
         if num_components < 2:
             print("WARNING: Failed to create multiple components in social network")
         else:
