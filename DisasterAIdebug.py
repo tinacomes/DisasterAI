@@ -953,7 +953,8 @@ class HumanAgent(Agent):
                         print(f"  Base Q-values: {decision_factors['base_scores']}")
                         print(f"  Applied biases: {decision_factors['biases']}")
                         print(f"  Final scores: {decision_factors['final_scores']}")
-                    print(f"  AI alignment level: {self.model.ai_alignment_level}")
+                    print(f"  AI alignment level: {self.model.ai_alignment_level}")          
+                    track_component_seci_evolution(self, tick_interval=10) 
 
             self.tokens_this_tick = {chosen_mode: 1}
             self.last_queried_source_ids = []
@@ -1732,169 +1733,6 @@ class DisasterModel(Model):
         self.disaster_grid[...] = self.baseline_grid
 
         # Construct social network
-        
-        def initialize_social_network(self):
-            """Initialize social network with multiple components and homophily."""
-            # Calculate how many exploitative and exploratory agents we have
-            num_exploitative = int(self.num_humans * self.share_exploitative)
-            num_exploratory = self.num_humans - num_exploitative
-            
-            print(f"Initializing social network with {num_exploitative} exploitative and {num_exploratory} exploratory agents")
-            
-            # Create an empty graph
-            self.social_network = nx.Graph()
-            
-            # Add all nodes
-            for i in range(self.num_humans):
-                self.social_network.add_node(i)
-            
-            # CREATE SEPARATE COMMUNITIES WITH HOMOPHILY
-            
-            # Create separate initial clusters for exploitative and exploratory agents
-            exploitative_agents = list(range(num_exploitative))
-            exploratory_agents = list(range(num_exploitative, self.num_humans))
-            
-            # Random number of communities (between 2 and 4)
-            num_communities = random.randint(2, min(4, self.num_humans // 8))
-            print(f"Creating {num_communities} communities")
-            
-            # Assign agents to communities with homophily
-            communities = [[] for _ in range(num_communities)]
-            
-            # First, create primary agent type communities
-            if num_communities >= 2:
-                # At least one primarily exploitative and one primarily exploratory
-                exploit_community_count = max(1, num_communities // 2)
-                explor_community_count = num_communities - exploit_community_count
-                
-                # Calculate approximate sizes
-                exploit_comm_size = num_exploitative // exploit_community_count
-                explor_comm_size = num_exploratory // explor_community_count
-                
-                # Distribute exploitative agents to their communities
-                remaining_exploit = exploitative_agents.copy()
-                for i in range(exploit_community_count):
-                    comm_size = min(exploit_comm_size, len(remaining_exploit))
-                    # Take random agents from remaining
-                    comm_agents = random.sample(remaining_exploit, comm_size)
-                    communities[i].extend(comm_agents)
-                    # Remove assigned agents
-                    for agent in comm_agents:
-                        remaining_exploit.remove(agent)
-                
-                # Distribute exploratory agents to their communities
-                remaining_explor = exploratory_agents.copy()
-                for i in range(explor_community_count):
-                    comm_size = min(explor_comm_size, len(remaining_explor))
-                    # Take random agents from remaining
-                    comm_agents = random.sample(remaining_explor, comm_size)
-                    communities[i + exploit_community_count].extend(comm_agents)
-                    # Remove assigned agents
-                    for agent in comm_agents:
-                        remaining_explor.remove(agent)
-                
-                # Distribute any remaining agents randomly
-                remaining_agents = remaining_exploit + remaining_explor
-                if remaining_agents:
-                    for agent in remaining_agents:
-                        communities[random.randrange(num_communities)].append(agent)
-            else:
-                # Only one community - mix agents with strong homophily bias
-                communities[0] = list(range(self.num_humans))
-            
-            # Add cross-type agents to create community diversity (prevents perfect homophily)
-            for i in range(num_communities):
-                community = communities[i]
-                # Count agent types in this community
-                comm_exploit_count = sum(1 for a in community if a < num_exploitative)
-                comm_explor_count = len(community) - comm_exploit_count
-                
-                # If community is heavily biased toward one type, add a few of the other type
-                if comm_exploit_count > 0 and comm_explor_count == 0:
-                    # Add a few exploratory agents
-                    cross_type_count = max(1, len(community) // 10)  # 10% crossover
-                    crossover_agents = random.sample(exploratory_agents, 
-                                                    min(cross_type_count, len(exploratory_agents)))
-                    communities[i].extend(crossover_agents)
-                elif comm_explor_count > 0 and comm_exploit_count == 0:
-                    # Add a few exploitative agents
-                    cross_type_count = max(1, len(community) // 10)  # 10% crossover
-                    crossover_agents = random.sample(exploitative_agents, 
-                                                  min(cross_type_count, len(exploitative_agents)))
-                    communities[i].extend(crossover_agents)
-            
-            # Report community compositions
-            for i, community in enumerate(communities):
-                comm_exploit_count = sum(1 for a in community if a < num_exploitative)
-                comm_explor_count = len(community) - comm_exploit_count
-                print(f"Community {i}: {len(community)} agents ({comm_exploit_count} exploit, {comm_explor_count} explor)")
-            
-            # Now create dense connections within communities and sparse connections between
-            # Within-community connection probability
-            p_within = 0.7  # High connectivity within community
-            
-            # Add edges within communities
-            for community in communities:
-                for i in range(len(community)):
-                    for j in range(i+1, len(community)):
-                        if random.random() < p_within:
-                            self.social_network.add_edge(community[i], community[j])
-            
-            # Between-community connection probability
-            p_between = 0.05  # Very low connectivity between communities
-            
-            # Add a few edges between communities (for minimal connectivity)
-            for i in range(num_communities):
-                for j in range(i+1, num_communities):
-                    # Count how many cross-edges already exist
-                    cross_edges = sum(1 for u in communities[i] for v in communities[j] 
-                                    if self.social_network.has_edge(u, v))
-                    
-                    # Ensure at least one cross-edge if none exist
-                    if cross_edges == 0:
-                        u = random.choice(communities[i])
-                        v = random.choice(communities[j])
-                        self.social_network.add_edge(u, v)
-                    
-                    # Add a few more with low probability
-                    for u in communities[i]:
-                        for v in communities[j]:
-                            if random.random() < p_between:
-                                self.social_network.add_edge(u, v)
-
-            # Verify network properties
-            components = list(nx.connected_components(self.social_network))
-            print(f"Created social network with {len(components)} connected components")
-            for i, comp in enumerate(components):
-                comp_exploit_count = sum(1 for a in comp if a < num_exploitative)
-                comp_explor_count = len(comp) - comp_exploit_count
-                print(f"Component {i}: {len(comp)} agents ({comp_exploit_count} exploit, {comp_explor_count} explor)")
-
-            # If we still have only one component, force a split
-            if len(components) == 1:
-                print("WARNING: Still only one connected component - forcing split")
-                
-                # Find the weakest links between different agent types
-                potential_cuts = []
-                for i in range(num_exploitative):
-                    for j in range(num_exploitative, self.num_humans):
-                        if self.social_network.has_edge(i, j):
-                            potential_cuts.append((i, j))
-                
-                # Cut some edges to create separation
-                if potential_cuts:
-                    num_to_cut = min(5, len(potential_cuts))
-                    for i, j in random.sample(potential_cuts, num_to_cut):
-                        self.social_network.remove_edge(i, j)
-                    
-                    # Verify again
-                    components = list(nx.connected_components(self.social_network))
-                    print(f"After forced split: {len(components)} connected components")
-                    for i, comp in enumerate(components):
-                        comp_exploit_count = sum(1 for a in comp if a < num_exploitative)
-                        comp_explor_count = len(comp) - comp_exploit_count
-                        print(f"Component {i}: {len(comp)} agents ({comp_exploit_count} exploit, {comp_explor_count} explor)")
-
         self.initialize_social_network()
         self.agent_list = []
         self.humans = {}
@@ -2014,6 +1852,169 @@ class DisasterModel(Model):
         """Log debug messages if debug mode is enabled or forced."""
         if self.debug_mode or force:
             print(f"[DEBUG] Tick {self.tick}: {message}")
+
+    def initialize_social_network(self):
+        """Initialize social network with multiple components and homophily."""
+        # Calculate how many exploitative and exploratory agents we have
+        num_exploitative = int(self.num_humans * self.share_exploitative)
+        num_exploratory = self.num_humans - num_exploitative
+        
+        print(f"Initializing social network with {num_exploitative} exploitative and {num_exploratory} exploratory agents")
+        
+        # Create an empty graph
+        self.social_network = nx.Graph()
+        
+        # Add all nodes
+        for i in range(self.num_humans):
+            self.social_network.add_node(i)
+        
+        # CREATE SEPARATE COMMUNITIES WITH HOMOPHILY
+        
+        # Create separate initial clusters for exploitative and exploratory agents
+        exploitative_agents = list(range(num_exploitative))
+        exploratory_agents = list(range(num_exploitative, self.num_humans))
+        
+        # Random number of communities (between 2 and 4)
+        num_communities = random.randint(2, min(4, self.num_humans // 8))
+        print(f"Creating {num_communities} communities")
+        
+        # Assign agents to communities with homophily
+        communities = [[] for _ in range(num_communities)]
+        
+        # First, create primary agent type communities
+        if num_communities >= 2:
+            # At least one primarily exploitative and one primarily exploratory
+            exploit_community_count = max(1, num_communities // 2)
+            explor_community_count = num_communities - exploit_community_count
+            
+            # Calculate approximate sizes
+            exploit_comm_size = num_exploitative // exploit_community_count
+            explor_comm_size = num_exploratory // explor_community_count
+            
+            # Distribute exploitative agents to their communities
+            remaining_exploit = exploitative_agents.copy()
+            for i in range(exploit_community_count):
+                comm_size = min(exploit_comm_size, len(remaining_exploit))
+                # Take random agents from remaining
+                comm_agents = random.sample(remaining_exploit, comm_size)
+                communities[i].extend(comm_agents)
+                # Remove assigned agents
+                for agent in comm_agents:
+                    remaining_exploit.remove(agent)
+            
+            # Distribute exploratory agents to their communities
+            remaining_explor = exploratory_agents.copy()
+            for i in range(explor_community_count):
+                comm_size = min(explor_comm_size, len(remaining_explor))
+                # Take random agents from remaining
+                comm_agents = random.sample(remaining_explor, comm_size)
+                communities[i + exploit_community_count].extend(comm_agents)
+                # Remove assigned agents
+                for agent in comm_agents:
+                    remaining_explor.remove(agent)
+            
+            # Distribute any remaining agents randomly
+            remaining_agents = remaining_exploit + remaining_explor
+            if remaining_agents:
+                for agent in remaining_agents:
+                    communities[random.randrange(num_communities)].append(agent)
+        else:
+            # Only one community - mix agents with strong homophily bias
+            communities[0] = list(range(self.num_humans))
+        
+        # Add cross-type agents to create community diversity (prevents perfect homophily)
+        for i in range(num_communities):
+            community = communities[i]
+            # Count agent types in this community
+            comm_exploit_count = sum(1 for a in community if a < num_exploitative)
+            comm_explor_count = len(community) - comm_exploit_count
+            
+            # If community is heavily biased toward one type, add a few of the other type
+            if comm_exploit_count > 0 and comm_explor_count == 0:
+                # Add a few exploratory agents
+                cross_type_count = max(1, len(community) // 10)  # 10% crossover
+                crossover_agents = random.sample(exploratory_agents, 
+                                                min(cross_type_count, len(exploratory_agents)))
+                communities[i].extend(crossover_agents)
+            elif comm_explor_count > 0 and comm_exploit_count == 0:
+                # Add a few exploitative agents
+                cross_type_count = max(1, len(community) // 10)  # 10% crossover
+                crossover_agents = random.sample(exploitative_agents, 
+                                              min(cross_type_count, len(exploitative_agents)))
+                communities[i].extend(crossover_agents)
+        
+        # Report community compositions
+        for i, community in enumerate(communities):
+            comm_exploit_count = sum(1 for a in community if a < num_exploitative)
+            comm_explor_count = len(community) - comm_exploit_count
+            print(f"Community {i}: {len(community)} agents ({comm_exploit_count} exploit, {comm_explor_count} explor)")
+        
+        # Now create dense connections within communities and sparse connections between
+        # Within-community connection probability
+        p_within = 0.7  # High connectivity within community
+        
+        # Add edges within communities
+        for community in communities:
+            for i in range(len(community)):
+                for j in range(i+1, len(community)):
+                    if random.random() < p_within:
+                        self.social_network.add_edge(community[i], community[j])
+        
+        # Between-community connection probability
+        p_between = 0.05  # Very low connectivity between communities
+        
+        # Add a few edges between communities (for minimal connectivity)
+        for i in range(num_communities):
+            for j in range(i+1, num_communities):
+                # Count how many cross-edges already exist
+                cross_edges = sum(1 for u in communities[i] for v in communities[j] 
+                                if self.social_network.has_edge(u, v))
+                
+                # Ensure at least one cross-edge if none exist
+                if cross_edges == 0:
+                    u = random.choice(communities[i])
+                    v = random.choice(communities[j])
+                    self.social_network.add_edge(u, v)
+                
+                # Add a few more with low probability
+                for u in communities[i]:
+                    for v in communities[j]:
+                        if random.random() < p_between:
+                            self.social_network.add_edge(u, v)
+
+        # Verify network properties
+        components = list(nx.connected_components(self.social_network))
+        print(f"Created social network with {len(components)} connected components")
+        for i, comp in enumerate(components):
+            comp_exploit_count = sum(1 for a in comp if a < num_exploitative)
+            comp_explor_count = len(comp) - comp_exploit_count
+            print(f"Component {i}: {len(comp)} agents ({comp_exploit_count} exploit, {comp_explor_count} explor)")
+
+        # If we still have only one component, force a split
+        if len(components) == 1:
+            print("WARNING: Still only one connected component - forcing split")
+            
+            # Find the weakest links between different agent types
+            potential_cuts = []
+            for i in range(num_exploitative):
+                for j in range(num_exploitative, self.num_humans):
+                    if self.social_network.has_edge(i, j):
+                        potential_cuts.append((i, j))
+            
+            # Cut some edges to create separation
+            if potential_cuts:
+                num_to_cut = min(5, len(potential_cuts))
+                for i, j in random.sample(potential_cuts, num_to_cut):
+                    self.social_network.remove_edge(i, j)
+                
+                # Verify again
+                components = list(nx.connected_components(self.social_network))
+                print(f"After forced split: {len(components)} connected components")
+                for i, comp in enumerate(components):
+                    comp_exploit_count = sum(1 for a in comp if a < num_exploitative)
+                    comp_explor_count = len(comp) - comp_exploit_count
+                    print(f"Component {i}: {len(comp)} agents ({comp_exploit_count} exploit, {comp_explor_count} explor)")
+
 
     def initialize_ai_knowledge_maps(self):
         """Initialize maps showing which areas each AI agent has knowledge about."""
@@ -2810,7 +2811,11 @@ class DisasterModel(Model):
                 self._last_metrics['trust_stats']['nonfriend_expl']
             ))
 
-       def validate_social_network(model, save_dir="analysis_plots"):
+          
+#########################################
+# Simulation and Experiment Functions
+#########################################
+def validate_social_network(model, save_dir="analysis_plots"):
           """
           Validates the social network structure and visualizes it.
           
@@ -2818,10 +2823,6 @@ class DisasterModel(Model):
               model: The DisasterModel instance
               save_dir: Directory to save plots
           """
-          import os
-          import matplotlib.pyplot as plt
-          import networkx as nx
-          import numpy as np
           
           os.makedirs(save_dir, exist_ok=True)
           
@@ -3009,99 +3010,91 @@ class DisasterModel(Model):
           }
 
     # Function to monitor component SECI evolution over time
-    def track_component_seci_evolution(model, tick_interval=10, save_dir="analysis_plots"):
-        """
-        Tracks and visualizes the evolution of component SECI over time.
-        
-        Args:
-            model: The DisasterModel instance
-            tick_interval: How often to record data
-            save_dir: Directory to save plots
-        """
-        if model.tick % tick_interval != 0:
-            return  # Only run at intervals
-        
-        os.makedirs(save_dir, exist_ok=True)
-        
-        # Initialize storage for tracking
-        if not hasattr(model, 'component_seci_evolution'):
-            model.component_seci_evolution = {
-                'ticks': [],
-                'num_components': [],
-                'avg_component_seci': [],
-                'component_data': {}  # Store data for each component over time
-            }
-        
-        # Get connected components
-        components = list(nx.connected_components(model.social_network))
-        num_components = len(components)
-        
-        # Record tick
-        model.component_seci_evolution['ticks'].append(model.tick)
-        model.component_seci_evolution['num_components'].append(num_components)
-        
-        # Calculate the component SECI values
-        result = validate_social_network(model, save_dir)
-        
-        # Record average component SECI
-        model.component_seci_evolution['avg_component_seci'].append(result['avg_component_seci'])
-        
-        # Record individual component data
-        for i, seci in result['component_seci_values'].items():
-            if i not in model.component_seci_evolution['component_data']:
-                model.component_seci_evolution['component_data'][i] = []
-            
-            # Add None for any missing ticks
-            while len(model.component_seci_evolution['component_data'][i]) < len(model.component_seci_evolution['ticks']) - 1:
-                model.component_seci_evolution['component_data'][i].append(None)
-            
-            # Add current value
-            model.component_seci_evolution['component_data'][i].append(seci)
-        
-        # Plot the evolution of SECI values
-        if len(model.component_seci_evolution['ticks']) > 1:
-            plt.figure(figsize=(12, 8))
-            
-            # Plot average component SECI
-            plt.plot(model.component_seci_evolution['ticks'], 
-                    model.component_seci_evolution['avg_component_seci'],
-                    'k-', linewidth=2, label='Average Component SECI')
-            
-            # Plot individual component SECI values with different colors
-            for i, values in model.component_seci_evolution['component_data'].items():
-                # Fill in missing values at the end
-                while len(values) < len(model.component_seci_evolution['ticks']):
-                    values.append(None)
-                
-                # Convert None values to NaN for plotting
-                plot_values = [float('nan') if v is None else v for v in values]
-                
-                # Use a different color from tab10 colormap
-                color = plt.cm.tab10(i % 10)
-                plt.plot(model.component_seci_evolution['ticks'], plot_values,
-                        '--', color=color, alpha=0.7, linewidth=1.5,
-                        label=f'Component {i}')
-            
-            plt.xlabel('Tick')
-            plt.ylabel('SECI Value')
-            plt.title('Evolution of Component SECI Values')
-            plt.grid(True, linestyle='--', alpha=0.7)
-            plt.legend()
-            
-            # Save the figure
-            plt.savefig(os.path.join(save_dir, f"component_seci_evolution_tick_{model.tick}.png"), 
-                      dpi=300, bbox_inches='tight')
-            plt.close()
-            
-            print(f"Component SECI evolution plot saved at tick {model.tick}")
+def track_component_seci_evolution(model, tick_interval=10, save_dir="analysis_plots"):
+    """
+    Tracks and visualizes the evolution of component SECI over time.
 
+    Args:
+        model: The DisasterModel instance
+        tick_interval: How often to record data
+        save_dir: Directory to save plots
+    """
+    if model.tick % tick_interval != 0:
+        return  # Only run at intervals
 
-    if self.tick % 10 == 0:  # Every 10 ticks
-        track_component_seci_evolution(self, tick_interval=10)     
+    os.makedirs(save_dir, exist_ok=True)
 
-#########################################
-# Simulation and Experiment Functions
-#########################################
+    # Initialize storage for tracking
+    if not hasattr(model, 'component_seci_evolution'):
+        model.component_seci_evolution = {
+            'ticks': [],
+            'num_components': [],
+            'avg_component_seci': [],
+            'component_data': {}  # Store data for each component over time
+        }
+
+    # Get connected components
+    components = list(nx.connected_components(model.social_network))
+    num_components = len(components)
+
+    # Record tick
+    model.component_seci_evolution['ticks'].append(model.tick)
+    model.component_seci_evolution['num_components'].append(num_components)
+
+    # Calculate the component SECI values
+    result = validate_social_network(model, save_dir)
+
+    # Record average component SECI
+    model.component_seci_evolution['avg_component_seci'].append(result['avg_component_seci'])
+
+    # Record individual component data
+    for i, seci in result['component_seci_values'].items():
+        if i not in model.component_seci_evolution['component_data']:
+            model.component_seci_evolution['component_data'][i] = []
+        
+        # Add None for any missing ticks
+        while len(model.component_seci_evolution['component_data'][i]) < len(model.component_seci_evolution['ticks']) - 1:
+            model.component_seci_evolution['component_data'][i].append(None)
+        
+        # Add current value
+        model.component_seci_evolution['component_data'][i].append(seci)
+
+    # Plot the evolution of SECI values
+    if len(model.component_seci_evolution['ticks']) > 1:
+        plt.figure(figsize=(12, 8))
+        
+        # Plot average component SECI
+        plt.plot(model.component_seci_evolution['ticks'], 
+                model.component_seci_evolution['avg_component_seci'],
+                'k-', linewidth=2, label='Average Component SECI')
+        
+        # Plot individual component SECI values with different colors
+        for i, values in model.component_seci_evolution['component_data'].items():
+            # Fill in missing values at the end
+            while len(values) < len(model.component_seci_evolution['ticks']):
+                values.append(None)
+            
+            # Convert None values to NaN for plotting
+            plot_values = [float('nan') if v is None else v for v in values]
+            
+            # Use a different color from tab10 colormap
+            color = plt.cm.tab10(i % 10)
+            plt.plot(model.component_seci_evolution['ticks'], plot_values,
+                    '--', color=color, alpha=0.7, linewidth=1.5,
+                    label=f'Component {i}')
+        
+        plt.xlabel('Tick')
+        plt.ylabel('SECI Value')
+        plt.title('Evolution of Component SECI Values')
+        plt.grid(True, linestyle='--', alpha=0.7)
+        plt.legend()
+        
+        # Save the figure
+        plt.savefig(os.path.join(save_dir, f"component_seci_evolution_tick_{model.tick}.png"), 
+                  dpi=300, bbox_inches='tight')
+        plt.close()
+        
+        print(f"Component SECI evolution plot saved at tick {model.tick}")
 
 def run_simulation(params):
     model = DisasterModel(**params)
@@ -4435,60 +4428,60 @@ def plot_summary_echo_indices_vs_alignment(results_b, alignment_values, title_su
 
     return fig
 
-def plot_final_performance_vs_alignment(results_b, alignment_values, title_suffix="Exp B"):
-    """Plots final mean performance metrics vs AI alignment with percentile bands."""
+def plot_average_performance_vs_alignment(results_b, alignment_values, title_suffix="Exp B"):
+    """Plots mean performance metrics vs AI alignment with percentile bands."""
     num_params = len(alignment_values)
     bar_width = 0.2
     index = np.arange(num_params)
 
-    # Empty lists to store metrics
-    final_mae_exploit_mean, final_mae_exploit_err = [], [[],[]]
-    final_mae_explor_mean, final_mae_explor_err = [], [[],[]]
-    final_unmet_mean, final_unmet_err = [], [[],[]]
-    final_correct_ratio_exploit_mean, final_correct_ratio_exploit_err = [], [[],[]]
-    final_correct_ratio_explor_mean, final_correct_ratio_explor_err = [], [[],[]]
+    # Empty lists to store metrics - CONSISTENTLY NAMED
+    mae_exploit_mean, mae_exploit_err = [], [[],[]]
+    mae_explor_mean, mae_explor_err = [], [[],[]]
+    unmet_mean, unmet_err = [], [[],[]]
+    correct_ratio_exploit_mean, correct_ratio_exploit_err = [], [[],[]]
+    correct_ratio_explor_mean, correct_ratio_explor_err = [], [[],[]]
 
     for align in alignment_values:
         res = results_b.get(align)
         if not res: continue
 
-        # Helper to extract final stats with percentiles
-        def get_final_stats(data_array, col_index):
+        # Helper to extract average stats with percentiles
+        def get_avg_stats(data_array, col_index):
             if data_array is None or not isinstance(data_array, np.ndarray) or data_array.size == 0:
                 return 0, [0, 0]
 
             if data_array.ndim < 3 or data_array.shape[1] == 0 or col_index >= data_array.shape[2]:
                 return 0, [0, 0]
 
-            # Get the final values for all runs
-            final_vals = data_array[:, -1, col_index]
+            # Get all values across all time points for all runs
+            all_vals = data_array[:, :, col_index].flatten()
 
             # Calculate mean and percentiles
-            mean = np.mean(final_vals)
-            p25 = np.percentile(final_vals, 25)
-            p75 = np.percentile(final_vals, 75)
+            mean = np.mean(all_vals)
+            p25 = np.percentile(all_vals, 25)
+            p75 = np.percentile(all_vals, 75)
 
             # Return mean and error lengths [lower, upper]
             return mean, [max(0, mean - p25), max(0, p75 - mean)]
 
         # Helper for unmet needs (list of lists)
-        def get_final_unmet_stats(unmet_list):
+        def get_avg_unmet_stats(unmet_list):
             if not unmet_list:
                 return 0, [0, 0]
 
-            # Extract final values from each run
-            final_vals = []
+            # Flatten all values from all runs
+            all_vals = []
             for run_data in unmet_list:
                 if run_data and len(run_data) > 0:
-                    final_vals.append(run_data[-1])
+                    all_vals.extend(run_data)
 
-            if not final_vals:
+            if not all_vals:
                 return 0, [0, 0]
 
             # Calculate mean and percentiles
-            mean = np.mean(final_vals)
-            p25 = np.percentile(final_vals, 25)
-            p75 = np.percentile(final_vals, 75)
+            mean = np.mean(all_vals)
+            p25 = np.percentile(all_vals, 25)
+            p75 = np.percentile(all_vals, 75)
 
             # Return mean and error lengths [lower, upper]
             return mean, [max(0, mean - p25), max(0, p75 - mean)]
@@ -4526,64 +4519,64 @@ def plot_final_performance_vs_alignment(results_b, alignment_values, title_suffi
             return mean, [max(0, mean - p25), max(0, p75 - mean)]
 
         # Extract belief error stats
-        mean, err = get_final_stats(res.get("belief_error"), 1)
-        final_mae_exploit_mean.append(mean)
-        final_mae_exploit_err[0].append(err[0])
-        final_mae_exploit_err[1].append(err[1])
+        mean, err = get_avg_stats(res.get("belief_error"), 1)
+        mae_exploit_mean.append(mean)
+        mae_exploit_err[0].append(err[0])
+        mae_exploit_err[1].append(err[1])
 
-        mean, err = get_final_stats(res.get("belief_error"), 2)
-        final_mae_explor_mean.append(mean)
-        final_mae_explor_err[0].append(err[0])
-        final_mae_explor_err[1].append(err[1])
+        mean, err = get_avg_stats(res.get("belief_error"), 2)
+        mae_explor_mean.append(mean)
+        mae_explor_err[0].append(err[0])
+        mae_explor_err[1].append(err[1])
 
         # Extract unmet needs stats
-        mean, err = get_final_unmet_stats(res.get("unmet_needs_evol"))
-        final_unmet_mean.append(mean)
-        final_unmet_err[0].append(err[0])
-        final_unmet_err[1].append(err[1])
+        mean, err = get_avg_unmet_stats(res.get("unmet_needs_evol"))
+        unmet_mean.append(mean)
+        unmet_err[0].append(err[0])
+        unmet_err[1].append(err[1])
 
         # Extract correct token ratios with percentiles
         raw_counts = res.get("raw_assist_counts", {})
         mean, err = get_ratio_stats(raw_counts, "exploit_correct", "exploit_incorrect")
-        final_correct_ratio_exploit_mean.append(mean)
-        final_correct_ratio_exploit_err[0].append(err[0])
-        final_correct_ratio_exploit_err[1].append(err[1])
+        correct_ratio_exploit_mean.append(mean)
+        correct_ratio_exploit_err[0].append(err[0])
+        correct_ratio_exploit_err[1].append(err[1])
 
         mean, err = get_ratio_stats(raw_counts, "explor_correct", "explor_incorrect")
-        final_correct_ratio_explor_mean.append(mean)
-        final_correct_ratio_explor_err[0].append(err[0])
-        final_correct_ratio_explor_err[1].append(err[1])
+        correct_ratio_explor_mean.append(mean)
+        correct_ratio_explor_err[0].append(err[0])
+        correct_ratio_explor_err[1].append(err[1])
 
     # Setup plot
     fig, axes = plt.subplots(1, 3, figsize=(18, 5), sharex=True)
-    fig.suptitle(f"Final Performance vs AI Alignment ({title_suffix})", fontsize=16)
+    fig.suptitle(f"Average Performance vs AI Alignment ({title_suffix})", fontsize=16)
 
-    # Plot Final MAE with percentile error bars
-    axes[0].bar(index - bar_width/2, final_mae_exploit_mean, bar_width,
-                yerr=final_mae_exploit_err, capsize=4, label='Exploit', color='red')
-    axes[0].bar(index + bar_width/2, final_mae_explor_mean, bar_width,
-                yerr=final_mae_explor_err, capsize=4, label='Explor', color='blue')
-    axes[0].set_ylabel("Final Mean MAE")
+    # Plot Average MAE with percentile error bars - CONSISTENT NAMING
+    axes[0].bar(index - bar_width/2, mae_exploit_mean, bar_width,
+                yerr=mae_exploit_err, capsize=4, label='Exploit', color='red')
+    axes[0].bar(index + bar_width/2, mae_explor_mean, bar_width,
+                yerr=mae_explor_err, capsize=4, label='Explor', color='blue')
+    axes[0].set_ylabel("Average MAE")
     axes[0].set_title("Belief Error (MAE)")
     axes[0].legend()
     axes[0].grid(True, axis='y', linestyle='--', alpha=0.6)
     axes[0].set_ylim(bottom=0)  # MAE cannot be negative
 
-    # Plot Final Unmet Needs with percentile error bars
-    axes[1].bar(index, final_unmet_mean, bar_width*1.5,
-                yerr=final_unmet_err, capsize=4, label='Overall', color='purple')
-    axes[1].set_ylabel("Final Mean Unmet Needs")
+    # Plot Average Unmet Needs with percentile error bars
+    axes[1].bar(index, unmet_mean, bar_width*1.5,
+                yerr=unmet_err, capsize=4, label='Overall', color='purple')
+    axes[1].set_ylabel("Average Unmet Needs")
     axes[1].set_title("Unmet Needs")
     axes[1].set_xlabel("AI Alignment Level")
     axes[1].grid(True, axis='y', linestyle='--', alpha=0.6)
     axes[1].set_ylim(bottom=0)  # Unmet needs cannot be negative
 
-    # Plot Final Correct Token Share with percentile error bars
-    axes[2].bar(index - bar_width/2, final_correct_ratio_exploit_mean, bar_width,
-                yerr=final_correct_ratio_exploit_err, capsize=4, label='Exploit', color='red')
-    axes[2].bar(index + bar_width/2, final_correct_ratio_explor_mean, bar_width,
-                yerr=final_correct_ratio_explor_err, capsize=4, label='Explor', color='blue')
-    axes[2].set_ylabel("Final Mean Correct Token Share")
+    # Plot Average Correct Token Share with percentile error bars
+    axes[2].bar(index - bar_width/2, correct_ratio_exploit_mean, bar_width,
+                yerr=correct_ratio_exploit_err, capsize=4, label='Exploit', color='red')
+    axes[2].bar(index + bar_width/2, correct_ratio_explor_mean, bar_width,
+                yerr=correct_ratio_explor_err, capsize=4, label='Explor', color='blue')
+    axes[2].set_ylabel("Average Correct Token Share")
     axes[2].set_title("Assistance Quality (Correct Ratio)")
     axes[2].legend()
     axes[2].grid(True, axis='y', linestyle='--', alpha=0.6)
@@ -4594,7 +4587,7 @@ def plot_final_performance_vs_alignment(results_b, alignment_values, title_suffi
         ax.set_xticklabels(alignment_values)
 
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-    save_path = f"agent_model_results/summary_perf_{title_suffix}.png"
+    save_path = f"agent_model_results/avg_perf_{title_suffix}.png"
     plt.savefig(save_path.replace('(','').replace(')','').replace('=','_'))
     plt.close(fig)
 
@@ -5221,7 +5214,7 @@ def plot_echo_chamber_indices(results_dict, title_suffix=""):
                 first = False
 
     # --- Fix _plot_mean_iqr function to be more robust ---
-    def _robust_plot_mean_iqr(ax, ticks, data_array, data_index, label, color, linestyle='-'):
+    def _robust_plot_mean_iqr(ax, ticks, data_array, data_index, label, color, linestyle='-', is_ratio_metric=False):
         """Helper to plot mean and IQR band with better error handling."""
         if data_array is None or not isinstance(data_array, np.ndarray) or data_array.size == 0:
             print(f"Warning: Empty data for {label}")
@@ -5832,6 +5825,7 @@ def plot_belief_error_evolution(belief_error_array, title_suffix=""):
     plt.ylim(bottom=0)
     plt.tight_layout()
 
+    fig = plt.figure(figsize=(8, 5))
     save_path = f"agent_model_results/belief_error_evolution_{title_suffix}.png"
     plt.savefig(save_path.replace('(','').replace(')','').replace('=','_'))
     plt.close(fig)
@@ -6071,7 +6065,7 @@ if __name__ == "__main__":
     print(f"\n--- Plotting Summary Comparisons for {param_name_b} ---")
     if results_b:
         plot_final_echo_indices_vs_alignment(results_b, sorted(list(results_b.keys())), title_suffix="Tipping Points")
-        plot_final_performance_vs_alignment(results_b, sorted(list(results_b.keys())), title_suffix="Tipping Points")
+        plot_average_performance_vs_alignment(results_b, sorted(list(results_b.keys())), title_suffix="Tipping Points")
 
         # New boxplot summaries across all time steps
         print(f"\n--- Plotting Boxplot Summaries for {param_name_b} ---")
@@ -6107,7 +6101,7 @@ if __name__ == "__main__":
     if results_b: # Check if results exist before plotting summary
          # Call the specific summary plot functions for this experiment
          plot_final_echo_indices_vs_alignment(results_b, alignment_values, title_suffix="Exp B")
-         plot_final_performance_vs_alignment(results_b, alignment_values, title_suffix="Exp B")
+         lot_average_performance_vs_alignment(results_b, alignment_values, title_suffix="Exp B")
 
     ##############################################
     # Experiment C: Vary Disaster Dynamics and Shock Magnitude
