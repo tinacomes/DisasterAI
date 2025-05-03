@@ -742,7 +742,7 @@ class HumanAgent(Agent):
         source_agent_id = None
         interest_point = None
         query_radius = 0
-        eports = {}
+        reports = {}
         source_id = None  # Initialize source_id here, at the beginning of the method
         chosen_mode = None  # Initialize chosen_mode as well
 
@@ -954,7 +954,6 @@ class HumanAgent(Agent):
                         print(f"  Applied biases: {decision_factors['biases']}")
                         print(f"  Final scores: {decision_factors['final_scores']}")
                     print(f"  AI alignment level: {self.model.ai_alignment_level}")          
-                    track_component_seci_evolution(self.model, tick_interval=10) 
 
             self.tokens_this_tick = {chosen_mode: 1}
             self.last_queried_source_ids = []
@@ -1768,7 +1767,7 @@ class DisasterModel(Model):
             self.grid.place_agent(agent, pos)
             agent.pos = pos
 
-        validate_social_network(self, save_dir="analysis_plots") #debug
+        # validate_social_network(self, save_dir="analysis_plots") #debug
 
         self.agent_rumors = {} # Store assigned rumor details {agent_id: (epicenter, intensity, confidence)}
         rumor_prob = getattr(self, 'rumor_probability', 0.0)
@@ -2217,6 +2216,13 @@ class DisasterModel(Model):
 
         if self.tick % 10 == 0:
             self.track_ai_usage_patterns()
+
+        if self.tick % 10 == 0:
+            try:
+                track_component_seci_evolution(self, tick_interval=10)
+            except Exception as e:
+                if self.debug_mode:
+                    print(f"Error in track_component_seci_evolution: {e}")
 
         # Initialize metric storage to track last calculated values
         if not hasattr(self, '_last_metrics'):
@@ -3042,15 +3048,76 @@ def validate_social_network(model, save_dir="analysis_plots"):
         'avg_component_seci': avg_component_seci
     }
 
+### function to calculate SECI components separately
+def calculate_component_seci(model, components):
+    """Calculate SECI values for network components without validation."""
+    if not components:
+        return 0
+        
+    # Get all beliefs across all agents
+    all_beliefs = {}
+    for agent_id, agent in model.humans.items():
+        for cell, belief_info in agent.beliefs.items():
+            if isinstance(belief_info, dict):
+                level = belief_info.get('level', 0)
+                if cell not in all_beliefs:
+                    all_beliefs[cell] = []
+                all_beliefs[cell].append(level)
+    
+    # Calculate global variance for all beliefs
+    global_vars = {}
+    for cell, levels in all_beliefs.items():
+        if len(levels) > 1:
+            global_vars[cell] = np.var(levels)
+    
+    # Calculate SECI for each component
+    component_seci_values = {}
+    for i, component in enumerate(components):
+        # Only calculate SECI for components with enough agents
+        if len(component) <= 1:
+            component_seci_values[i] = 0
+            continue
+            
+        # Get all beliefs from agents in this component
+        component_beliefs_by_cell = {}
+        for node in component:
+            agent_id = f"H_{node}"
+            if agent_id in model.humans:
+                agent = model.humans[agent_id]
+                for cell, belief_info in agent.beliefs.items():
+                    if isinstance(belief_info, dict):
+                        level = belief_info.get('level', 0)
+                        if cell not in component_beliefs_by_cell:
+                            component_beliefs_by_cell[cell] = []
+                        component_beliefs_by_cell[cell].append(level)
+        
+        # Calculate SECI for this component
+        seci_values = []
+        for cell, component_levels in component_beliefs_by_cell.items():
+            if len(component_levels) > 1 and cell in global_vars and global_vars[cell] > 0:
+                component_var = np.var(component_levels)
+                global_var = global_vars[cell]
+                seci = (global_var - component_var) / global_var
+                seci = max(0, min(1, seci))  # Bound to [0,1]
+                seci_values.append(seci)
+        
+        # Average SECI for this component
+        if seci_values:
+            component_seci_values[i] = sum(seci_values) / len(seci_values)
+        else:
+            component_seci_values[i] = 0
+    
+    # Calculate average SECI across all components
+    if component_seci_values:
+        avg_component_seci = sum(component_seci_values.values()) / len(component_seci_values)
+    else:
+        avg_component_seci = 0
+        
+    return avg_component_seci
 # Function to monitor component SECI evolution over time
 def track_component_seci_evolution(model, tick_interval=10, save_dir="analysis_plots"):
     """
     Tracks and visualizes the evolution of component SECI over time.
-
-    Args:
-        model: The DisasterModel instance
-        tick_interval: How often to record data
-        save_dir: Directory to save plots
     """
     if model.tick % tick_interval != 0:
         return  # Only run at intervals
@@ -3074,14 +3141,71 @@ def track_component_seci_evolution(model, tick_interval=10, save_dir="analysis_p
     model.component_seci_evolution['ticks'].append(model.tick)
     model.component_seci_evolution['num_components'].append(num_components)
 
-    # Calculate the component SECI values
-    result = validate_social_network(model, save_dir)
-
+    # Calculate the component SECI values directly instead of using validate_social_network
+    component_seci_values = {}
+    avg_component_seci = 0
+    
+    # Get all beliefs across all agents
+    all_beliefs = {}
+    for agent_id, agent in model.humans.items():
+        for cell, belief_info in agent.beliefs.items():
+            if isinstance(belief_info, dict):
+                level = belief_info.get('level', 0)
+                if cell not in all_beliefs:
+                    all_beliefs[cell] = []
+                all_beliefs[cell].append(level)
+    
+    # Calculate global variance for all beliefs
+    global_vars = {}
+    for cell, levels in all_beliefs.items():
+        if len(levels) > 1:
+            global_vars[cell] = np.var(levels)
+    
+    # Calculate SECI for each component
+    for i, component in enumerate(components):
+        # Only calculate SECI for components with enough agents
+        if len(component) <= 1:
+            component_seci_values[i] = 0
+            continue
+            
+        # Get all beliefs from agents in this component
+        component_beliefs_by_cell = {}
+        for node in component:
+            agent_id = f"H_{node}"
+            if agent_id in model.humans:
+                agent = model.humans[agent_id]
+                for cell, belief_info in agent.beliefs.items():
+                    if isinstance(belief_info, dict):
+                        level = belief_info.get('level', 0)
+                        if cell not in component_beliefs_by_cell:
+                            component_beliefs_by_cell[cell] = []
+                        component_beliefs_by_cell[cell].append(level)
+        
+        # Calculate SECI for this component
+        seci_values = []
+        for cell, component_levels in component_beliefs_by_cell.items():
+            if len(component_levels) > 1 and cell in global_vars and global_vars[cell] > 0:
+                component_var = np.var(component_levels)
+                global_var = global_vars[cell]
+                seci = (global_var - component_var) / global_var
+                seci = max(0, min(1, seci))  # Bound to [0,1]
+                seci_values.append(seci)
+        
+        # Average SECI for this component
+        if seci_values:
+            component_seci_values[i] = sum(seci_values) / len(seci_values)
+        else:
+            component_seci_values[i] = 0
+    
+    # Calculate average component SECI
+    if component_seci_values:
+        avg_component_seci = sum(component_seci_values.values()) / len(component_seci_values)
+    
     # Record average component SECI
-    model.component_seci_evolution['avg_component_seci'].append(result['avg_component_seci'])
+    model.component_seci_evolution['avg_component_seci'].append(avg_component_seci)
 
     # Record individual component data
-    for i, seci in result['component_seci_values'].items():
+    for i, seci in component_seci_values.items():
         if i not in model.component_seci_evolution['component_data']:
             model.component_seci_evolution['component_data'][i] = []
         
@@ -3091,7 +3215,6 @@ def track_component_seci_evolution(model, tick_interval=10, save_dir="analysis_p
         
         # Add current value
         model.component_seci_evolution['component_data'][i].append(seci)
-
     # Plot the evolution of SECI values
     if len(model.component_seci_evolution['ticks']) > 1:
         plt.figure(figsize=(12, 8))
