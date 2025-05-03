@@ -2321,7 +2321,7 @@ class DisasterModel(Model):
 
             # Define AI-reliant agents with a more inclusive threshold
             min_calls_threshold = 3  # Minimum calls to be considered active
-            min_ai_ratio = 0.3      # Lowered from 0.5 to be more inclusive
+            min_ai_ratio = 0.2      # Lowered from 0.3 to be more inclusive
 
             ai_reliant_agents = [agent for agent in self.humans.values()
                                 if agent.accum_calls_total >= min_calls_threshold and
@@ -3925,6 +3925,71 @@ def safe_plot(ax, data_array, col_idx, label, color, linestyle='-', is_ratio=Tru
         import traceback
         traceback.print_exc()
         return False
+def plot_component_seci_distribution(results_dict, title_suffix=""):
+    """Plots the distribution of SECI values across different components"""
+    
+    # Check if component_seci_data exists
+    if not hasattr(results_dict, 'component_seci_data') or not results_dict.component_seci_data:
+        print(f"No component SECI data available for {title_suffix}")
+        return
+    
+    component_seci_data = results_dict['component_seci_data']
+    if not component_seci_data:
+        return
+    
+    # Extract the values (second column) from each timestep
+    seci_values = []
+    for timepoint in component_seci_data:
+        if len(timepoint) >= 2:  # Should have (tick, value)
+            seci_values.append(timepoint[1])
+    
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
+    
+    # Plot 1: SECI distribution histogram
+    if seci_values:
+        ax1.hist(seci_values, bins=30, color='skyblue', edgecolor='black', alpha=0.7)
+        ax1.axvline(np.mean(seci_values), color='red', linestyle='--', linewidth=2, label=f'Mean: {np.mean(seci_values):.3f}')
+        ax1.axvline(np.median(seci_values), color='green', linestyle='--', linewidth=2, label=f'Median: {np.median(seci_values):.3f}')
+        ax1.set_xlabel('Component SECI Value')
+        ax1.set_ylabel('Frequency')
+        ax1.set_title(f'Component SECI Distribution {title_suffix}')
+        ax1.legend()
+        ax1.grid(True, alpha=0.3)
+    else:
+        ax1.text(0.5, 0.5, 'No component SECI data', ha='center', va='center')
+    
+    # Plot 2: Component SECI evolution with percentiles showing spread
+    if 'component_seci' in results_dict and results_dict['component_seci'].size > 0:
+        comp_seci_array = results_dict['component_seci']
+        if comp_seci_array.ndim >= 3 and comp_seci_array.shape[1] > 0:
+            # Calculate statistics across runs
+            ticks = comp_seci_array[0, :, 0]
+            mean = np.mean(comp_seci_array[:, :, 1], axis=0)
+            lower = np.percentile(comp_seci_array[:, :, 1], 10, axis=0)
+            upper = np.percentile(comp_seci_array[:, :, 1], 90, axis=0)
+            
+            ax2.plot(ticks, mean, 'b-', linewidth=2, label='Mean')
+            ax2.fill_between(ticks, lower, upper, alpha=0.3, color='blue')
+            
+            # Add min and max to show full spread
+            min_seci = np.min(comp_seci_array[:, :, 1], axis=0)
+            max_seci = np.max(comp_seci_array[:, :, 1], axis=0)
+            ax2.plot(ticks, min_seci, 'r--', alpha=0.5, label='Min')
+            ax2.plot(ticks, max_seci, 'g--', alpha=0.5, label='Max')
+            
+            ax2.set_xlabel('Tick')
+            ax2.set_ylabel('Component SECI')
+            ax2.set_title(f'Component SECI: Spread Analysis {title_suffix}')
+            ax2.legend()
+            ax2.grid(True, alpha=0.3)
+    else:
+        ax2.text(0.5, 0.5, 'No component SECI array data', ha='center', va='center')
+    
+    plt.tight_layout()
+    save_path = f"agent_model_results/component_seci_distribution_{title_suffix}.png"
+    plt.savefig(save_path.replace('(','').replace(')','').replace('=','_'))
+    plt.close()
+
 
 def plot_grid_state(model, tick, save_dir="grid_plots"):
     """Plots the disaster grid state, agent locations, and tokens sent."""
@@ -5261,8 +5326,44 @@ def plot_simulation_overview(results_dict, title_suffix=""):
         for ax in ax_row:
             ax.set_xlim(0, num_ticks-1)
 
-    # --- Subplot 4: Keep the pie chart implementation as is ---
-    # (no changes needed)
+    # --- Subplot 4: token assistance summary pie chart ---
+    ax = axes[1, 1]
+    if assist_stats and raw_counts:
+        try:
+            # Access assist data safely
+            exploit_correct = assist_stats.get("exploit_correct", {}).get("mean", 0)
+            exploit_incorrect = assist_stats.get("exploit_incorrect", {}).get("mean", 0)
+            explor_correct = assist_stats.get("explor_correct", {}).get("mean", 0)
+            explor_incorrect = assist_stats.get("explor_incorrect", {}).get("mean", 0)
+            
+            # Skip if all values are zero
+            total = exploit_correct + exploit_incorrect + explor_correct + explor_incorrect
+            if total > 0:
+                sizes = [exploit_correct, exploit_incorrect, explor_correct, explor_incorrect]
+                labels = ['Exploit Correct', 'Exploit Incorrect', 'Explor Correct', 'Explor Incorrect']
+                colors = ['forestgreen', 'lightcoral', 'skyblue', 'salmon']
+                
+                # Filter out zero values
+                non_zero_data = [(size, label, color) for size, label, color in zip(sizes, labels, colors) if size > 0]
+                if non_zero_data:
+                    actual_sizes, actual_labels, actual_colors = zip(*non_zero_data)
+                    wedges, texts, autotexts = ax.pie(actual_sizes, labels=actual_labels, colors=actual_colors, 
+                                                    autopct=lambda pct: f'{pct:.1f}%' if pct > 0 else '',
+                                                    pctdistance=0.85)
+                    
+                    # Improve text visibility
+                    plt.setp(autotexts, size=8, weight="bold")
+                    plt.setp(texts, size=9)
+                    ax.set_title("Token Assistance\nDistribution")
+                else:
+                    ax.text(0.5, 0.5, 'No assistance data', ha='center', va='center')
+            else:
+                ax.text(0.5, 0.5, 'No tokens sent', ha='center', va='center')
+        except Exception as e:
+            print(f"Warning: Could not create pie chart: {e}")
+            ax.text(0.5, 0.5, f'Error: {e}', ha='center', va='center')
+    else:
+        ax.text(0.5, 0.5, 'Assistance data\nnot available', ha='center', va='center')
 
     # Save the main overview plot
     save_path = f"agent_model_results/simulation_overview_{title_suffix}.png"
@@ -6069,6 +6170,225 @@ def plot_unmet_need_evolution(unmet_needs_data, title_suffix=""):
 
     return fig
 
+def plot_experiment_c_comprehensive(results_c, dynamics_values, shock_values):
+    """Create comprehensive visualization for experiment C"""
+    
+    # Create figure with subplots
+    fig = plt.figure(figsize=(20, 16))
+    gs = fig.add_gridspec(3, 3, hspace=0.3, wspace=0.3)
+    
+    # Define the metrics we'll track
+    metrics = {
+        'correct_ratio': np.zeros((len(dynamics_values), len(shock_values))),
+        'mae_final': np.zeros((len(dynamics_values), len(shock_values))),
+        'unmet_needs': np.zeros((len(dynamics_values), len(shock_values))),
+        'seci_final': np.zeros((len(dynamics_values), len(shock_values))),
+        'aeci_final': np.zeros((len(dynamics_values), len(shock_values))),
+        'ai_trust_final': np.zeros((len(dynamics_values), len(shock_values)))
+    }
+    
+    # Collect data for each combination
+    for i, dd in enumerate(dynamics_values):
+        for j, sm in enumerate(shock_values):
+            res_key = (dd, sm)
+            if res_key not in results_c:
+                print(f"Missing data for dynamics={dd}, shock={sm}")
+                continue
+            res = results_c[res_key]
+            
+            # 1. Correct token ratio
+            if "raw_assist_counts" in res:
+                counts = res["raw_assist_counts"]
+                total_correct = (counts.get("exploit_correct", [0]) + 
+                               counts.get("explor_correct", [0]))
+                total_incorrect = (counts.get("exploit_incorrect", [0]) + 
+                                 counts.get("explor_incorrect", [0]))
+                
+                if total_correct and total_incorrect:
+                    total_correct_sum = sum(total_correct)
+                    total_sum = total_correct_sum + sum(total_incorrect)
+                    metrics['correct_ratio'][i, j] = total_correct_sum / total_sum if total_sum > 0 else 0
+            
+            # 2. Final mean absolute error (belief error)
+            if "belief_error" in res and res["belief_error"].size > 0:
+                # Get final error for both agent types and average
+                final_errors = res["belief_error"][:, -1, 1:]  # Get last tick, both agent types
+                metrics['mae_final'][i, j] = np.mean(final_errors)
+            
+            # 3. Final unmet needs
+            if "unmet_needs_evol" in res and res["unmet_needs_evol"]:
+                final_unmet = []
+                for run_data in res["unmet_needs_evol"]:
+                    if run_data and len(run_data) > 0:
+                        final_unmet.append(run_data[-1])
+                if final_unmet:
+                    metrics['unmet_needs'][i, j] = np.mean(final_unmet)
+            
+            # 4. Final SECI (average)
+            if "seci" in res and res["seci"].size > 0:
+                final_seci = res["seci"][:, -1, 1:]  # Last tick, both agent types
+                metrics['seci_final'][i, j] = np.mean(final_seci)
+            
+            # 5. Final AECI (average)
+            if "aeci" in res and res["aeci"].size > 0:
+                final_aeci = res["aeci"][:, -1, 1:]  # Last tick, both agent types
+                metrics['aeci_final'][i, j] = np.mean(final_aeci)
+            
+            # 6. Final AI trust
+            if "trust_stats" in res and res["trust_stats"].size > 0:
+                final_ai_trust = res["trust_stats"][:, -1, [1, 4]]  # AI trust for both agent types
+                metrics['ai_trust_final'][i, j] = np.mean(final_ai_trust)
+    
+    # Create heatmaps
+    heatmap_configs = [
+        {'metric': 'correct_ratio', 'title': 'Correct Token Ratio', 'cmap': 'RdYlGn', 'pos': (0, 0)},
+        {'metric': 'mae_final', 'title': 'Final Belief Error', 'cmap': 'RdYlGn_r', 'pos': (0, 1)},
+        {'metric': 'unmet_needs', 'title': 'Final Unmet Needs', 'cmap': 'RdYlGn_r', 'pos': (0, 2)},
+        {'metric': 'seci_final', 'title': 'Final SECI (Echo Chamber)', 'cmap': 'RdYlBu', 'pos': (1, 0)},
+        {'metric': 'aeci_final', 'title': 'Final AECI (AI Usage)', 'cmap': 'RdYlBu', 'pos': (1, 1)},
+        {'metric': 'ai_trust_final', 'title': 'Final AI Trust', 'cmap': 'RdYlBu', 'pos': (1, 2)}
+    ]
+    
+    for config in heatmap_configs:
+        ax = fig.add_subplot(gs[config['pos'][0], config['pos'][1]])
+        data = metrics[config['metric']]
+        
+        # Handle NaN values
+        data_masked = np.ma.masked_where(np.isnan(data), data)
+        
+        im = ax.imshow(data_masked, cmap=config['cmap'], aspect='auto', 
+                      vmin=np.nanmin(data), vmax=np.nanmax(data))
+        
+        # Add colorbar
+        cbar = fig.colorbar(im, ax=ax)
+        cbar.set_label(config['title'])
+        
+        # Set ticks and labels
+        ax.set_xticks(range(len(shock_values)))
+        ax.set_yticks(range(len(dynamics_values)))
+        ax.set_xticklabels(shock_values)
+        ax.set_yticklabels(dynamics_values)
+        ax.set_xlabel('Shock Magnitude')
+        ax.set_ylabel('Disaster Dynamics')
+        ax.set_title(config['title'])
+        
+        # Add value annotations
+        for ii in range(len(dynamics_values)):
+            for jj in range(len(shock_values)):
+                if not np.isnan(data[ii, jj]):
+                    text = ax.text(jj, ii, f'{data[ii, jj]:.2f}',
+                                 ha='center', va='center', color='black',
+                                 fontsize=9, fontweight='bold')
+    
+    # Add performance bar chart comparing different scenarios
+    ax_bar = fig.add_subplot(gs[2, :])
+    
+    # Extract some key performance indicators for comparison
+    performance_data = []
+    labels = []
+    
+    for i, dd in enumerate(dynamics_values):
+        for j, sm in enumerate(shock_values):
+            performance_score = (metrics['correct_ratio'][i, j] * 0.4 + 
+                               (1 - metrics['mae_final'][i, j] / np.nanmax(metrics['mae_final'])) * 0.3 + 
+                               (1 - metrics['unmet_needs'][i, j] / np.nanmax(metrics['unmet_needs'])) * 0.3)
+            performance_data.append(performance_score)
+            labels.append(f'D={dd},S={sm}')
+    
+    # Create bar chart
+    bars = ax_bar.bar(range(len(performance_data)), performance_data, 
+                      color=plt.cm.viridis(np.array(performance_data)))
+    
+    # Add value labels on bars
+    for bar, value in zip(bars, performance_data):
+        height = bar.get_height()
+        ax_bar.text(bar.get_x() + bar.get_width()/2., height,
+                   f'{value:.2f}', ha='center', va='bottom')
+    
+    ax_bar.set_xticks(range(len(labels)))
+    ax_bar.set_xticklabels(labels, rotation=45)
+    ax_bar.set_ylabel('Overall Performance Score')
+    ax_bar.set_title('Combined Performance Score (40% Correct Ratio + 30% Accuracy + 30% Effectiveness)')
+    ax_bar.grid(axis='y', alpha=0.3)
+    
+    plt.tight_layout()
+    plt.savefig("agent_model_results/experiment_c_comprehensive.png", dpi=300)
+    plt.close()
+    
+    # Create additional time evolution plots for selected scenarios
+    plot_experiment_c_evolution(results_c, dynamics_values, shock_values)
+
+def plot_experiment_c_evolution(results_c, dynamics_values, shock_values):
+    """Plot time evolution for key scenarios in Experiment C"""
+    
+    # Select key scenarios to compare (e.g., different dynamics with same shock)
+    scenarios_to_plot = []
+    if len(dynamics_values) >= 2 and len(shock_values) >= 1:
+        scenarios_to_plot = [(dynamics_values[0], shock_values[0]), 
+                            (dynamics_values[-1], shock_values[0])]
+    
+    if not scenarios_to_plot:
+        print("Not enough data to create evolution plots")
+        return
+    
+    fig, axes = plt.subplots(2, 2, figsize=(15, 12))
+    axes = axes.reshape(4)
+    
+    colors = ['blue', 'red', 'green', 'orange']
+    metrics_to_plot = [
+        {'key': 'trust_stats', 'col_idx': [1, 4], 'title': 'AI Trust Evolution', 
+         'ylabel': 'AI Trust', 'style': '--'},
+        {'key': 'seci', 'col_idx': [1, 2], 'title': 'SECI Evolution', 
+         'ylabel': 'SECI Value', 'style': '-'},
+        {'key': 'aeci', 'col_idx': [1, 2], 'title': 'AECI Evolution', 
+         'ylabel': 'AECI Value', 'style': '-'},
+        {'key': 'belief_error', 'col_idx': [1, 2], 'title': 'Belief Error Evolution', 
+         'ylabel': 'MAE', 'style': '-'}
+    ]
+    
+    for plot_idx, metric in enumerate(metrics_to_plot):
+        ax = axes[plot_idx]
+        
+        for scenario_idx, (dd, sm) in enumerate(scenarios_to_plot):
+            res_key = (dd, sm)
+            if res_key not in results_c:
+                continue
+            res = results_c[res_key]
+            
+            data_key = metric['key']
+            if data_key in res and res[data_key].size > 0:
+                data_array = res[data_key]
+                if data_array.ndim >= 3 and data_array.shape[1] > 0:
+                    ticks = data_array[0, :, 0]
+                    
+                    # Plot mean for each column index
+                    for col_idx in metric['col_idx']:
+                        if col_idx < data_array.shape[2]:
+                            mean_values = np.mean(data_array[:, :, col_idx], axis=0)
+                            label = f'D={dd}, S={sm}, Type={col_idx}'
+                            color = colors[(scenario_idx * 2 + col_idx-1) % len(colors)]
+                            ax.plot(ticks, mean_values, 
+                                   color=color,
+                                   linestyle=metric['style'],
+                                   linewidth=2,
+                                   label=label)
+        
+        ax.set_title(metric['title'])
+        ax.set_xlabel('Tick')
+        ax.set_ylabel(metric['ylabel'])
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+        
+        # Set y-limits based on the metric type
+        if metric['key'] in ['seci', 'aeci', 'trust_stats']:
+            ax.set_ylim(0, 1)
+    
+    plt.tight_layout()
+    plt.savefig("agent_model_results/experiment_c_evolution.png", dpi=300)
+    plt.close()
+
+
+
 #########################################
 # Utility Function for CSV Export
 #########################################
@@ -6140,7 +6460,7 @@ if __name__ == "__main__":
         title_suffix = f"({param_name_a}={share})"
 
         if results_dict:
-            # Call NEW consolidated plot functions
+            # Call  consolidated plot functions
             plot_simulation_overview(results_dict, title_suffix)
             # Ensure your aggregation collects component data for this one:
             plot_echo_chamber_indices(results_dict, title_suffix)
@@ -6148,86 +6468,86 @@ if __name__ == "__main__":
             plot_trust_evolution(results_dict["trust_stats"], title_suffix)
 
             # Optional: Call final state bar plot for assistance
-            # if "assist" in results_dict and "raw_assist_counts" in results_dict:
-            #    plot_assistance_bars(results_dict["assist"], results_dict["raw_assist_counts"], title_suffix)
+            if "assist" in results_dict and "raw_assist_counts" in results_dict:
+                plot_assistance_bars(results_dict["assist"], results_dict["raw_assist_counts"], title_suffix)
 
-        else:
-            print(f"  Skipping plots for {param_name_a}={share} (missing data)")
+         else:
+             print(f"  Skipping plots for {param_name_a}={share} (missing data)")
 
     # --- Plot SUMMARY Comparisons Across Parameters (AFTER LOOP) ---
-    print("\n--- Plotting Summary Comparisons for Experiment A ---")
+     print("\n--- Plotting Summary Comparisons for Experiment A ---")
     # Plot how correct token share changes with the parameter
-    if results_a: # Check if results exist before plotting summary
-        plot_correct_token_shares_bars(results_a, share_values)
+     if results_a: # Check if results exist before plotting summary
+         plot_correct_token_shares_bars(results_a, share_values)
 
-    # Add these lines to Experiment A's plotting section:
-    print("\n--- Plotting Boxplot Summaries for Experiment A ---")
-    # Create temporary versions of boxplot functions that work with share values instead of alignment values
-    plot_summary_echo_indices_by_share = lambda results, shares, suffix: plot_summary_echo_indices_vs_alignment(
-        results, shares, f"Share Exploitative {suffix}")
-    plot_summary_performance_by_share = lambda results, shares, suffix: plot_summary_performance_vs_alignment(
-        results, shares, f"Share Exploitative {suffix}")
+    # Boxplot Summaries 
+     print("\n--- Plotting Boxplot Summaries for Experiment A ---")
+     # Create temporary versions of boxplot functions that work with share values instead of alignment values
+     plot_summary_echo_indices_by_share = lambda results, shares, suffix: plot_summary_echo_indices_vs_alignment(
+         results, shares, f"Share Exploitative {suffix}")
+     plot_summary_performance_by_share = lambda results, shares, suffix: plot_summary_performance_vs_alignment(
+         results, shares, f"Share Exploitative {suffix}")
 
     # Call the adapted functions
-    plot_summary_echo_indices_by_share(results_a, share_values, "")
-    plot_summary_performance_by_share(results_a, share_values, "")
+     plot_summary_echo_indices_by_share(results_a, share_values, "")
+     plot_summary_performance_by_share(results_a, share_values, "")
 
     ##############################################
     # Experiment B: Vary AI Alignment Level
     ##############################################
 
-    alignment_values = [0.0, 0.3, 0.6, 0.9]  # Initial scan
+    alignment_values = [0.0, 0.25, 0.5, 0.75, 0.95]  # Initial scan
     param_name_b = "AI Alignment Tipping Point"
     file_b_pkl = os.path.join(save_dir, f"results_{param_name_b.replace(' ','_')}.pkl")
 
     print(f"\nRunning {param_name_b} Experiment...")
     results_b = experiment_alignment_tipping_point(base_params, alignment_values, num_runs=10)
 
-    # Save and plot results as before
+    # Save results
     with open(file_b_pkl, "wb") as f:
         pickle.dump(results_b, f)
 
-    # Still plot the regular summaries
+    # Get all alignment values (including fine-grained ones added by tipping point detection)
+    all_alignment_values = sorted(list(results_b.keys()))
+
+    # --- Plot SUMMARY Comparisons (only once, after getting all results) ---
     print(f"\n--- Plotting Summary Comparisons for {param_name_b} ---")
     if results_b:
-        plot_final_echo_indices_vs_alignment(results_b, sorted(list(results_b.keys())), title_suffix="Tipping Points")
-        plot_average_performance_vs_alignment(results_b, sorted(list(results_b.keys())), title_suffix="Tipping Points")
-
-        # New boxplot summaries across all time steps
+        # Use all alignment values found in results
+        plot_final_echo_indices_vs_alignment(results_b, all_alignment_values, title_suffix="Tipping Points")
+        plot_average_performance_vs_alignment(results_b, all_alignment_values, title_suffix="Tipping Points")
+        
+        # Boxplot summaries
         print(f"\n--- Plotting Boxplot Summaries for {param_name_b} ---")
-        plot_summary_echo_indices_vs_alignment(results_b, sorted(list(results_b.keys())), title_suffix="Tipping Points")
-        plot_summary_performance_vs_alignment(results_b, sorted(list(results_b.keys())), title_suffix="Tipping Points")
+        plot_summary_echo_indices_vs_alignment(results_b, all_alignment_values, title_suffix="Tipping Points")
+        plot_summary_performance_vs_alignment(results_b, all_alignment_values, title_suffix="Tipping Points")
 
     # --- Plot Aggregated Time Evolution for EACH Alignment Level ---
     print(f"\n--- Plotting Aggregated Time Evolution for {param_name_b} ---")
-    for align in alignment_values:
+    for align in all_alignment_values:  # Use all values, not just the initial ones
         print(f"{param_name_b} = {align}")
         results_dict = results_b.get(align, {})
-        title_suffix = f"({param_name_b}={align})"
+        title_suffix = f"(AI Alignment={align})"
 
         if results_dict:
             # Call the consolidated plotting functions
             plot_simulation_overview(results_dict, title_suffix)
             plot_trust_evolution(results_dict.get("trust_stats"), title_suffix)
             plot_echo_chamber_indices(results_dict, title_suffix)
+            plot_component_seci_distribution(results_dict, title_suffix)
 
-            # To generate the trust vs alignment plot, we need to run a model with this alignment setting
-            # since we need the actual agent objects, not just the aggregated statistics
+            # Generate trust vs alignment plot
             model_params = base_params.copy()
             model_params["ai_alignment_level"] = align
             temp_model = run_simulation(model_params)
             plot_ai_trust_vs_alignment(temp_model, save_dir=f"{save_dir}/trust_plots")
             del temp_model
-
         else:
             print(f"  Skipping plots for {param_name_b}={align} (missing data)")
 
-    # --- Plot SUMMARY Comparisons Across Alignment Levels (AFTER LOOP) ---
-    print(f"\n--- Plotting Summary Comparisons for {param_name_b} ---")
-    if results_b: # Check if results exist before plotting summary
-         # Call the specific summary plot functions for this experiment
-         plot_final_echo_indices_vs_alignment(results_b, alignment_values, title_suffix="Exp B")
-         lot_average_performance_vs_alignment(results_b, alignment_values, title_suffix="Exp B")
+    # Optional: Create a comparison plot of component SECI across all alignment values
+    #if results_b:
+     #   plot_component_seci_comparison(results_b, all_alignment_values, title_suffix="Tipping Points")
 
     ##############################################
     # Experiment C: Vary Disaster Dynamics and Shock Magnitude
@@ -6283,41 +6603,9 @@ if __name__ == "__main__":
                  print(f"Warning: Raw assist counts missing for {res_key}, skipping assistance bar plot.")
             # --- End Bar Chart Call ---
 
-    # --- Plotting Heatmaps ---
-    fig_c, axes_c = plt.subplots(2, 2, figsize=(12, 10)) # Create 2x2 layout for 4 heatmaps
-    fig_c.suptitle("Experiment C: Impact of Disaster Dynamics & Shock (Mean Final Values)")
+    print("\n--- Plotting Comprehensive Analysis for Experiment C ---")
+    plot_experiment_c_comprehensive(results_c, dynamics_values, shock_values)
 
-    # Heatmap 1: Exploit Correct Tokens (Keep Existing)
-    im1 = axes_c[0, 0].imshow(exploit_correct_matrix, cmap='viridis', origin='lower', aspect='auto')
-    axes_c[0, 0].set_title("Exploitative Correct Tokens")
-    fig_c.colorbar(im1, ax=axes_c[0, 0], label='Mean Total Correct Tokens')
-
-    # Heatmap 2: Explor Correct Tokens (Keep Existing)
-    im2 = axes_c[0, 1].imshow(explor_correct_matrix, cmap='viridis', origin='lower', aspect='auto')
-    axes_c[0, 1].set_title("Exploratory Correct Tokens")
-    fig_c.colorbar(im2, ax=axes_c[0, 1], label='Mean Total Correct Tokens')
-
-    # Heatmap 3: Final Belief MAE (Exploit) (NEW)
-    im3 = axes_c[1, 0].imshow(final_mae_exploit_matrix, cmap='magma', origin='lower', aspect='auto')
-    axes_c[1, 0].set_title("Exploitative Final Belief MAE")
-    fig_c.colorbar(im3, ax=axes_c[1, 0], label='Mean Final MAE')
-
-    # Heatmap 4: Final Unmet Need (NEW)
-    im4 = axes_c[1, 1].imshow(final_unmet_need_matrix, cmap='cividis', origin='lower', aspect='auto')
-    axes_c[1, 1].set_title("Final Unmet Need Count")
-    fig_c.colorbar(im4, ax=axes_c[1, 1], label='Mean Final Unmet Count')
-
-    # Set ticks and labels for all heatmaps
-    for ax_row in axes_c:
-        for ax in ax_row:
-            ax.set_xticks(ticks=range(len(shock_values)), labels=shock_values)
-            ax.set_yticks(ticks=range(len(dynamics_values)), labels=dynamics_values)
-            ax.set_xlabel("Shock Magnitude")
-            ax.set_ylabel("Disaster Dynamics")
-
-    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-    plt.show()
-    # --- End Heatmap Plotting ---
 
     ##############################################
     # Experiment D: Vary Learning Rate and Epsilon
