@@ -130,30 +130,30 @@ class HumanAgent(Agent):
         rumor_intensity = 0
         rumor_conf = 0.6
         rumor_radius = 0
-        
+
         if assigned_rumor:
             rumor_epicenter, rumor_intensity, rumor_conf, rumor_radius = assigned_rumor
-        
+
         # Initialize belief grid for ALL cells in the grid
         for x in range(width):
             for y in range(height):
                 cell = (x, y)
-                
+
                 # Default initialization - all cells start with minimal belief
                 initial_level = 0
                 initial_conf = 0.1
-                
+
                 # Calculate distance from agent for sensing
                 distance_from_agent = math.sqrt((x - self.pos[0])**2 + (y - self.pos[1])**2)
                 sense_radius = 3 if self.agent_type == "exploratory" else 2
-                
+
                 # If cell is within sensing range, initialize with noisy perception of actual disaster
                 if distance_from_agent <= sense_radius:
                     try:
                         # Get actual level with bounds checking
                         if 0 <= x < self.model.width and 0 <= y < self.model.height:
                             actual_level = self.model.disaster_grid[x, y]
-                            
+
                             # Add significant noise to initial sensing to create diversity
                             noise_chance = 0.4  # 40% chance of noisy reading (increased from 20%)
                             if random.random() < noise_chance:
@@ -162,7 +162,7 @@ class HumanAgent(Agent):
                                 initial_level = max(0, min(5, actual_level + noise))
                             else:
                                 initial_level = actual_level
-                            
+
                             # Add diversity in confidence levels
                             if self.agent_type == "exploratory":
                                 initial_conf = random.uniform(0.5, 0.7)  # Range for explorers
@@ -173,7 +173,7 @@ class HumanAgent(Agent):
                         if self.model.debug_mode:
                             print(f"Warning: Error accessing disaster grid at {x},{y} for agent {self.unique_id}: {e}")
                         # Keep default values set above
-                
+
                 # Apply rumor effects (overlay on top of sensed info)
                 if rumor_epicenter:
                     dist_from_rumor = math.sqrt((x - rumor_epicenter[0])**2 + (y - rumor_epicenter[1])**2)
@@ -181,16 +181,16 @@ class HumanAgent(Agent):
                         # Add random variation to rumor level too
                         base_rumor_level = min(5, int(round(3 + rumor_intensity)))
                         rumor_level = max(0, min(5, base_rumor_level + random.choice([-1, 0, 1])))
-                        
+
                         # Only override if rumor level is higher or agent has low confidence
                         if rumor_level > initial_level or initial_conf < rumor_conf:
                             initial_level = rumor_level
                             # Add some variation to rumor confidence too
                             initial_conf = rumor_conf + random.uniform(-0.1, 0.1)
-                
+
                 # Make sure to set belief for every cell
                 self.beliefs[cell] = {'level': initial_level, 'confidence': initial_conf}
-        
+
         # Verify that all cells have been initialized
         if len(self.beliefs) != width * height:
             print(f"WARNING: Agent {self.unique_id} beliefs not fully initialized! Expected {width*height}, got {len(self.beliefs)}")
@@ -202,7 +202,7 @@ class HumanAgent(Agent):
                         self.beliefs[cell] = {'level': 0, 'confidence': 0.1}
                         if self.model.debug_mode:
                             print(f"  Added missing belief for cell {cell}")
-        
+
         # Additional sensing after initialization
         self.sense_environment()
 
@@ -211,12 +211,12 @@ class HumanAgent(Agent):
         if not hasattr(self.model, 'ai_knowledge_maps'):
             # If knowledge maps aren't initialized, return random AI
             return f"A_{random.randrange(self.model.num_ai)}"
-        
+
         # Get cells in the area of interest
         cells_of_interest = self.model.grid.get_neighborhood(
             interest_point, moore=True, radius=query_radius, include_center=True
         )
-        
+
         # Count how many cells each AI knows about
         ai_knowledge_counts = {}
         for ai_id, knowledge_map in self.model.ai_knowledge_maps.items():
@@ -226,14 +226,14 @@ class HumanAgent(Agent):
                     if knowledge_map[cell[0], cell[1]] == 1:
                         count += 1
             ai_knowledge_counts[ai_id] = count
-        
+
         # Find AI with most knowledge (with some randomness)
         if not ai_knowledge_counts:
             return f"A_{random.randrange(self.model.num_ai)}"
-        
+
         # Sort AIs by knowledge count (descending)
         sorted_ais = sorted(ai_knowledge_counts.items(), key=lambda x: x[1], reverse=True)
-        
+
         # Choose among top 2 AIs (add randomness)
         if len(sorted_ais) >= 2 and sorted_ais[0][1] > 0 and sorted_ais[1][1] > 0:
             # If top AI has significantly more knowledge, pick it
@@ -244,10 +244,10 @@ class HumanAgent(Agent):
         elif sorted_ais and sorted_ais[0][1] > 0:
             # Only one AI has knowledge
             return sorted_ais[0][0]
-        
+
         # No AI has knowledge - pick random
         return f"A_{random.randrange(self.model.num_ai)}"
-    
+
     def apply_confidence_decay(self):
         """Apply confidence decay with more stability and cell-specific rates."""
         base_decay_rate = 0.0003 if self.agent_type == "exploitative" else 0.0005  # Higher for exploratory
@@ -366,7 +366,7 @@ class HumanAgent(Agent):
     def report_beliefs(self, interest_point, query_radius):
         """Reports human agent's beliefs about cells within query_radius of the interest_point."""
         report = {}
-        
+
         # Check if agent can report (e.g., not in high disaster zone)
         try:
             current_pos_level = self.model.disaster_grid[self.pos[0], self.pos[1]]
@@ -385,9 +385,9 @@ class HumanAgent(Agent):
         )
 
         # Debug info similar to AI agent
-        if hasattr(self.model, 'debug_mode') and self.model.debug_mode and random.random() < 0.05:
-            print(f"DEBUG: Human {self.unique_id} asked to report on {len(cells_to_report_on)} cells around {interest_point}")
-        
+        # if hasattr(self.model, 'debug_mode') and self.model.debug_mode and random.random() < 0.05:
+            #print(f"DEBUG: Human {self.unique_id} asked to report on {len(cells_to_report_on)} cells around {interest_point}")
+
         # Track how many cells had direct beliefs vs guesses
         known_cells = 0
         guessed_cells = 0
@@ -397,20 +397,20 @@ class HumanAgent(Agent):
             if 0 <= cell[0] < self.model.width and 0 <= cell[1] < self.model.height:
                 # Check if agent has belief about this cell
                 has_belief = cell in self.beliefs and isinstance(self.beliefs[cell], dict)
-                
+
                 if has_belief:
                     # Report own belief about the cell
                     belief_info = self.beliefs[cell]
                     current_level = belief_info.get('level', 0)
                     current_conf = belief_info.get('confidence', 0.1)
-                    
+
                     # Apply a small chance of reporting noise
                     if random.random() < 0.05:
                         noisy_level = max(0, min(5, current_level + random.choice([-1, 1])))
                         report[cell] = noisy_level
                     else:
                         report[cell] = current_level
-                    
+
                     known_cells += 1
                 else:
                     # HUMAN GUESSING MECHANISM - similar to AI but less sophisticated
@@ -418,14 +418,14 @@ class HumanAgent(Agent):
                     if random.random() < 0.5:
                         # Look at surrounding cells with beliefs
                         nearby_values = []
-                        
+
                         for dx in range(-1, 2):
                             for dy in range(-1, 2):
                                 nearby = (cell[0] + dx, cell[1] + dy)
-                                if (nearby in self.beliefs and 
+                                if (nearby in self.beliefs and
                                     isinstance(self.beliefs[nearby], dict)):
                                     nearby_values.append(self.beliefs[nearby].get('level', 0))
-                        
+
                         if nearby_values:
                             # Simple average with random noise
                             avg_value = sum(nearby_values) / len(nearby_values)
@@ -433,14 +433,14 @@ class HumanAgent(Agent):
                             guessed_value = max(0, min(5, int(round(avg_value + noise))))
                             report[cell] = guessed_value
                             guessed_cells += 1
-        
-        # Debug output for comparison with AI
-        if hasattr(self.model, 'debug_mode') and self.model.debug_mode and random.random() < 0.05:
-            total_reported = len(report)
-            print(f"DEBUG: Human {self.unique_id} reported on {total_reported} cells "
-                  f"({known_cells} known, {guessed_cells} guessed)")
 
-        return report  
+        # Debug output for comparison with AI
+        #if hasattr(self.model, 'debug_mode') and self.model.debug_mode and random.random() < 0.05:
+           # total_reported = len(report)
+            #print(f"DEBUG: Human {self.unique_id} reported on {total_reported} cells "
+                  #f"({known_cells} known, {guessed_cells} guessed)")
+
+        return report
 
     def find_believed_epicenter(self):
         """Finds the cell with the highest believed disaster level."""
@@ -953,7 +953,7 @@ class HumanAgent(Agent):
                         print(f"  Base Q-values: {decision_factors['base_scores']}")
                         print(f"  Applied biases: {decision_factors['biases']}")
                         print(f"  Final scores: {decision_factors['final_scores']}")
-                    print(f"  AI alignment level: {self.model.ai_alignment_level}")          
+                    print(f"  AI alignment level: {self.model.ai_alignment_level}")
 
             self.tokens_this_tick = {chosen_mode: 1}
             self.last_queried_source_ids = []
@@ -987,15 +987,15 @@ class HumanAgent(Agent):
                     # Invalid source agent
                     source_id = None
             else:  # AI
-                
+
                 if chosen_mode in self.model.ais:
                     source_id = chosen_mode
                 else:
                     # Otherwise, pick best AI for this query
                     source_id = self.choose_best_ai_for_query(interest_point, query_radius)
-                    
+
                 source_agent = self.model.ais.get(source_id)
-                
+
                 if source_agent:
                     reports = source_agent.report_beliefs(interest_point, query_radius, self.beliefs, self.trust.get(source_id, 0.1))
 
@@ -1010,8 +1010,8 @@ class HumanAgent(Agent):
                         self.ai_info_sources[cell] = source_id
 
                     # DEBUG PRINT to track AI source queries
-                    if self.model.debug_mode and random.random() < 0.1:  # 10% of the time
-                        print(f"DEBUG: Agent {self.unique_id} queried AI {source_id} for {len(reports)} cells")
+                    #if self.model.debug_mode and random.random() < 0.1:  # 10% of the time
+                        #print(f"DEBUG: Agent {self.unique_id} queried AI {source_id} for {len(reports)} cells")
 
                     self.accum_calls_ai += 1
                     self.accum_calls_total += 1
@@ -1438,28 +1438,28 @@ class AIAgent(Agent):
                 if 0 <= cell[0] < self.model.width and 0 <= cell[1] < self.model.height:
                     knowledge_map[cell[0], cell[1]] = 1
             self.model.ai_knowledge_maps[self.unique_id] = knowledge_map
-            
+
     def report_beliefs(self, interest_point, query_radius, caller_beliefs, caller_trust_in_ai):
         """
         Reports AI's beliefs about cells within query_radius of interest_point,
         applying alignment based on caller's trust and beliefs.
         """
         report = {}
-        
+
         # Safety checks for interest_point
         if interest_point is None:
             print(f"WARNING: AI {self.unique_id} received None interest_point in report_beliefs!")
             return {}
-            
+
         if not (0 <= interest_point[0] < self.model.width and 0 <= interest_point[1] < self.model.height):
             print(f"WARNING: AI {self.unique_id} received out-of-bounds interest_point {interest_point}!")
             adjusted_x = max(0, min(self.model.width-1, interest_point[0]))
             adjusted_y = max(0, min(self.model.height-1, interest_point[1]))
             interest_point = (adjusted_x, adjusted_y)
-            
+
         # Ensure query_radius is positive
         query_radius = max(1, query_radius)
-        
+
         # Get cells to report on
         cells_to_report_on = self.model.grid.get_neighborhood(
             interest_point, moore=True, radius=query_radius, include_center=True
@@ -1489,7 +1489,7 @@ class AIAgent(Agent):
             if 0 <= cell[0] < self.model.width and 0 <= cell[1] < self.model.height:
                 value_to_use = None
                 is_guessed = False
-                
+
                 # If directly sensed, use that value
                 if cell in directly_sensed_cells:
                     value_to_use = directly_sensed_cells[cell]
@@ -1500,7 +1500,7 @@ class AIAgent(Agent):
                         # 1. Check nearby cells that are directly sensed
                         nearby_values = []
                         nearby_weights = []
-                        
+
                         # Look at surrounding cells with distance weighting
                         max_search_dist = query_radius + 1
                         for dx in range(-max_search_dist, max_search_dist+1):
@@ -1510,17 +1510,17 @@ class AIAgent(Agent):
                                     # Calculate distance for weighting (inverse square)
                                     dist = max(1, dx*dx + dy*dy)  # Avoid division by zero
                                     weight = 1.0 / dist
-                                    
+
                                     nearby_values.append(directly_sensed_cells[nearby])
                                     nearby_weights.append(weight)
-                        
+
                         # 2. If we have nearby sensed cells, make a weighted guess
                         if nearby_values:
                             # Create a weighted average, rounded to nearest integer
                             total_weight = sum(nearby_weights)
                             weighted_sum = sum(v * w for v, w in zip(nearby_values, nearby_weights))
                             avg_value = weighted_sum / total_weight
-                            
+
                             # Add some noise to the weighted average
                             noise = random.choice([-1, 0, 0, 0, 1])  # Bias toward accuracy
                             guessed_value = int(round(avg_value + noise * 0.5))  # Reduced noise impact
@@ -1530,7 +1530,7 @@ class AIAgent(Agent):
                             caller_belief_info = caller_beliefs.get(cell, {'level': None, 'confidence': 0})
                             caller_level = caller_belief_info.get('level')
                             caller_conf = caller_belief_info.get('confidence', 0)
-                            
+
                             if caller_level is not None and caller_conf > 0.3:
                                 # If caller has reasonable confidence, use their belief with noise
                                 noise = random.choice([-1, 0, 0, 1])
@@ -1540,13 +1540,13 @@ class AIAgent(Agent):
                                 # Cells closer to center of disaster tend to have higher values
                                 # Use interest_point as a proxy for potential disaster center
                                 dist_to_interest = math.sqrt(
-                                    (cell[0] - interest_point[0])**2 + 
+                                    (cell[0] - interest_point[0])**2 +
                                     (cell[1] - interest_point[1])**2
                                 )
-                                
+
                                 # Scale distance to range [0,1] based on query radius
                                 scaled_dist = min(1.0, dist_to_interest / (query_radius + 1))
-                                
+
                                 # Higher probability of higher values closer to interest point
                                 # Further away = more likely to be 0-1
                                 # Closer = more likely to be 2-4
@@ -1556,18 +1556,18 @@ class AIAgent(Agent):
                                     value_to_use = random.choice([1, 2, 2, 3, 3])
                                 else:  # Far away
                                     value_to_use = random.choice([0, 0, 1, 1, 2])
-                        
+
                         is_guessed = True
-                
+
                 # If we have a value to use (either sensed or guessed), process it
                 if value_to_use is not None:
                     valid_cells_in_query.append(cell)
                     sensed_vals_list.append(int(value_to_use))
-                    
+
                     # Track guessed values for debugging
                     if is_guessed and hasattr(self.model, 'debug_mode') and self.model.debug_mode and random.random() < 0.02:
                         print(f"DEBUG: AI {self.unique_id} guessed value {value_to_use} for cell {cell}")
-                    
+
                     # Get the CALLER'S belief for this cell (for alignment)
                     caller_belief_info = caller_beliefs.get(cell, {'level': 0, 'confidence': 0.1})
                     human_level = caller_belief_info.get('level', 0)
@@ -1740,7 +1740,7 @@ class DisasterModel(Model):
             print("WARNING: Failed to create multiple components in social network")
         else:
             print(f"Successfully created social network with {num_components} components")
-        
+
         self.agent_list = []
         self.humans = {}
 
@@ -1859,7 +1859,7 @@ class DisasterModel(Model):
                 agent.q_table[ai_id] = default_q_value # Initialize Q for this specific AI
 
 
-           
+
     def debug_log(self, message, force=False):
         """Log debug messages if debug mode is enabled or forced."""
         if self.debug_mode or force:
@@ -1870,55 +1870,55 @@ class DisasterModel(Model):
         # Calculate how many exploitative and exploratory agents we have
         num_exploitative = int(self.num_humans * self.share_exploitative)
         num_exploratory = self.num_humans - num_exploitative
-        
+
         print(f"Initializing social network with {num_exploitative} exploitative and {num_exploratory} exploratory agents")
-        
+
         # Create an empty graph
         self.social_network = nx.Graph()
-        
+
         # Add all nodes
         for i in range(self.num_humans):
             self.social_network.add_node(i)
-        
+
         # Determine number of communities (2-3 for typical agent counts)
         num_communities = min(3, max(2, self.num_humans // 15))
         print(f"Creating {num_communities} substantial communities")
-        
+
         # Divide agents into communities
         # Ensure each community has at least 5 agents (or appropriate minimum)
         min_community_size = max(5, self.num_humans // (num_communities * 2))
-        
+
         all_agents = list(range(self.num_humans))
         random.shuffle(all_agents)  # Randomize agent assignment
-        
+
         # Create the communities with minimum size constraints
         communities = []
         remaining_agents = all_agents.copy()
-        
+
         for i in range(num_communities - 1):  # Allocate all but the last community
             # Ensure we leave enough agents for remaining communities
             agents_needed = min_community_size * (num_communities - i)
             max_size = len(remaining_agents) - agents_needed + min_community_size
-            
+
             # Select size between min and max
             size = random.randint(min_community_size, max(min_community_size, max_size))
-            
+
             # Create community
             community = remaining_agents[:size]
             communities.append(community)
-            
+
             # Remove assigned agents
             remaining_agents = remaining_agents[size:]
-        
+
         # Last community gets all remaining agents
         if remaining_agents:
             communities.append(remaining_agents)
-        
+
         # Ensure type diversity within each community (some mixture of types)
         for community in communities:
             exploit_count = sum(1 for a in community if a < num_exploitative)
             explor_count = len(community) - exploit_count
-            
+
             # If community is heavily biased to one type, adjust it
             if exploit_count == 0 and num_exploitative > 0:
                 # Add at least one exploitative agent
@@ -1933,9 +1933,9 @@ class DisasterModel(Model):
                                 community.append(agent_to_move)
                                 other_comm.remove(agent_to_move)
                                 break
-            
+
             elif explor_count == 0 and num_exploratory > 0:
-                # Add at least one exploratory agent 
+                # Add at least one exploratory agent
                 explor_to_add = min(2, num_exploratory)
                 for _ in range(explor_to_add):
                     # Similar logic for exploratory agents
@@ -1947,26 +1947,26 @@ class DisasterModel(Model):
                                 community.append(agent_to_move)
                                 other_comm.remove(agent_to_move)
                                 break
-        
+
         # Report community compositions
         print(f"Created {len(communities)} communities:")
         for i, community in enumerate(communities):
             exploit_count = sum(1 for a in community if a < num_exploitative)
             explor_count = len(community) - exploit_count
             print(f"  Community {i}: {len(community)} agents ({exploit_count} exploit, {explor_count} explor)")
-        
+
         # Create dense connections WITHIN communities
         p_within = 0.7  # 70% connection probability within community
-        
+
         for comm_idx, community in enumerate(communities):
             print(f"  Adding within-community edges for community {comm_idx} (size {len(community)})")
             for i in range(len(community)):
                 for j in range(i+1, len(community)):
                     if random.random() < p_within:
                         self.social_network.add_edge(community[i], community[j])
-        
+
         # NO connections BETWEEN communities to ensure separate components
-        
+
         # Final verification
         components = list(nx.connected_components(self.social_network))
         print(f"Final network: {len(components)} connected components")
@@ -1975,21 +1975,21 @@ class DisasterModel(Model):
             comp_exploit_count = sum(1 for a in comp if a < num_exploitative)
             comp_explor_count = comp_size - comp_exploit_count
             print(f"  Component {i}: {comp_size} agents ({comp_exploit_count} exploit, {comp_explor_count} explor)")
-            
+
             # Check for too-small components
             if comp_size < 3:
                 print(f"    WARNING: Component {i} is too small ({comp_size} agents)")
-                
+
                 # Find the largest component
                 largest_comp = max(components, key=len)
-                
+
                 # Connect this small component to the largest one
                 if comp != largest_comp:
                     small_node = random.choice(list(comp))
                     large_node = random.choice(list(largest_comp))
                     self.social_network.add_edge(small_node, large_node)
                     print(f"    Connected small component node {small_node} to large component node {large_node}")
-        
+
         # Final check after fixes
         components = list(nx.connected_components(self.social_network))
         print(f"Final network after fixes: {len(components)} connected components")
@@ -1998,25 +1998,25 @@ class DisasterModel(Model):
             comp_exploit_count = sum(1 for a in comp if a < num_exploitative)
             comp_explor_count = comp_size - comp_exploit_count
             print(f"  Component {i}: {comp_size} agents ({comp_exploit_count} exploit, {comp_explor_count} explor)")
-        
+
         return components
 
     def initialize_ai_knowledge_maps(self):
         """Initialize maps showing which areas each AI agent has knowledge about."""
         self.ai_knowledge_maps = {}
-        
+
         for ai_id, ai_agent in self.ais.items():
             # Create a binary knowledge map (0=no knowledge, 1=has knowledge)
             knowledge_map = np.zeros((self.width, self.height))
-            
+
             # Mark cells that the AI has sensed
             for cell in ai_agent.sensed:
                 if 0 <= cell[0] < self.width and 0 <= cell[1] < self.height:
                     knowledge_map[cell[0], cell[1]] = 1
-                    
+
             # Store the knowledge map
             self.ai_knowledge_maps[ai_id] = knowledge_map
-            
+
             if self.debug_mode:
                 coverage = np.sum(knowledge_map) / (self.width * self.height) * 100
                 print(f"DEBUG: {ai_id} has knowledge of {coverage:.1f}% of the grid")
@@ -2176,10 +2176,6 @@ class DisasterModel(Model):
         # Create a proper token array counting all tokens
         token_array = np.zeros((self.width, self.height), dtype=int)
 
-        # Debug totals for verification
-        total_exploit_tokens = 0
-        total_explor_tokens = 0
-
         # Fill the token array
         for pos, count_dict in self.tokens_this_tick.items():
             x, y = pos
@@ -2188,30 +2184,13 @@ class DisasterModel(Model):
                 # Get token counts by type
                 exploit_tokens = count_dict.get('exploit', 0)
                 explor_tokens = count_dict.get('explor', 0)
-
-                # Track totals for debugging
-                total_exploit_tokens += exploit_tokens
-                total_explor_tokens += explor_tokens
-
                 # Assign the sum to the token array
                 token_array[x, y] = exploit_tokens + explor_tokens
-            else:
-                print(f"Warning: Invalid position key in tokens_this_tick: {pos}")
-
-        # Log token totals periodically
-        if self.tick % 10 == 0 or self.debug_mode:
-            print(f"Tick {self.tick} token counts - Exploit: {total_exploit_tokens}, Explor: {total_explor_tokens}, Total: {total_exploit_tokens + total_explor_tokens}")
 
         # Identify high-need cells (L4+) that received no tokens
         need_mask = self.disaster_grid >= 4
         tokens_mask = token_array == 0
         unmet = np.sum(need_mask & tokens_mask)
-
-        # Log details about the unmet needs
-        if self.tick % 10 == 0 or self.debug_mode:
-            high_need_count = np.sum(need_mask)
-            print(f"Tick {self.tick} high-need cells: {high_need_count}, unmet: {unmet} ({unmet/max(1,high_need_count)*100:.1f}%)")
-
         self.unmet_needs_evolution.append(unmet)
 
         if self.tick % 10 == 0:
@@ -2260,8 +2239,6 @@ class DisasterModel(Model):
                 global_var = np.var(all_belief_levels)
             else:
                 global_var = 1e-6  # Default to small value if insufficient data
-                if self.debug_mode:
-                    print(f"Warning: Not enough belief data to calculate global variance at tick {self.tick}")
 
             # Initialize metric lists
             seci_exp_list = []
@@ -2313,8 +2290,6 @@ class DisasterModel(Model):
             else:
                 # Add default values if no data
                 self.seci_data.append((self.tick, 0, 0))
-                if self.debug_mode:
-                    print(f"Warning: No SECI data calculated at tick {self.tick}")
 
             # --- AECI-Variance (AI Echo Chamber Index) ---
             aeci_variance = 0.0
@@ -2326,12 +2301,6 @@ class DisasterModel(Model):
             ai_reliant_agents = [agent for agent in self.humans.values()
                                 if agent.accum_calls_total >= min_calls_threshold and
                                     (agent.accum_calls_ai / max(1, agent.accum_calls_total)) >= min_ai_ratio]
-
-            # Log counts for debugging
-            if self.debug_mode:
-                print(f"Tick {self.tick}: Found {len(ai_reliant_agents)} AI-reliant agents out of {len(self.humans)}")
-                num_active = sum(1 for a in self.humans.values() if a.accum_calls_total >= min_calls_threshold)
-                print(f"    Active agents: {num_active}, AI threshold: {min_ai_ratio}")
 
             # Only compute variance if we have AI-reliant agents
             if ai_reliant_agents:
@@ -2391,23 +2360,15 @@ class DisasterModel(Model):
 
             # --- Component SECI ---
             component_seci_list = []
-            print(f"DEBUG Tick {self.tick}: Social network has {len(list(nx.connected_components(self.social_network)))} components")
-
+            
             for component_nodes in nx.connected_components(self.social_network):
                 if len(component_nodes) <= 1:
                     continue  # Skip components with only 1 node
                     
-                # Debug component size
-                if self.debug_mode:
-                    print(f"DEBUG Tick {self.tick}: Processing component with {len(component_nodes)} nodes")
-                    
                 # Get all beliefs from this component
                 component_belief_levels = []
-                component_agent_ids = []
-                
                 for node_id in component_nodes:
                     agent_id = f"H_{node_id}"
-                    component_agent_ids.append(agent_id)
                     agent = self.humans.get(agent_id)
                     if agent and agent.beliefs:
                         for cell, belief_info in agent.beliefs.items():
@@ -2417,9 +2378,6 @@ class DisasterModel(Model):
                 
                 # Only calculate SECI if we have beliefs
                 if len(component_belief_levels) > 0:
-                    if self.debug_mode:
-                        print(f"DEBUG Tick {self.tick}: Component has {len(component_belief_levels)} beliefs from {len(component_agent_ids)} agents")
-                        
                     # Calculate global variance (all agents)
                     all_belief_levels = []
                     for agent in self.humans.values():
@@ -2432,26 +2390,15 @@ class DisasterModel(Model):
                     global_var = np.var(all_belief_levels) if len(all_belief_levels) > 1 else 1e-6
                     component_var = np.var(component_belief_levels) if len(component_belief_levels) > 1 else global_var
                     
-                    if self.debug_mode:
-                        print(f"DEBUG Tick {self.tick}: Global var: {global_var:.4f}, Component var: {component_var:.4f}")
-                        
                     # Calculate component SECI more robustly
                     if global_var > 1e-9:  # Avoid division by zero with small threshold
                         component_seci_val = max(0, min(1, (global_var - component_var) / global_var))
                         component_seci_list.append(component_seci_val)
-                        
-                        if self.debug_mode:
-                            print(f"DEBUG Tick {self.tick}: Component SECI: {component_seci_val:.4f}")
                     else:
-                        if self.debug_mode:
-                            print(f"DEBUG Tick {self.tick}: Global variance too small, setting component SECI to 0")
                         component_seci_list.append(0)
                         
             # Calculate mean component SECI and store
             component_seci_mean = np.mean(component_seci_list) if component_seci_list else 0
-
-            # IMPORTANT DEBUG OUTPUT
-            print(f"Tick {self.tick}: Final Component SECI mean: {component_seci_mean:.4f} from {len(component_seci_list)} components")
 
             # Update the last metrics dictionary and store in model data
             self._last_metrics['component_seci'] = {
@@ -2460,6 +2407,7 @@ class DisasterModel(Model):
             }
 
             self.component_seci_data.append((self.tick, component_seci_mean))
+            
             # --- Component AI Trust Variance ---
             component_ai_trust_var_list = []
             for component_nodes in nx.connected_components(self.social_network):
@@ -2483,7 +2431,7 @@ class DisasterModel(Model):
 
             self.component_ai_trust_variance_data.append((self.tick, component_ai_trust_var_mean))
 
-            # --- Belief Accuracy Metric (MAE) ---
+           # --- Belief Accuracy Metric (MAE) ---
             total_mae_exploit = 0
             total_mae_explor = 0
             count_exploit = 0
@@ -2714,7 +2662,6 @@ class DisasterModel(Model):
                 agent.accum_calls_total = 0
                 agent.accepted_human = 0
                 agent.accepted_ai = 0
-
         else:
             # For ticks between calculations, use the last calculated values
 
@@ -2802,66 +2749,66 @@ class DisasterModel(Model):
                 self._last_metrics['trust_stats']['nonfriend_expl']
             ))
 
-          
+
 #########################################
 # Simulation and Experiment Functions
 #########################################
 def validate_social_network(model, save_dir="analysis_plots"):
     """
     Validates the social network structure and visualizes it.
-    
+
     Args:
         model: The DisasterModel instance
         save_dir: Directory to save plots
     """
-    
+
     os.makedirs(save_dir, exist_ok=True)
-    
+
     # Calculate how many exploitative and exploratory agents
     num_exploitative = int(model.num_humans * model.share_exploitative)
-    
+
     # Get network components
     components = list(nx.connected_components(model.social_network))
-    
+
     print(f"Social Network Analysis:")
     print(f"  {model.num_humans} total agents ({num_exploitative} exploit, {model.num_humans - num_exploitative} explor)")
     print(f"  {model.social_network.number_of_edges()} connections")
     print(f"  {len(components)} connected components")
-    
+
     # Analyze each component
     for i, component in enumerate(components):
         component_nodes = list(component)
         component_size = len(component_nodes)
-        
+
         # Count agent types
         exploit_count = sum(1 for n in component_nodes if n < num_exploitative)
         explor_count = component_size - exploit_count
-        
+
         # Calculate homophily (ratio of same-type connections)
         same_type_edges = 0
         cross_type_edges = 0
-        
+
         for u, v in model.social_network.edges(component_nodes):
             u_type = "exploit" if u < num_exploitative else "explor"
             v_type = "exploit" if v < num_exploitative else "explor"
-            
+
             if u_type == v_type:
                 same_type_edges += 1
             else:
                 cross_type_edges += 1
-        
+
         total_edges = same_type_edges + cross_type_edges
         homophily = same_type_edges / total_edges if total_edges > 0 else 0
-        
+
         print(f"  Component {i}: {component_size} agents ({exploit_count} exploit, {explor_count} explor)")
         print(f"    Homophily: {homophily:.2f} ({same_type_edges} same-type edges, {cross_type_edges} cross-type edges)")
-    
+
     # Draw the network
     plt.figure(figsize=(12, 10))
-    
+
     # Positions using spring layout with seed for reproducibility
     pos = nx.spring_layout(model.social_network, seed=42)
-    
+
     # Color nodes by agent type
     node_colors = []
     for node in model.social_network.nodes():
@@ -2869,56 +2816,56 @@ def validate_social_network(model, save_dir="analysis_plots"):
             node_colors.append('red')  # Exploitative
         else:
             node_colors.append('blue')  # Exploratory
-    
+
     # Draw the graph
-    nx.draw_networkx_nodes(model.social_network, pos, 
-                          node_color=node_colors, 
+    nx.draw_networkx_nodes(model.social_network, pos,
+                          node_color=node_colors,
                           node_size=100,
                           alpha=0.8)
-    
-    nx.draw_networkx_edges(model.social_network, pos, 
-                          width=0.5, 
+
+    nx.draw_networkx_edges(model.social_network, pos,
+                          width=0.5,
                           alpha=0.5)
-    
+
     plt.title(f"Social Network with {len(components)} Components\n"
               f"Red: Exploitative, Blue: Exploratory")
     plt.axis('off')
-    
+
     # Save the figure
     plt.savefig(os.path.join(save_dir, "social_network.png"), dpi=300, bbox_inches='tight')
     print(f"Network visualization saved to {os.path.join(save_dir, 'social_network.png')}")
     plt.close()
-    
+
     # Create a second visualization showing the components more clearly
     plt.figure(figsize=(12, 10))
-    
+
     # Use a different layout that separates components better
     pos = nx.spring_layout(model.social_network, seed=42)
-    
+
     # Draw each component with a different color
     for i, component in enumerate(components):
         subgraph = model.social_network.subgraph(component)
         color = plt.cm.tab10(i % 10)  # Use tab10 colormap for up to 10 components
-        
-        nx.draw_networkx_nodes(subgraph, pos, 
+
+        nx.draw_networkx_nodes(subgraph, pos,
                               node_color=color,
                               node_size=100,
                               alpha=0.8)
-        
-        nx.draw_networkx_edges(subgraph, pos, 
-                              width=0.5, 
+
+        nx.draw_networkx_edges(subgraph, pos,
+                              width=0.5,
                               alpha=0.5,
                               edge_color=color)
-    
+
     plt.title(f"Social Network with {len(components)} Components\n"
               f"Each color represents a different component")
     plt.axis('off')
-    
+
     # Save the second figure
     plt.savefig(os.path.join(save_dir, "social_network_components.png"), dpi=300, bbox_inches='tight')
     print(f"Component visualization saved to {os.path.join(save_dir, 'social_network_components.png')}")
     plt.close()
-    
+
     # Check if model.humans exists before trying to analyze beliefs
     if not hasattr(model, 'humans') or not model.humans:
         print("\nSkipping belief analysis - humans not populated yet")
@@ -2929,10 +2876,10 @@ def validate_social_network(model, save_dir="analysis_plots"):
             'component_seci_values': {i: 0 for i in range(len(components))},
             'avg_component_seci': 0
         }
-    
+
     # Analyze belief divergence by component
     print("\nBelief Divergence Analysis by Network Component:")
-    
+
     # Get all beliefs across all agents
     all_beliefs = {}
     for agent_id, agent in model.humans.items():
@@ -2942,13 +2889,13 @@ def validate_social_network(model, save_dir="analysis_plots"):
                 if cell not in all_beliefs:
                     all_beliefs[cell] = []
                 all_beliefs[cell].append(level)
-    
+
     # Calculate global variance for all beliefs
     global_vars = {}
     for cell, levels in all_beliefs.items():
         if len(levels) > 1:
             global_vars[cell] = np.var(levels)
-    
+
     # Calculate variance within each component
     component_vars = {}
     for i, component in enumerate(components):
@@ -2963,11 +2910,11 @@ def validate_social_network(model, save_dir="analysis_plots"):
                     if cell in agent.beliefs and isinstance(agent.beliefs[cell], dict):
                         level = agent.beliefs[cell].get('level', 0)
                         component_beliefs.append(level)
-            
+
             # Calculate variance if we have enough beliefs
             if len(component_beliefs) > 1:
                 component_vars[i][cell] = np.var(component_beliefs)
-    
+
     # Calculate SECI values for each component
     # Within the validate_social_network function, update the SECI calculation section:
 
@@ -2979,7 +2926,7 @@ def validate_social_network(model, save_dir="analysis_plots"):
             print(f"  Component {i} too small for SECI calculation")
             component_seci_values[i] = 0
             continue
-            
+
         # Get all beliefs from agents in this component
         component_beliefs_by_cell = {}
         for node in component:
@@ -2992,7 +2939,7 @@ def validate_social_network(model, save_dir="analysis_plots"):
                         if cell not in component_beliefs_by_cell:
                             component_beliefs_by_cell[cell] = []
                         component_beliefs_by_cell[cell].append(level)
-        
+
         # Calculate SECI for this component
         seci_values = []
         for cell, component_levels in component_beliefs_by_cell.items():
@@ -3001,20 +2948,20 @@ def validate_social_network(model, save_dir="analysis_plots"):
                 # Calculate component variance
                 component_var = np.var(component_levels)
                 global_var = global_vars[cell]
-                
+
                 # Debug output for this specific cell
                 print(f"    Cell {cell}: global_var={global_var:.4f}, component_var={component_var:.4f}")
-                
+
                 # SECI formula: (global_var - component_var) / global_var
                 seci = (global_var - component_var) / global_var
                 seci = max(0, min(1, seci))  # Bound to [0,1]
                 seci_values.append(seci)
-                
+
                 # Extra debug if SECI is 0
                 if seci < 0.01:
                     print(f"      Low SECI ({seci:.4f}) - component levels: {component_levels}")
                     print(f"      Global levels in cell {cell}: {all_beliefs.get(cell, [])}")
-        
+
         # Average SECI for this component
         if seci_values:
             component_seci_values[i] = sum(seci_values) / len(seci_values)
@@ -3022,17 +2969,17 @@ def validate_social_network(model, save_dir="analysis_plots"):
         else:
             print(f"  Component {i}: No variance data available for SECI calculation")
             component_seci_values[i] = 0
-    
+
     # Calculate average SECI across all components
     if component_seci_values:
         avg_component_seci = sum(component_seci_values.values()) / len(component_seci_values)
         print(f"  Average component SECI: {avg_component_seci:.4f}")
     else:
         avg_component_seci = 0
-    
+
     # Create a histogram of SECI values
     plt.figure(figsize=(10, 6))
-    plt.hist(list(component_seci_values.values()), bins=10, range=(0, 1), 
+    plt.hist(list(component_seci_values.values()), bins=10, range=(0, 1),
              color='skyblue', edgecolor='black', alpha=0.7)
     plt.xlabel('SECI Value')
     plt.ylabel('Frequency')
@@ -3040,7 +2987,7 @@ def validate_social_network(model, save_dir="analysis_plots"):
     plt.grid(True, linestyle='--', alpha=0.7)
     plt.savefig(os.path.join(save_dir, "component_seci_histogram.png"), dpi=300, bbox_inches='tight')
     plt.close()
-    
+
     return {
         'num_components': len(components),
         'component_sizes': [len(c) for c in components],
@@ -3053,7 +3000,7 @@ def calculate_component_seci(model, components):
     """Calculate SECI values for network components without validation."""
     if not components:
         return 0
-        
+
     # Get all beliefs across all agents
     all_beliefs = {}
     for agent_id, agent in model.humans.items():
@@ -3063,13 +3010,13 @@ def calculate_component_seci(model, components):
                 if cell not in all_beliefs:
                     all_beliefs[cell] = []
                 all_beliefs[cell].append(level)
-    
+
     # Calculate global variance for all beliefs
     global_vars = {}
     for cell, levels in all_beliefs.items():
         if len(levels) > 1:
             global_vars[cell] = np.var(levels)
-    
+
     # Calculate SECI for each component
     component_seci_values = {}
     for i, component in enumerate(components):
@@ -3077,7 +3024,7 @@ def calculate_component_seci(model, components):
         if len(component) <= 1:
             component_seci_values[i] = 0
             continue
-            
+
         # Get all beliefs from agents in this component
         component_beliefs_by_cell = {}
         for node in component:
@@ -3090,7 +3037,7 @@ def calculate_component_seci(model, components):
                         if cell not in component_beliefs_by_cell:
                             component_beliefs_by_cell[cell] = []
                         component_beliefs_by_cell[cell].append(level)
-        
+
         # Calculate SECI for this component
         seci_values = []
         for cell, component_levels in component_beliefs_by_cell.items():
@@ -3100,20 +3047,21 @@ def calculate_component_seci(model, components):
                 seci = (global_var - component_var) / global_var
                 seci = max(0, min(1, seci))  # Bound to [0,1]
                 seci_values.append(seci)
-        
+
         # Average SECI for this component
         if seci_values:
             component_seci_values[i] = sum(seci_values) / len(seci_values)
         else:
             component_seci_values[i] = 0
-    
+
     # Calculate average SECI across all components
     if component_seci_values:
         avg_component_seci = sum(component_seci_values.values()) / len(component_seci_values)
     else:
         avg_component_seci = 0
-        
+
     return avg_component_seci
+
 # Function to monitor component SECI evolution over time
 def track_component_seci_evolution(model, tick_interval=10, save_dir="analysis_plots"):
     """
@@ -3141,10 +3089,9 @@ def track_component_seci_evolution(model, tick_interval=10, save_dir="analysis_p
     model.component_seci_evolution['ticks'].append(model.tick)
     model.component_seci_evolution['num_components'].append(num_components)
 
-    # Calculate the component SECI values directly instead of using validate_social_network
+    # Calculate component SECI values
     component_seci_values = {}
-    avg_component_seci = 0
-    
+
     # Get all beliefs across all agents
     all_beliefs = {}
     for agent_id, agent in model.humans.items():
@@ -3154,20 +3101,20 @@ def track_component_seci_evolution(model, tick_interval=10, save_dir="analysis_p
                 if cell not in all_beliefs:
                     all_beliefs[cell] = []
                 all_beliefs[cell].append(level)
-    
+
     # Calculate global variance for all beliefs
     global_vars = {}
     for cell, levels in all_beliefs.items():
         if len(levels) > 1:
             global_vars[cell] = np.var(levels)
-    
+
     # Calculate SECI for each component
     for i, component in enumerate(components):
         # Only calculate SECI for components with enough agents
         if len(component) <= 1:
             component_seci_values[i] = 0
             continue
-            
+
         # Get all beliefs from agents in this component
         component_beliefs_by_cell = {}
         for node in component:
@@ -3180,7 +3127,7 @@ def track_component_seci_evolution(model, tick_interval=10, save_dir="analysis_p
                         if cell not in component_beliefs_by_cell:
                             component_beliefs_by_cell[cell] = []
                         component_beliefs_by_cell[cell].append(level)
-        
+
         # Calculate SECI for this component
         seci_values = []
         for cell, component_levels in component_beliefs_by_cell.items():
@@ -3190,66 +3137,65 @@ def track_component_seci_evolution(model, tick_interval=10, save_dir="analysis_p
                 seci = (global_var - component_var) / global_var
                 seci = max(0, min(1, seci))  # Bound to [0,1]
                 seci_values.append(seci)
-        
+
         # Average SECI for this component
         if seci_values:
             component_seci_values[i] = sum(seci_values) / len(seci_values)
         else:
             component_seci_values[i] = 0
-    
+
     # Calculate average component SECI
     if component_seci_values:
         avg_component_seci = sum(component_seci_values.values()) / len(component_seci_values)
-    
+    else:
+        avg_component_seci = 0
+
     # Record average component SECI
     model.component_seci_evolution['avg_component_seci'].append(avg_component_seci)
 
-    # Record individual component data
-    for i, seci in component_seci_values.items():
-        if i not in model.component_seci_evolution['component_data']:
-            model.component_seci_evolution['component_data'][i] = []
-        
+    # Record individual component data with unique identifiers
+    for comp_id, seci_value in component_seci_values.items():
+        if comp_id not in model.component_seci_evolution['component_data']:
+            model.component_seci_evolution['component_data'][comp_id] = []
+
         # Add None for any missing ticks
-        while len(model.component_seci_evolution['component_data'][i]) < len(model.component_seci_evolution['ticks']) - 1:
-            model.component_seci_evolution['component_data'][i].append(None)
-        
+        while len(model.component_seci_evolution['component_data'][comp_id]) < len(model.component_seci_evolution['ticks']) - 1:
+            model.component_seci_evolution['component_data'][comp_id].append(None)
+
         # Add current value
-        model.component_seci_evolution['component_data'][i].append(seci)
-    # Plot the evolution of SECI values
+        model.component_seci_evolution['component_data'][comp_id].append(seci_value)
+
+    # Fill in None for components that no longer exist
+    for comp_id in model.component_seci_evolution['component_data']:
+        if comp_id not in component_seci_values:
+            # Fill with None if component doesn't exist at this tick
+            while len(model.component_seci_evolution['component_data'][comp_id]) < len(model.component_seci_evolution['ticks']):
+                model.component_seci_evolution['component_data'][comp_id].append(None)
+
+    # Store in the model's component_seci_data list format
+    model.component_seci_data.append({'tick': model.tick, 'component_data': component_seci_values})
+
+    # Plot evolution only if we have enough data
     if len(model.component_seci_evolution['ticks']) > 1:
+        # Create a simplified plot showing just average component SECI
         plt.figure(figsize=(12, 8))
-        
+
         # Plot average component SECI
-        plt.plot(model.component_seci_evolution['ticks'], 
+        plt.plot(model.component_seci_evolution['ticks'],
                 model.component_seci_evolution['avg_component_seci'],
                 'k-', linewidth=2, label='Average Component SECI')
-        
-        # Plot individual component SECI values with different colors
-        for i, values in model.component_seci_evolution['component_data'].items():
-            # Fill in missing values at the end
-            while len(values) < len(model.component_seci_evolution['ticks']):
-                values.append(None)
-            
-            # Convert None values to NaN for plotting
-            plot_values = [float('nan') if v is None else v for v in values]
-            
-            # Use a different color from tab10 colormap
-            color = plt.cm.tab10(i % 10)
-            plt.plot(model.component_seci_evolution['ticks'], plot_values,
-                    '--', color=color, alpha=0.7, linewidth=1.5,
-                    label=f'Component {i}')
-        
+
         plt.xlabel('Tick')
         plt.ylabel('SECI Value')
-        plt.title('Evolution of Component SECI Values')
+        plt.title('Evolution of Average Component SECI')
         plt.grid(True, linestyle='--', alpha=0.7)
         plt.legend()
-        
+
         # Save the figure
-        plt.savefig(os.path.join(save_dir, f"component_seci_evolution_tick_{model.tick}.png"), 
+        plt.savefig(os.path.join(save_dir, f"component_seci_evolution_tick_{model.tick}.png"),
                   dpi=300, bbox_inches='tight')
         plt.close()
-        
+
         print(f"Component SECI evolution plot saved at tick {model.tick}")
 
 def run_simulation(params):
@@ -3257,19 +3203,43 @@ def run_simulation(params):
     for _ in range(params.get("ticks", 150)):
         model.step()
     return model
+    
+def safe_convert_to_array(data_list):
+    """Safely convert data to numpy array, handling mixed types."""
+    if not data_list:
+        return np.array([])
+    
+    # Check if all elements are dictionaries (from _last_metrics)
+    if all(isinstance(item, dict) for item in data_list):
+        # Convert dict data to tuples
+        converted = []
+        for item in data_list:
+            if 'tick' in item and 'value' in item:
+                converted.append((item['tick'], item['value']))
+            elif 'tick' in item and 'exploit' in item and 'explor' in item:
+                converted.append((item['tick'], item['exploit'], item['explor']))
+            else:
+                # Handle unknown dict format
+                converted.append((item.get('tick', 0), sum(v for k, v in item.items() if k != 'tick')))
+        return np.array(converted)
+    
+    # Check if all elements are tuples
+    elif all(isinstance(item, tuple) for item in data_list):
+        # Check tuple length consistency
+        if all(len(item) == 2 for item in data_list):
+            return np.array(data_list, dtype=[('tick', 'i4'), ('value', 'f4')])
+        elif all(len(item) == 3 for item in data_list):
+            return np.array(data_list, dtype=[('tick', 'i4'), ('exploit', 'f4'), ('explor', 'f4')])
+        else:
+            # Mixed tuple lengths - use object array
+            return np.array(data_list, dtype=object)
+    
+    # Mixed types or unknown format - use object array
+    else:
+        return np.array(data_list, dtype=object)
 
 def simulation_generator(num_runs, base_params):
-    """
-    Generator function that runs simulations and yields results one at a time.
-    Each iteration yields a tuple of (result_dict, model_object).
-
-    Args:
-        num_runs (int): Number of simulation runs to perform
-        base_params (dict): Base parameters for the simulation model
-
-    Yields:
-        tuple: (result_dict, model_object) for each run
-    """
+    """Generator function that runs simulations and yields results one at a time."""
     for seed in range(num_runs):
         try:
             # Set seeds for reproducibility
@@ -3281,6 +3251,7 @@ def simulation_generator(num_runs, base_params):
             model = run_simulation(base_params)
 
             # Extract all relevant data from the model
+            # In simulation_generator, update the result dict:
             result = {
                 "trust_stats": np.array(model.trust_stats),
                 "seci": np.array(model.seci_data),
@@ -3290,10 +3261,11 @@ def simulation_generator(num_runs, base_params):
                 "belief_error": np.array(model.belief_error_data),
                 "belief_variance": np.array(model.belief_variance_data),
                 "unmet_needs_evolution": model.unmet_needs_evolution,
-                "component_seci": np.array(getattr(model, 'component_seci_data', [])),
-                "aeci_variance": np.array(getattr(model, 'aeci_variance_data', [])),
-                "component_aeci": np.array(getattr(model, 'component_aeci_data', [])),
-                "component_ai_trust_variance": np.array(getattr(model, 'component_ai_trust_variance_data', [])),
+                # Handle component data flexibly
+                "component_seci": safe_convert_to_array(getattr(model, 'component_seci_data', [])),
+                "aeci_variance": safe_convert_to_array(getattr(model, 'aeci_variance_data', [])),
+                "component_aeci": safe_convert_to_array(getattr(model, 'component_aeci_data', [])),
+                "component_ai_trust_variance": safe_convert_to_array(getattr(model, 'component_ai_trust_variance_data', [])),
                 "event_ticks": list(getattr(model, 'event_ticks', []))
             }
 
@@ -3325,10 +3297,10 @@ def aggregate_simulation_results(num_runs, base_params):
         dict: A dictionary containing aggregated results (stacked arrays for time-series,
               summary stats for assistance, raw assistance counts, etc.).
     """
-    # --- Initialize Lists for ALL metrics ---
+    # --- Initialize Lists for all metrics ---
     trust_list, seci_list, aeci_list, retain_aeci_list, retain_seci_list = [], [], [], [], []
     unmet_needs_evolution_list, belief_error_list, belief_variance_list = [], [], []
-
+    component_seci_data_list = []
     # Lists for new metrics
     component_seci_list, aeci_variance_list, component_aeci_list = [], [], []
     component_ai_trust_variance_list = [], []
@@ -3370,6 +3342,10 @@ def aggregate_simulation_results(num_runs, base_params):
         component_aeci_list.append(result.get("component_aeci", np.array([])))
         component_ai_trust_variance_list.append(result.get("component_ai_trust_variance", np.array([])))
         event_ticks_list.append(result.get("event_ticks", []))
+        if hasattr(model, 'component_seci_data'):
+            component_seci_data_list.append(model.component_seci_data)
+        else:
+            component_seci_data_list.append([])
 
         # Extract max AECI variance if available
         aeci_variance_data = result.get("aeci_variance", np.array([]))
@@ -3476,6 +3452,7 @@ def aggregate_simulation_results(num_runs, base_params):
 
         # New aggregated metrics
         "component_seci": component_seci_array,
+        "component_seci_data": component_seci_data_list,
         "aeci_variance": aeci_variance_array,
         "max_aeci_variance": max_aeci_variance_per_run,
         "component_aeci": component_aeci_array,
@@ -3927,69 +3904,69 @@ def safe_plot(ax, data_array, col_idx, label, color, linestyle='-', is_ratio=Tru
         return False
 def plot_component_seci_distribution(results_dict, title_suffix=""):
     """Plots the distribution of SECI values across different components"""
-    
-    # Check if component_seci_data exists
-    if not hasattr(results_dict, 'component_seci_data') or not results_dict.component_seci_data:
-        print(f"No component SECI data available for {title_suffix}")
-        return
-    
-    component_seci_data = results_dict['component_seci_data']
-    if not component_seci_data:
-        return
-    
-    # Extract the values (second column) from each timestep
-    seci_values = []
-    for timepoint in component_seci_data:
-        if len(timepoint) >= 2:  # Should have (tick, value)
-            seci_values.append(timepoint[1])
-    
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
-    
-    # Plot 1: SECI distribution histogram
-    if seci_values:
-        ax1.hist(seci_values, bins=30, color='skyblue', edgecolor='black', alpha=0.7)
-        ax1.axvline(np.mean(seci_values), color='red', linestyle='--', linewidth=2, label=f'Mean: {np.mean(seci_values):.3f}')
-        ax1.axvline(np.median(seci_values), color='green', linestyle='--', linewidth=2, label=f'Median: {np.median(seci_values):.3f}')
-        ax1.set_xlabel('Component SECI Value')
-        ax1.set_ylabel('Frequency')
-        ax1.set_title(f'Component SECI Distribution {title_suffix}')
-        ax1.legend()
-        ax1.grid(True, alpha=0.3)
-    else:
-        ax1.text(0.5, 0.5, 'No component SECI data', ha='center', va='center')
-    
-    # Plot 2: Component SECI evolution with percentiles showing spread
-    if 'component_seci' in results_dict and results_dict['component_seci'].size > 0:
-        comp_seci_array = results_dict['component_seci']
-        if comp_seci_array.ndim >= 3 and comp_seci_array.shape[1] > 0:
-            # Calculate statistics across runs
-            ticks = comp_seci_array[0, :, 0]
-            mean = np.mean(comp_seci_array[:, :, 1], axis=0)
-            lower = np.percentile(comp_seci_array[:, :, 1], 10, axis=0)
-            upper = np.percentile(comp_seci_array[:, :, 1], 90, axis=0)
-            
-            ax2.plot(ticks, mean, 'b-', linewidth=2, label='Mean')
-            ax2.fill_between(ticks, lower, upper, alpha=0.3, color='blue')
-            
-            # Add min and max to show full spread
-            min_seci = np.min(comp_seci_array[:, :, 1], axis=0)
-            max_seci = np.max(comp_seci_array[:, :, 1], axis=0)
-            ax2.plot(ticks, min_seci, 'r--', alpha=0.5, label='Min')
-            ax2.plot(ticks, max_seci, 'g--', alpha=0.5, label='Max')
-            
+
+    # Extract component SECI data
+    if 'component_seci_data' in results_dict and results_dict['component_seci_data']:
+        component_seci_data = results_dict['component_seci_data']
+
+        # Extract all SECI values across all ticks and runs
+        all_seci_values = []
+        for run_data in component_seci_data:
+            for timestep_data in run_data:
+                if isinstance(timestep_data, dict) and 'component_data' in timestep_data:
+                    seci_values = list(timestep_data['component_data'].values())
+                    all_seci_values.extend([v for v in seci_values if v > 0])  # Exclude zeros
+
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
+
+        # Plot 1: SECI distribution histogram
+        if all_seci_values:
+            ax1.hist(all_seci_values, bins=30, color='skyblue', edgecolor='black', alpha=0.7)
+            ax1.axvline(np.mean(all_seci_values), color='red', linestyle='--', linewidth=2,
+                       label=f'Mean: {np.mean(all_seci_values):.3f}')
+            ax1.axvline(np.median(all_seci_values), color='green', linestyle='--', linewidth=2,
+                       label=f'Median: {np.median(all_seci_values):.3f}')
+            ax1.set_xlabel('Component SECI Value')
+            ax1.set_ylabel('Frequency')
+            ax1.set_title(f'Component SECI Distribution {title_suffix}')
+            ax1.legend()
+            ax1.grid(True, alpha=0.3)
+        else:
+            ax1.text(0.5, 0.5, 'No component SECI data', ha='center', va='center')
+
+        # Plot 2: Evolution of average component SECI
+        # Extract average values per tick
+        tick_to_avg = {}
+        for run_data in component_seci_data:
+            for timestep_data in run_data:
+                if isinstance(timestep_data, dict) and 'tick' in timestep_data and 'component_data' in timestep_data:
+                    tick = timestep_data['tick']
+                    seci_values = list(timestep_data['component_data'].values())
+                    valid_values = [v for v in seci_values if v > 0]
+                    if valid_values:
+                        if tick not in tick_to_avg:
+                            tick_to_avg[tick] = []
+                        tick_to_avg[tick].append(np.mean(valid_values))
+
+        if tick_to_avg:
+            ticks = sorted(tick_to_avg.keys())
+            means = [np.mean(tick_to_avg[t]) for t in ticks]
+
+            ax2.plot(ticks, means, 'b-', linewidth=2, label='Mean')
             ax2.set_xlabel('Tick')
-            ax2.set_ylabel('Component SECI')
-            ax2.set_title(f'Component SECI: Spread Analysis {title_suffix}')
+            ax2.set_ylabel('Average Component SECI')
+            ax2.set_title(f'Component SECI Evolution {title_suffix}')
             ax2.legend()
             ax2.grid(True, alpha=0.3)
-    else:
-        ax2.text(0.5, 0.5, 'No component SECI array data', ha='center', va='center')
-    
-    plt.tight_layout()
-    save_path = f"agent_model_results/component_seci_distribution_{title_suffix}.png"
-    plt.savefig(save_path.replace('(','').replace(')','').replace('=','_'))
-    plt.close()
+        else:
+            ax2.text(0.5, 0.5, 'No component SECI evolution data', ha='center', va='center')
 
+        plt.tight_layout()
+        save_path = f"agent_model_results/component_seci_distribution_{title_suffix}.png"
+        plt.savefig(save_path.replace('(','').replace(')','').replace('=','_'))
+        plt.close()
+    else:
+        print(f"No component SECI data available for {title_suffix}")
 
 def plot_grid_state(model, tick, save_dir="grid_plots"):
     """Plots the disaster grid state, agent locations, and tokens sent."""
@@ -5180,13 +5157,13 @@ def plot_simulation_overview(results_dict, title_suffix=""):
     # --- Data Extraction ---
     belief_error = results_dict.get("belief_error")
     belief_variance = results_dict.get("belief_variance")
-    unmet_needs_list = results_dict.get("unmet_needs_evol") 
+    unmet_needs_list = results_dict.get("unmet_needs_evol")
     assist_stats = results_dict.get("assist", {})
     raw_counts = results_dict.get("raw_assist_counts", {})
 
     # Determine Ticks - Use a sequence of approaches to find the actual tick count
     num_ticks = None
-    
+
     # Method 1: Check if belief_error contains valid tick data in first column
     if belief_error is not None and isinstance(belief_error, np.ndarray) and belief_error.ndim >= 3:
         if belief_error.shape[1] > 0 and belief_error.shape[2] > 0:
@@ -5199,7 +5176,7 @@ def plot_simulation_overview(results_dict, title_suffix=""):
                 # Just use the array shape if not storing ticks in column 0
                 num_ticks = belief_error.shape[1]
                 print(f"Using {num_ticks} timepoints from belief_error shape")
-    
+
     # Method 2: If not found from belief_error, check other data arrays
     if num_ticks is None:
         for data_key, data_array in [
@@ -5211,7 +5188,7 @@ def plot_simulation_overview(results_dict, title_suffix=""):
                     num_ticks = data_array.shape[1]
                     print(f"Using {num_ticks} timepoints from {data_key} shape")
                     break
-    
+
     # Method 3: As a last resort, use unmet_needs data
     if num_ticks is None and unmet_needs_list and any(unmet_needs_list):
         max_len = 0
@@ -5221,12 +5198,12 @@ def plot_simulation_overview(results_dict, title_suffix=""):
         if max_len > 0:
             num_ticks = max_len
             print(f"Using {num_ticks} timepoints from max unmet_needs length")
-    
+
     # Fallback: If still no tick count found, use a reasonable default
     if num_ticks is None or num_ticks <= 0:
         print("Warning: Could not detect tick count from data, using default")
         num_ticks = 150  # Reasonable default
-    
+
     # Generate tick array
     ticks = np.arange(num_ticks)
     print(f"Using {len(ticks)} ticks for plotting")
@@ -5294,7 +5271,7 @@ def plot_simulation_overview(results_dict, title_suffix=""):
             # Find actual length of unmet needs data
             T_needs = max(len(run_data) for run_data in unmet_needs_list if run_data is not None and len(run_data)>0)
             T_needs = min(T_needs, num_ticks)  # Limit to the number of ticks
-            
+
             if T_needs > 0:
                 unmet_array = np.full((len(unmet_needs_list), T_needs), np.nan)
                 for i, run_data in enumerate(unmet_needs_list):
@@ -5305,9 +5282,9 @@ def plot_simulation_overview(results_dict, title_suffix=""):
                 mean = np.nanmean(unmet_array, axis=0)
                 lower = np.nanpercentile(unmet_array, 25, axis=0)
                 upper = np.nanpercentile(unmet_array, 75, axis=0)
-                
+
                 plot_ticks_needs = np.arange(T_needs)
-                
+
                 ax.plot(plot_ticks_needs, mean, label="Unmet Need", color="purple")
                 ax.fill_between(plot_ticks_needs, lower, upper, color="purple", alpha=0.4)
             else:
@@ -5335,22 +5312,22 @@ def plot_simulation_overview(results_dict, title_suffix=""):
             exploit_incorrect = assist_stats.get("exploit_incorrect", {}).get("mean", 0)
             explor_correct = assist_stats.get("explor_correct", {}).get("mean", 0)
             explor_incorrect = assist_stats.get("explor_incorrect", {}).get("mean", 0)
-            
+
             # Skip if all values are zero
             total = exploit_correct + exploit_incorrect + explor_correct + explor_incorrect
             if total > 0:
                 sizes = [exploit_correct, exploit_incorrect, explor_correct, explor_incorrect]
                 labels = ['Exploit Correct', 'Exploit Incorrect', 'Explor Correct', 'Explor Incorrect']
                 colors = ['forestgreen', 'lightcoral', 'skyblue', 'salmon']
-                
+
                 # Filter out zero values
                 non_zero_data = [(size, label, color) for size, label, color in zip(sizes, labels, colors) if size > 0]
                 if non_zero_data:
                     actual_sizes, actual_labels, actual_colors = zip(*non_zero_data)
-                    wedges, texts, autotexts = ax.pie(actual_sizes, labels=actual_labels, colors=actual_colors, 
+                    wedges, texts, autotexts = ax.pie(actual_sizes, labels=actual_labels, colors=actual_colors,
                                                     autopct=lambda pct: f'{pct:.1f}%' if pct > 0 else '',
                                                     pctdistance=0.85)
-                    
+
                     # Improve text visibility
                     plt.setp(autotexts, size=8, weight="bold")
                     plt.setp(texts, size=9)
@@ -6287,11 +6264,26 @@ def plot_experiment_c_comprehensive(results_c, dynamics_values, shock_values):
     performance_data = []
     labels = []
     
+    # Calculate max values, handling NaN cases
+    max_mae = np.nanmax(metrics['mae_final'])
+    max_unmet = np.nanmax(metrics['unmet_needs'])
+    
+    # If all values are NaN, use 1.0 to avoid division by zero
+    if np.isnan(max_mae):
+        max_mae = 1.0
+    if np.isnan(max_unmet):
+        max_unmet = 1.0
+    
     for i, dd in enumerate(dynamics_values):
         for j, sm in enumerate(shock_values):
-            performance_score = (metrics['correct_ratio'][i, j] * 0.4 + 
-                               (1 - metrics['mae_final'][i, j] / np.nanmax(metrics['mae_final'])) * 0.3 + 
-                               (1 - metrics['unmet_needs'][i, j] / np.nanmax(metrics['unmet_needs'])) * 0.3)
+            # Calculate performance score with proper error handling
+            if not np.isnan(metrics['correct_ratio'][i, j]) and not np.isnan(metrics['mae_final'][i, j]) and not np.isnan(metrics['unmet_needs'][i, j]):
+                performance_score = (metrics['correct_ratio'][i, j] * 0.4 + 
+                                   (1 - metrics['mae_final'][i, j] / max_mae) * 0.3 + 
+                                   (1 - metrics['unmet_needs'][i, j] / max_unmet) * 0.3)
+            else:
+                performance_score = 0  # Default to 0 if data is missing
+                
             performance_data.append(performance_score)
             labels.append(f'D={dd},S={sm}')
     
@@ -6348,6 +6340,7 @@ def plot_experiment_c_evolution(results_c, dynamics_values, shock_values):
     
     for plot_idx, metric in enumerate(metrics_to_plot):
         ax = axes[plot_idx]
+        plots_created = False
         
         for scenario_idx, (dd, sm) in enumerate(scenarios_to_plot):
             res_key = (dd, sm)
@@ -6367,16 +6360,27 @@ def plot_experiment_c_evolution(results_c, dynamics_values, shock_values):
                             mean_values = np.mean(data_array[:, :, col_idx], axis=0)
                             label = f'D={dd}, S={sm}, Type={col_idx}'
                             color = colors[(scenario_idx * 2 + col_idx-1) % len(colors)]
-                            ax.plot(ticks, mean_values, 
-                                   color=color,
-                                   linestyle=metric['style'],
-                                   linewidth=2,
-                                   label=label)
+                            
+                            # Only plot if we have valid data
+                            if not np.all(np.isnan(mean_values)):
+                                ax.plot(ticks, mean_values, 
+                                       color=color,
+                                       linestyle=metric['style'],
+                                       linewidth=2,
+                                       label=label)
+                                plots_created = True
         
         ax.set_title(metric['title'])
         ax.set_xlabel('Tick')
         ax.set_ylabel(metric['ylabel'])
-        ax.legend()
+        
+        # Only add legend if plots were created
+        if plots_created:
+            ax.legend()
+        else:
+            ax.text(0.5, 0.5, 'No data to display', 
+                   ha='center', va='center', transform=ax.transAxes)
+        
         ax.grid(True, alpha=0.3)
         
         # Set y-limits based on the metric type
@@ -6386,8 +6390,6 @@ def plot_experiment_c_evolution(results_c, dynamics_values, shock_values):
     plt.tight_layout()
     plt.savefig("agent_model_results/experiment_c_evolution.png", dpi=300)
     plt.close()
-
-
 
 #########################################
 # Utility Function for CSV Export
@@ -6434,116 +6436,116 @@ if __name__ == "__main__":
         "exploit_friend_bias": 0.1,
         "exploit_self_bias": 0.1
     }
-    num_runs = 20
+    num_runs = 1
     save_dir = "agent_model_results"
     os.makedirs(save_dir, exist_ok=True)
 
     ##############################################
     # Experiment A: Vary share_exploitative
     ##############################################
-    share_values = [0.3, 0.6]
-    file_a_pkl = os.path.join(save_dir, "results_experiment_A.pkl")
-    file_a_csv = os.path.join(save_dir, "results_experiment_A.csv")
+   # share_values = [0.3, 0.6]
+   # file_a_pkl = os.path.join(save_dir, "results_experiment_A.pkl")
+   # file_a_csv = os.path.join(save_dir, "results_experiment_A.csv")
 
-    param_name_a = "Share Exploitative"
-    print("Running Experiment A...")
-    results_a = experiment_share_exploitative(base_params, share_values, num_runs)
-    with open(file_a_pkl, "wb") as f:
-        pickle.dump(results_a, f)
-    export_results_to_csv(results_a, share_values, file_a_csv, "Experiment A")
+   # param_name_a = "Share Exploitative"
+  #  print("Running Experiment A...")
+   # results_a = experiment_share_exploitative(base_params, share_values, num_runs)
+   # with open(file_a_pkl, "wb") as f:
+  #      pickle.dump(results_a, f)
+  #  export_results_to_csv(results_a, share_values, file_a_csv, "Experiment A")
 
-    print("\n--- Plotting Aggregated Time Evolution for Experiment A ---")
-    for share in share_values:
-        print(f"{param_name_a} = {share}")
-        # Load data for this parameter setting from the saved dictionary
-        results_dict = results_a.get(share, {})
-        title_suffix = f"({param_name_a}={share})"
+ #   print("\n--- Plotting Aggregated Time Evolution for Experiment A ---")
+  #  for share in share_values:
+  #      print(f"{param_name_a} = {share}")
+ #       # Load data for this parameter setting from the saved dictionary
+  #      results_dict = results_a.get(share, {})
+ #       title_suffix = f"({param_name_a}={share})"
 
-        if results_dict:
+ #       if results_dict:
             # Call  consolidated plot functions
-            plot_simulation_overview(results_dict, title_suffix)
+       #     plot_simulation_overview(results_dict, title_suffix)
             # Ensure your aggregation collects component data for this one:
-            plot_echo_chamber_indices(results_dict, title_suffix)
+      #      plot_echo_chamber_indices(results_dict, title_suffix)
             # Call the original trust plot function (it's already well-structured)
-            plot_trust_evolution(results_dict["trust_stats"], title_suffix)
+      #      plot_trust_evolution(results_dict["trust_stats"], title_suffix)
 
             # Optional: Call final state bar plot for assistance
-            if "assist" in results_dict and "raw_assist_counts" in results_dict:
-                plot_assistance_bars(results_dict["assist"], results_dict["raw_assist_counts"], title_suffix)
+            # if "assist" in results_dict and "raw_assist_counts" in results_dict:
+            #    plot_assistance_bars(results_dict["assist"], results_dict["raw_assist_counts"], title_suffix)
 
-         else:
-             print(f"  Skipping plots for {param_name_a}={share} (missing data)")
+      #  else:
+       #     print(f"  Skipping plots for {param_name_a}={share} (missing data)")
 
     # --- Plot SUMMARY Comparisons Across Parameters (AFTER LOOP) ---
-     print("\n--- Plotting Summary Comparisons for Experiment A ---")
+   # print("\n--- Plotting Summary Comparisons for Experiment A ---")
     # Plot how correct token share changes with the parameter
-     if results_a: # Check if results exist before plotting summary
-         plot_correct_token_shares_bars(results_a, share_values)
+   # if results_a: # Check if results exist before plotting summary
+    #    plot_correct_token_shares_bars(results_a, share_values)
 
-    # Boxplot Summaries 
-     print("\n--- Plotting Boxplot Summaries for Experiment A ---")
-     # Create temporary versions of boxplot functions that work with share values instead of alignment values
-     plot_summary_echo_indices_by_share = lambda results, shares, suffix: plot_summary_echo_indices_vs_alignment(
-         results, shares, f"Share Exploitative {suffix}")
-     plot_summary_performance_by_share = lambda results, shares, suffix: plot_summary_performance_vs_alignment(
-         results, shares, f"Share Exploitative {suffix}")
+    # Add these lines to Experiment A's plotting section:
+   # print("\n--- Plotting Boxplot Summaries for Experiment A ---")
+    # Create temporary versions of boxplot functions that work with share values instead of alignment values
+  #  plot_summary_echo_indices_by_share = lambda results, shares, suffix: plot_summary_echo_indices_vs_alignment(
+  #      results, shares, f"Share Exploitative {suffix}")
+  #  plot_summary_performance_by_share = lambda results, shares, suffix: plot_summary_performance_vs_alignment(
+    #    results, shares, f"Share Exploitative {suffix}")
 
     # Call the adapted functions
-     plot_summary_echo_indices_by_share(results_a, share_values, "")
-     plot_summary_performance_by_share(results_a, share_values, "")
+ #   plot_summary_echo_indices_by_share(results_a, share_values, "")
+  #  plot_summary_performance_by_share(results_a, share_values, "")
 
     ##############################################
     # Experiment B: Vary AI Alignment Level
     ##############################################
 
-    alignment_values = [0.0, 0.25, 0.5, 0.75, 0.95]  # Initial scan
-    param_name_b = "AI Alignment Tipping Point"
-    file_b_pkl = os.path.join(save_dir, f"results_{param_name_b.replace(' ','_')}.pkl")
+    #alignment_values = [0.0, 0.25, 0.5, 0.75, 0.95]  # Initial scan
+    #param_name_b = "AI Alignment Tipping Point"
+    #file_b_pkl = os.path.join(save_dir, f"results_{param_name_b.replace(' ','_')}.pkl")
 
-    print(f"\nRunning {param_name_b} Experiment...")
-    results_b = experiment_alignment_tipping_point(base_params, alignment_values, num_runs=10)
+    #print(f"\nRunning {param_name_b} Experiment...")
+    #results_b = experiment_alignment_tipping_point(base_params, alignment_values, num_runs=10)
 
     # Save results
-    with open(file_b_pkl, "wb") as f:
-        pickle.dump(results_b, f)
+    #with open(file_b_pkl, "wb") as f:
+        #pickle.dump(results_b, f)
 
     # Get all alignment values (including fine-grained ones added by tipping point detection)
-    all_alignment_values = sorted(list(results_b.keys()))
+    #all_alignment_values = sorted(list(results_b.keys()))
 
     # --- Plot SUMMARY Comparisons (only once, after getting all results) ---
-    print(f"\n--- Plotting Summary Comparisons for {param_name_b} ---")
-    if results_b:
+    #print(f"\n--- Plotting Summary Comparisons for {param_name_b} ---")
+    #if results_b:
         # Use all alignment values found in results
-        plot_final_echo_indices_vs_alignment(results_b, all_alignment_values, title_suffix="Tipping Points")
-        plot_average_performance_vs_alignment(results_b, all_alignment_values, title_suffix="Tipping Points")
-        
+        #plot_final_echo_indices_vs_alignment(results_b, all_alignment_values, title_suffix="Tipping Points")
+        #plot_average_performance_vs_alignment(results_b, all_alignment_values, title_suffix="Tipping Points")
+
         # Boxplot summaries
-        print(f"\n--- Plotting Boxplot Summaries for {param_name_b} ---")
-        plot_summary_echo_indices_vs_alignment(results_b, all_alignment_values, title_suffix="Tipping Points")
-        plot_summary_performance_vs_alignment(results_b, all_alignment_values, title_suffix="Tipping Points")
+        #print(f"\n--- Plotting Boxplot Summaries for {param_name_b} ---")
+        #plot_summary_echo_indices_vs_alignment(results_b, all_alignment_values, title_suffix="Tipping Points")
+        #plot_summary_performance_vs_alignment(results_b, all_alignment_values, title_suffix="Tipping Points")
 
     # --- Plot Aggregated Time Evolution for EACH Alignment Level ---
-    print(f"\n--- Plotting Aggregated Time Evolution for {param_name_b} ---")
-    for align in all_alignment_values:  # Use all values, not just the initial ones
-        print(f"{param_name_b} = {align}")
-        results_dict = results_b.get(align, {})
-        title_suffix = f"(AI Alignment={align})"
+    #print(f"\n--- Plotting Aggregated Time Evolution for {param_name_b} ---")
+    #for align in all_alignment_values:  # Use all values, not just the initial ones
+       # print(f"{param_name_b} = {align}")
+        #results_dict = results_b.get(align, {})
+       # title_suffix = f"(AI Alignment={align})"
 
-        if results_dict:
+       # if results_dict:
             # Call the consolidated plotting functions
-            plot_simulation_overview(results_dict, title_suffix)
-            plot_trust_evolution(results_dict.get("trust_stats"), title_suffix)
-            plot_echo_chamber_indices(results_dict, title_suffix)
-            plot_component_seci_distribution(results_dict, title_suffix)
+           # plot_simulation_overview(results_dict, title_suffix)
+           # plot_trust_evolution(results_dict.get("trust_stats"), title_suffix)
+           # plot_echo_chamber_indices(results_dict, title_suffix)
+           # plot_component_seci_distribution(results_dict, title_suffix)
 
             # Generate trust vs alignment plot
-            model_params = base_params.copy()
-            model_params["ai_alignment_level"] = align
-            temp_model = run_simulation(model_params)
-            plot_ai_trust_vs_alignment(temp_model, save_dir=f"{save_dir}/trust_plots")
-            del temp_model
-        else:
-            print(f"  Skipping plots for {param_name_b}={align} (missing data)")
+         #   model_params = base_params.copy()
+         #   model_params["ai_alignment_level"] = align
+         #   temp_model = run_simulation(model_params)
+         #   plot_ai_trust_vs_alignment(temp_model, save_dir=f"{save_dir}/trust_plots")
+         #   del temp_model
+       # else:
+         #   print(f"  Skipping plots for {param_name_b}={align} (missing data)")
 
     # Optional: Create a comparison plot of component SECI across all alignment values
     #if results_b:
@@ -6552,8 +6554,8 @@ if __name__ == "__main__":
     ##############################################
     # Experiment C: Vary Disaster Dynamics and Shock Magnitude
     ##############################################
-    dynamics_values = [1, 2, 3]
-    shock_values = [1, 2, 3]
+    dynamics_values = [1, 3]
+    shock_values = [1, 3]
     results_c = experiment_disaster_dynamics(base_params, dynamics_values, shock_values, num_runs)
 
     # Initialize matrices for heatmaps
