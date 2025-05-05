@@ -610,7 +610,7 @@ class HumanAgent(Agent):
             # Apply the calculated decay rate
             self.trust[source_id] = max(0, self.trust[source_id] - decay_rate)
 
-    def update_belief_bayesian(self, cell, reported_level, source_trust):
+    def update_belief_bayesian(self, cell, reported_level, source_trust, source_id=None):
         """Update agent's belief about a cell using Bayesian principles."""
         try:
             # Get current belief
@@ -717,6 +717,7 @@ class HumanAgent(Agent):
                 'confidence': posterior_confidence
             }
 
+            # Determine if this was a significant belief change
             significant_change = abs(posterior_level - prior_level) >= 1
 
             # Track AI source information for later trust updates
@@ -725,6 +726,21 @@ class HumanAgent(Agent):
                 if not hasattr(self, 'ai_acceptances'):
                     self.ai_acceptances = {}
                 self.ai_acceptances[cell] = self.model.tick
+                
+            # Track acceptance statistics based on significant changes
+            if significant_change:
+                # Using the source_id parameter
+                if source_id is not None:
+                    if source_id.startswith("H_"):
+                        self.accepted_human += 1
+                        if source_id in self.friends:
+                            self.accepted_friend += 1
+                    elif source_id.startswith("A_"):
+                        self.accepted_ai += 1
+                        
+                    # Log acceptance for debugging
+                    if self.model.debug_mode and self.model.tick % 10 == 0 and random.random() < 0.1:
+                        print(f"DEBUG: Agent {self.unique_id} accepted info from {source_id} for cell {cell}")
 
             # Return whether this update caused a significant belief change
             return significant_change
@@ -1031,8 +1047,7 @@ class HumanAgent(Agent):
                 reported_level = int(round(reported_value))
 
                 # Use the Bayesian update function
-                significant_update = self.update_belief_bayesian(cell, reported_level, source_trust)
-
+                significant_update = self.update_belief_bayesian(cell, reported_level, source_trust, source_id)
                 # Track if this was a significant belief update
                 if significant_update:
                     belief_updates += 1
@@ -1048,8 +1063,8 @@ class HumanAgent(Agent):
                             self.accepted_ai += 1
 
                             # DEBUG PRINT to track AI info acceptance
-                            if self.model.debug_mode and random.random() < 0.05:  # 5% of the time
-                                print(f"DEBUG: Agent {self.unique_id} accepted info from AI {source_id} for cell {cell}")
+                            #if self.model.debug_mode and random.random() < 0.05:  # 5% of the time
+                                #print(f"DEBUG: Agent {self.unique_id} accepted info from AI {source_id} for cell {cell}")
 
         except Exception as e:
             print(f"ERROR in Agent {self.unique_id} seek_information at tick {self.model.tick}: {e}")
@@ -1565,8 +1580,8 @@ class AIAgent(Agent):
                     sensed_vals_list.append(int(value_to_use))
 
                     # Track guessed values for debugging
-                    if is_guessed and hasattr(self.model, 'debug_mode') and self.model.debug_mode and random.random() < 0.02:
-                        print(f"DEBUG: AI {self.unique_id} guessed value {value_to_use} for cell {cell}")
+                    #if is_guessed and hasattr(self.model, 'debug_mode') and self.model.debug_mode and random.random() < 0.02:
+                        #print(f"DEBUG: AI {self.unique_id} guessed value {value_to_use} for cell {cell}")
 
                     # Get the CALLER'S belief for this cell (for alignment)
                     caller_belief_info = caller_beliefs.get(cell, {'level': 0, 'confidence': 0.1})
@@ -1582,8 +1597,8 @@ class AIAgent(Agent):
             return {}
 
         # Debug output
-        if hasattr(self.model, 'debug_mode') and self.model.debug_mode and random.random() < 0.1:
-            print(f"DEBUG: AI {self.unique_id} has data for {len(valid_cells_in_query)} cells out of {len(cells_to_report_on)} requested")
+        #if hasattr(self.model, 'debug_mode') and self.model.debug_mode and random.random() < 0.1:
+            #print(f"DEBUG: AI {self.unique_id} has data for {len(valid_cells_in_query)} cells out of {len(cells_to_report_on)} requested")
 
         # Convert to numpy arrays for alignment logic
         sensed_vals = np.array(sensed_vals_list)
@@ -1862,9 +1877,87 @@ class DisasterModel(Model):
 
     def debug_log(self, message, force=False):
         """Log debug messages if debug mode is enabled or forced."""
-        if self.debug_mode or force:
-            print(f"[DEBUG] Tick {self.tick}: {message}")
+        #if self.debug_mode or force:
+           # print(f"[DEBUG] Tick {self.tick}: {message}")
 
+    def calculate_aeci_variance(self):
+        """Calculate AI Echo Chamber Index variance with improved debugging"""
+        aeci_variance = 0.0
+        
+        # Define AI-reliant agents
+        min_calls_threshold = 2  # Reduced threshold for testing
+        min_ai_ratio = 0.1      # Reduced threshold
+        
+        ai_reliant_agents = []
+        for agent in self.humans.values():
+            # Safety checks for valid counters
+            if not hasattr(agent, 'accum_calls_total') or not hasattr(agent, 'accum_calls_ai'):
+                continue
+                
+            total_calls = max(1, agent.accum_calls_total)  # Prevent division by zero
+            ai_ratio = agent.accum_calls_ai / total_calls
+            
+            if total_calls >= min_calls_threshold and ai_ratio >= min_ai_ratio:
+                ai_reliant_agents.append(agent)
+        
+        # Debug print
+        if self.debug_mode and self.tick % 10 == 0:
+            print(f"\nAECI Variance Calculation at Tick {self.tick}:")
+            print(f"  Found {len(ai_reliant_agents)}/{len(self.humans)} AI-reliant agents")
+            for agent in list(ai_reliant_agents)[:3]:  # Sample first 3 agents
+                print(f"  Agent {agent.unique_id}: AI calls={agent.accum_calls_ai}, Total={agent.accum_calls_total}")
+        
+        # Get global belief variance
+        all_beliefs = []
+        for agent in self.humans.values():
+            for belief_info in agent.beliefs.values():
+                if isinstance(belief_info, dict):
+                    level = belief_info.get('level', 0)
+                    if not np.isnan(level):  # Filter out NaN values
+                        all_beliefs.append(level)
+        
+        # Calculate global variance with safety check
+        if len(all_beliefs) > 1:
+            global_var = np.var(all_beliefs)
+        else:
+            global_var = 0.0
+            
+        # Only proceed if we have a valid global variance and AI-reliant agents
+        if global_var > 0 and ai_reliant_agents:
+            # Get AI-reliant agents' beliefs
+            ai_reliant_beliefs = []
+            for agent in ai_reliant_agents:
+                for belief_info in agent.beliefs.values():
+                    if isinstance(belief_info, dict):
+                        level = belief_info.get('level', 0)
+                        if not np.isnan(level):  # Filter out NaN values
+                            ai_reliant_beliefs.append(level)
+            
+            # Calculate AI-reliant variance with safety check
+            if len(ai_reliant_beliefs) > 1:
+                ai_reliant_var = np.var(ai_reliant_beliefs)
+                # Calculate variance reduction ratio
+                aeci_variance = max(0, min(1, (global_var - ai_reliant_var) / global_var))
+                
+                if self.debug_mode and self.tick % 10 == 0:
+                    print(f"  Global variance: {global_var:.4f}")
+                    print(f"  AI-reliant variance: {ai_reliant_var:.4f}")
+                    print(f"  AECI variance: {aeci_variance:.4f}")
+        
+        # Store result in a consistent format
+        aeci_variance_tuple = (self.tick, aeci_variance)
+        
+        # Update metrics dictionary
+        self._last_metrics['aeci_variance'] = {
+            'tick': self.tick,
+            'value': aeci_variance
+        }
+        
+        # Store in the array
+        self.aeci_variance_data.append(aeci_variance_tuple)
+        
+        return aeci_variance_tuple
+        
     def initialize_social_network(self):
         """Initialize social network with multiple components and meaningful homophily."""
         # Calculate how many exploitative and exploratory agents we have
@@ -2292,48 +2385,7 @@ class DisasterModel(Model):
                 self.seci_data.append((self.tick, 0, 0))
 
             # --- AECI-Variance (AI Echo Chamber Index) ---
-            aeci_variance = 0.0
-
-            # Define AI-reliant agents with a more inclusive threshold
-            min_calls_threshold = 3  # Minimum calls to be considered active
-            min_ai_ratio = 0.2      # Lowered from 0.3 to be more inclusive
-
-            ai_reliant_agents = [agent for agent in self.humans.values()
-                                if agent.accum_calls_total >= min_calls_threshold and
-                                    (agent.accum_calls_ai / max(1, agent.accum_calls_total)) >= min_ai_ratio]
-
-            # Only compute variance if we have AI-reliant agents
-            if ai_reliant_agents:
-                # Get global variance first
-                all_belief_levels = []
-                for agent in self.humans.values():
-                    for belief_info in agent.beliefs.values():
-                        if isinstance(belief_info, dict):
-                            all_belief_levels.append(belief_info.get('level', 0))
-
-                global_var = np.var(all_belief_levels) if all_belief_levels else 1e-6
-
-                # Now get AI-reliant agents' belief variance
-                ai_reliant_beliefs = []
-                for agent in ai_reliant_agents:
-                    for belief_info in agent.beliefs.values():
-                        if isinstance(belief_info, dict):
-                            ai_reliant_beliefs.append(belief_info.get('level', 0))
-
-                if ai_reliant_beliefs and global_var > 1e-9:
-                    ai_reliant_var = np.var(ai_reliant_beliefs)
-                    aeci_variance = max(0, min(1, (global_var - ai_reliant_var) / global_var))
-                elif ai_reliant_beliefs:
-                    aeci_variance = 0.0  # If global_var is essentially zero, no reduction is possible
-
-            # Update last metrics
-            self._last_metrics['aeci_variance'] = {
-                'tick': self.tick,
-                'value': aeci_variance
-            }
-
-            # Store the value
-            self.aeci_variance_data.append((self.tick, aeci_variance))
+            aeci_variance_result = self.calculate_aeci_variance()
 
             # --- Component-AECI ---
             component_aeci_list = []
@@ -4440,45 +4492,56 @@ def plot_max_aeci_variance_by_alignment(results_dict, alignment_values, title_su
     for align in alignment_values:
         result = results_dict.get(align, {})
         max_values = result.get("max_aeci_variance", [])
-
+        
         if max_values:
-            # Calculate statistics for this alignment level
-            mean_max = np.mean(max_values)
-            p25 = np.percentile(max_values, 25)
-            p75 = np.percentile(max_values, 75)
+            # Filter out NaN or infinite values
+            valid_max_values = [v for v in max_values if not np.isnan(v) and not np.isinf(v)]
+            
+            if valid_max_values:
+                # Calculate statistics for this alignment level
+                mean_max = np.mean(valid_max_values)
+                p25 = np.percentile(valid_max_values, 25)
+                p75 = np.percentile(valid_max_values, 75)
 
-            max_var_means.append(mean_max)
-            max_var_errors[0].append(max(0, mean_max - p25))  # Lower error
-            max_var_errors[1].append(max(0, p75 - mean_max))  # Upper error
+                max_var_means.append(mean_max)
+                max_var_errors[0].append(max(0, mean_max - p25))  # Lower error
+                max_var_errors[1].append(max(0, p75 - mean_max))  # Upper error
+            else:
+                # If no valid values, append zeros
+                max_var_means.append(0)
+                max_var_errors[0].append(0)
+                max_var_errors[1].append(0)
         else:
             # If no data, append zeros
             max_var_means.append(0)
             max_var_errors[0].append(0)
             max_var_errors[1].append(0)
 
-    # Create plot
+    # Create plot with error handling
     plt.figure(figsize=(10, 6))
-    x = np.arange(len(alignment_values))
-
-    plt.bar(x, max_var_means, width=0.6, yerr=max_var_errors, capsize=5,
-            color='magenta', alpha=0.7, label='Max AECI Variance')
-
-    # Add value labels on top of bars
-    for i, v in enumerate(max_var_means):
-        plt.text(i, v + 0.01, f'{v:.3f}', ha='center', va='bottom')
-
-    plt.xlabel('AI Alignment Level')
-    plt.ylabel('Maximum AECI Variance Reduction')
-    plt.title(f'Maximum AI Belief Variance Reduction by Alignment Level {title_suffix}')
-    plt.xticks(x, alignment_values)
-    plt.grid(axis='y', linestyle='--', alpha=0.7)
-    plt.legend()
-
-    # Save and show the plot
-    save_path = f"agent_model_results/max_aeci_variance_{title_suffix.replace('(','').replace(')','').replace('=','_')}.png"
-    plt.savefig(save_path)
-    plt.tight_layout()
-    plt.show()
+    try:
+        x = np.arange(len(alignment_values))
+        plt.bar(x, max_var_means, width=0.6, yerr=max_var_errors, capsize=5,
+                color='magenta', alpha=0.7, label='Max AECI Variance')
+        
+        # Add value labels with error handling
+        for i, v in enumerate(max_var_means):
+            if not np.isnan(v) and not np.isinf(v):
+                plt.text(i, v + 0.01, f'{v:.3f}', ha='center', va='bottom')
+        
+        plt.xlabel('AI Alignment Level')
+        plt.ylabel('Maximum AECI Variance Reduction')
+        plt.title(f'Maximum AI Belief Variance Reduction by Alignment Level {title_suffix}')
+        plt.xticks(x, alignment_values)
+        plt.grid(axis='y', linestyle='--', alpha=0.7)
+        plt.legend()
+        
+        save_path = f"agent_model_results/max_aeci_variance_{title_suffix.replace('(','').replace(')','').replace('=','_')}.png"
+        plt.savefig(save_path)
+    except Exception as e:
+        print(f"Error in plot_max_aeci_variance_by_alignment: {e}")
+    finally:
+        plt.close()
 
 #########################################
 # Echo chamber plotting functions
@@ -6140,264 +6203,279 @@ def plot_unmet_need_evolution(unmet_needs_data, title_suffix=""):
 
     return fig
 
-# Fix for Experiment C - add error handling and data validation
 def plot_experiment_c_comprehensive(results_c, dynamics_values, shock_values):
-    """Create comprehensive visualization for experiment C with robust error handling"""
+    """Create comprehensive visualization for experiment C with direct matrix population"""
     
     print("Starting comprehensive plot creation...")
     
-    # Create figure with subplots
-    try:
-        fig = plt.figure(figsize=(20, 16))
-        gs = fig.add_gridspec(3, 3, hspace=0.3, wspace=0.3)
-        
-        # Define the metrics we'll track
-        metrics = {
-            'correct_ratio': np.full((len(dynamics_values), len(shock_values)), np.nan),
-            'mae_final': np.full((len(dynamics_values), len(shock_values)), np.nan),
-            'unmet_needs': np.full((len(dynamics_values), len(shock_values)), np.nan),
-            'seci_final': np.full((len(dynamics_values), len(shock_values)), np.nan),
-            'aeci_final': np.full((len(dynamics_values), len(shock_values)), np.nan),
-            'ai_trust_final': np.full((len(dynamics_values), len(shock_values)), np.nan)
-        }
-        
-        print("Collecting data for each parameter combination...")
-        
-        # Collect data for each combination
-        for i, dd in enumerate(dynamics_values):
-            for j, sm in enumerate(shock_values):
-                res_key = (dd, sm)
-                if res_key not in results_c:
-                    print(f"Missing data for dynamics={dd}, shock={sm}")
-                    continue
-                
-                res = results_c[res_key]
-                print(f"Processing data for dynamics={dd}, shock={sm}")
-                
-                # 1. Correct token ratio
-                try:
-                    if "raw_assist_counts" in res:
-                        counts = res["raw_assist_counts"]
-                        
-                        # Extract values safely
-                        exploit_correct = sum(counts.get("exploit_correct", [0]))
-                        exploit_incorrect = sum(counts.get("exploit_incorrect", [0]))
-                        explor_correct = sum(counts.get("explor_correct", [0]))
-                        explor_incorrect = sum(counts.get("explor_incorrect", [0]))
-                        
-                        total_correct = exploit_correct + explor_correct
-                        total_incorrect = exploit_incorrect + explor_incorrect
-                        total_sum = total_correct + total_incorrect
-                        
-                        if total_sum > 0:
-                            metrics['correct_ratio'][i, j] = total_correct / total_sum
-                except Exception as e:
-                    print(f"Error calculating correct ratio: {e}")
-                
-                # 2. Final mean absolute error (belief error)
-                try:
-                    if "belief_error" in res and isinstance(res["belief_error"], np.ndarray):
-                        belief_error = res["belief_error"]
-                        if belief_error.ndim >= 3 and belief_error.shape[1] > 0 and belief_error.shape[2] > 2:
-                            # Get the last timestep
-                            final_tick_data = belief_error[:, -1, :]
-                            
-                            # Extract the agent type columns (1 and 2)
-                            if final_tick_data.shape[1] > 2:
-                                agent_data = final_tick_data[:, 1:3]
-                                if np.any(~np.isnan(agent_data)):
-                                    metrics['mae_final'][i, j] = np.nanmean(agent_data)
-                except Exception as e:
-                    print(f"Error calculating MAE: {e}")
-                
-                # 3. Final unmet needs
-                try:
-                    if "unmet_needs_evol" in res and res["unmet_needs_evol"]:
-                        final_unmet = []
-                        for run_data in res["unmet_needs_evol"]:
-                            if isinstance(run_data, (list, np.ndarray)) and len(run_data) > 0:
-                                final_unmet.append(run_data[-1])
-                        
-                        if final_unmet:
-                            metrics['unmet_needs'][i, j] = np.nanmean(final_unmet)
-                except Exception as e:
-                    print(f"Error calculating unmet needs: {e}")
-                
-                # 4. Final SECI (average)
-                try:
-                    if "seci" in res and isinstance(res["seci"], np.ndarray):
-                        seci_data = res["seci"]
-                        if seci_data.ndim >= 3 and seci_data.shape[1] > 0 and seci_data.shape[2] > 2:
-                            final_seci = seci_data[:, -1, 1:3]  # Columns 1 and 2 for agent types
-                            if np.any(~np.isnan(final_seci)):
-                                metrics['seci_final'][i, j] = np.nanmean(final_seci)
-                except Exception as e:
-                    print(f"Error calculating SECI: {e}")
-                
-                # 5. Final AECI (average)
-                try:
-                    if "aeci" in res and isinstance(res["aeci"], np.ndarray):
-                        aeci_data = res["aeci"]
-                        if aeci_data.ndim >= 3 and aeci_data.shape[1] > 0 and aeci_data.shape[2] > 2:
-                            final_aeci = aeci_data[:, -1, 1:3]  # Columns 1 and 2 for agent types
-                            if np.any(~np.isnan(final_aeci)):
-                                metrics['aeci_final'][i, j] = np.nanmean(final_aeci)
-                except Exception as e:
-                    print(f"Error calculating AECI: {e}")
-                
-                # 6. Final AI trust
-                try:
-                    if "trust_stats" in res and isinstance(res["trust_stats"], np.ndarray):
-                        trust_data = res["trust_stats"]
-                        if trust_data.ndim >= 3 and trust_data.shape[1] > 0 and trust_data.shape[2] > 4:
-                            # Specifically extract AI trust columns (1 and 4)
-                            indices = [1, 4] if trust_data.shape[2] > 4 else [1]
-                            final_ai_trust = trust_data[:, -1, indices]
-                            if np.any(~np.isnan(final_ai_trust)):
-                                metrics['ai_trust_final'][i, j] = np.nanmean(final_ai_trust)
-                except Exception as e:
-                    print(f"Error calculating AI trust: {e}")
-        
-        print("Creating heatmap plots...")
-        
-        # Create heatmaps with better error handling
-        heatmap_configs = [
-            {'metric': 'correct_ratio', 'title': 'Correct Token Ratio', 'cmap': 'RdYlGn', 'pos': (0, 0)},
-            {'metric': 'mae_final', 'title': 'Final Belief Error', 'cmap': 'RdYlGn_r', 'pos': (0, 1)},
-            {'metric': 'unmet_needs', 'title': 'Final Unmet Needs', 'cmap': 'RdYlGn_r', 'pos': (0, 2)},
-            {'metric': 'seci_final', 'title': 'Final SECI (Echo Chamber)', 'cmap': 'RdYlBu', 'pos': (1, 0)},
-            {'metric': 'aeci_final', 'title': 'Final AECI (AI Usage)', 'cmap': 'RdYlBu', 'pos': (1, 1)},
-            {'metric': 'ai_trust_final', 'title': 'Final AI Trust', 'cmap': 'RdYlBu', 'pos': (1, 2)}
-        ]
-        
-        for config in heatmap_configs:
-            try:
-                ax = fig.add_subplot(gs[config['pos'][0], config['pos'][1]])
-                data = metrics[config['metric']]
-                
-                # Check if all data is NaN
-                if np.all(np.isnan(data)):
-                    ax.text(0.5, 0.5, f'No data for {config["title"]}', 
-                           ha='center', va='center', transform=ax.transAxes)
-                    ax.set_title(config['title'])
-                    continue
-                
-                # Filter out NaN values for color scaling
-                valid_data = data[~np.isnan(data)]
-                if len(valid_data) > 0:
-                    vmin, vmax = np.nanmin(valid_data), np.nanmax(valid_data)
-                else:
-                    vmin, vmax = 0, 1
-                
-                # Create masked array for proper NaN handling
-                data_masked = np.ma.masked_where(np.isnan(data), data)
-                
-                im = ax.imshow(data_masked, cmap=config['cmap'], aspect='auto', 
-                              vmin=vmin, vmax=vmax)
-                
-                # Add colorbar
-                cbar = fig.colorbar(im, ax=ax)
-                cbar.set_label(config['title'])
-                
-                # Set ticks and labels
-                ax.set_xticks(range(len(shock_values)))
-                ax.set_yticks(range(len(dynamics_values)))
-                ax.set_xticklabels(shock_values)
-                ax.set_yticklabels(dynamics_values)
-                ax.set_xlabel('Shock Magnitude')
-                ax.set_ylabel('Disaster Dynamics')
-                ax.set_title(config['title'])
-                
-                # Add value annotations
-                for ii in range(len(dynamics_values)):
-                    for jj in range(len(shock_values)):
-                        if not np.isnan(data[ii, jj]):
-                            ax.text(jj, ii, f'{data[ii, jj]:.2f}',
-                                  ha='center', va='center', color='black',
-                                  fontsize=9, fontweight='bold')
-            except Exception as e:
-                print(f"Error creating heatmap for {config['metric']}: {e}")
-        
-        print("Creating performance bar chart...")
-        
-        # Fix the performance bar chart section
-        try:
-            ax_bar = fig.add_subplot(gs[2, :])
-            
-            performance_data = []
-            labels = []
-            
-            # Calculate max values, handling NaN cases
-            max_mae = np.nanmax(metrics['mae_final'])
-            max_unmet = np.nanmax(metrics['unmet_needs'])
-            
-            # If all values are NaN, use 1.0 to avoid division by zero
-            if np.isnan(max_mae):
-                max_mae = 1.0
-            if np.isnan(max_unmet):
-                max_unmet = 1.0
-            
-            for i, dd in enumerate(dynamics_values):
-                for j, sm in enumerate(shock_values):
-                    # Calculate performance score with proper error handling
-                    correct_ratio = metrics['correct_ratio'][i, j]
-                    mae_val = metrics['mae_final'][i, j]
-                    unmet_val = metrics['unmet_needs'][i, j]
-                    
-                    if not np.isnan(correct_ratio) and not np.isnan(mae_val) and not np.isnan(unmet_val):
-                        performance_score = (correct_ratio * 0.4 + 
-                                           (1 - mae_val / max_mae) * 0.3 + 
-                                           (1 - unmet_val / max_unmet) * 0.3)
-                    else:
-                        performance_score = 0  # Default to 0 if data is missing
-                        
-                    performance_data.append(performance_score)
-                    labels.append(f'D={dd},S={sm}')
-            
-            # Create bar chart only if we have data
-            if performance_data:
-                # Convert to array for plotting
-                performance_data_arr = np.array(performance_data)
-                norm = plt.Normalize(0, 1)  # Normalize to [0,1]
-                
-                bars = ax_bar.bar(range(len(performance_data)), performance_data, 
-                                 color=plt.cm.viridis(norm(performance_data_arr)))
-                
-                # Add value labels on bars
-                for i, (bar, value) in enumerate(zip(bars, performance_data)):
-                    height = bar.get_height()
-                    if height > 0:  # Only label non-zero bars
-                        ax_bar.text(i, height + 0.01, f'{value:.2f}', 
-                                   ha='center', va='bottom')
-                
-                ax_bar.set_xticks(range(len(labels)))
-                ax_bar.set_xticklabels(labels, rotation=45)
-                ax_bar.set_ylabel('Overall Performance Score')
-                ax_bar.set_title('Combined Performance Score (40% Correct Ratio + 30% Accuracy + 30% Effectiveness)')
-                ax_bar.grid(axis='y', alpha=0.3)
-            else:
-                ax_bar.text(0.5, 0.5, 'No data for performance scores', 
-                           ha='center', va='center', transform=ax_bar.transAxes)
-        except Exception as e:
-            print(f"Error creating performance bar chart: {e}")
-        
-        print("Saving comprehensive plot...")
-        plt.tight_layout()
-        plt.savefig("agent_model_results/experiment_c_comprehensive.png", dpi=300)
-        plt.close(fig)
-        
-        print("Comprehensive plot saved successfully.")
-        
-        # Create additional time evolution plots
-        print("Creating time evolution plots...")
-        try:
-            plot_experiment_c_evolution(results_c, dynamics_values, shock_values)
-            print("Time evolution plots created successfully.")
-        except Exception as e:
-            print(f"Error creating time evolution plots: {e}")
+    # Create figure with subplots - use subplots directly for better control
+    fig, axes = plt.subplots(3, 3, figsize=(18, 15), constrained_layout=True)
     
+    # Flatten axes for easier indexing
+    axes = axes.flatten()
+    
+    # Initialize all metrics matrices
+    matrices = {}
+    metric_names = ['correct_ratio', 'mae', 'unmet_needs', 'seci', 'aeci', 'ai_trust']
+    
+    for name in metric_names:
+        matrices[name] = np.full((len(dynamics_values), len(shock_values)), np.nan)
+    
+    print("\nExtracting metrics for each parameter combination:")
+    print("-------------------------------------------------")
+    
+    # Explicitly populate each cell in each matrix
+    for i, dd in enumerate(dynamics_values):
+        for j, sm in enumerate(shock_values):
+            res_key = (dd, sm)
+            print(f"\nProcessing D={dd}, S={sm}:")
+            
+            if res_key not in results_c:
+                print(f"  No data available")
+                continue
+            
+            res = results_c[res_key]
+            
+            # 1. Process correct token ratio
+            if "raw_assist_counts" in res:
+                try:
+                    counts = res["raw_assist_counts"]
+                    exploit_correct = sum(counts.get("exploit_correct", [0]))
+                    exploit_incorrect = sum(counts.get("exploit_incorrect", [0]))
+                    explor_correct = sum(counts.get("explor_correct", [0]))
+                    explor_incorrect = sum(counts.get("explor_incorrect", [0]))
+                    
+                    total_correct = exploit_correct + explor_correct
+                    total_tokens = total_correct + exploit_incorrect + explor_incorrect
+                    
+                    if total_tokens > 0:
+                        ratio = total_correct / total_tokens
+                        matrices['correct_ratio'][i, j] = ratio
+                        print(f"  Correct ratio: {ratio:.4f}")
+                    else:
+                        print("  No tokens sent")
+                except Exception as e:
+                    print(f"  Error calculating correct ratio: {e}")
+            
+            # 2. Process belief error (MAE)
+            if "belief_error" in res and isinstance(res["belief_error"], np.ndarray):
+                try:
+                    belief_data = res["belief_error"]
+                    if belief_data.ndim >= 3 and belief_data.shape[1] > 0 and belief_data.shape[2] > 2:
+                        # Last tick, columns 1 & 2 (exploit & explor)
+                        final_data = belief_data[:, -1, 1:3]
+                        avg_mae = np.nanmean(final_data)
+                        matrices['mae'][i, j] = avg_mae
+                        print(f"  Average MAE: {avg_mae:.4f}")
+                except Exception as e:
+                    print(f"  Error calculating MAE: {e}")
+            
+            # 3. Process unmet needs
+            if "unmet_needs_evol" in res:
+                try:
+                    unmet_data = res["unmet_needs_evol"]
+                    final_unmet = []
+                    
+                    for run_data in unmet_data:
+                        if isinstance(run_data, (list, np.ndarray)) and len(run_data) > 0:
+                            final_unmet.append(run_data[-1])
+                    
+                    if final_unmet:
+                        avg_unmet = np.mean(final_unmet)
+                        matrices['unmet_needs'][i, j] = avg_unmet
+                        print(f"  Average unmet needs: {avg_unmet:.4f}")
+                except Exception as e:
+                    print(f"  Error calculating unmet needs: {e}")
+            
+            # 4. Process SECI
+            if "seci" in res and isinstance(res["seci"], np.ndarray):
+                try:
+                    seci_data = res["seci"]
+                    if seci_data.ndim >= 3 and seci_data.shape[1] > 0 and seci_data.shape[2] > 2:
+                        # Last tick, columns 1 & 2 (exploit & explor)
+                        final_seci = np.nanmean(seci_data[:, -1, 1:3])
+                        matrices['seci'][i, j] = final_seci
+                        print(f"  Average SECI: {final_seci:.4f}")
+                except Exception as e:
+                    print(f"  Error calculating SECI: {e}")
+            
+            # 5. Process AECI
+            if "aeci" in res and isinstance(res["aeci"], np.ndarray):
+                try:
+                    aeci_data = res["aeci"]
+                    if aeci_data.ndim >= 3 and aeci_data.shape[1] > 0 and aeci_data.shape[2] > 2:
+                        # Last tick, columns 1 & 2 (exploit & explor)
+                        final_aeci = np.nanmean(aeci_data[:, -1, 1:3])
+                        matrices['aeci'][i, j] = final_aeci
+                        print(f"  Average AECI: {final_aeci:.4f}")
+                except Exception as e:
+                    print(f"  Error calculating AECI: {e}")
+            
+            # 6. Process AI trust
+            if "trust_stats" in res and isinstance(res["trust_stats"], np.ndarray):
+                try:
+                    trust_data = res["trust_stats"]
+                    if trust_data.ndim >= 3 and trust_data.shape[1] > 0 and trust_data.shape[2] > 1:
+                        # Last tick, column 1 (AI trust for exploitative agents)
+                        final_trust = np.nanmean(trust_data[:, -1, 1])
+                        matrices['ai_trust'][i, j] = final_trust
+                        print(f"  Average AI trust: {final_trust:.4f}")
+                except Exception as e:
+                    print(f"  Error calculating AI trust: {e}")
+    
+    # Now create the heatmaps - one per metric
+    configs = [
+        {'name': 'correct_ratio', 'title': 'Correct Token Ratio', 'cmap': 'RdYlGn', 'idx': 0},
+        {'name': 'mae', 'title': 'Belief Error (MAE)', 'cmap': 'RdYlGn_r', 'idx': 1},
+        {'name': 'unmet_needs', 'title': 'Unmet Needs', 'cmap': 'RdYlGn_r', 'idx': 2},
+        {'name': 'seci', 'title': 'Social Echo Chamber Index', 'cmap': 'RdYlBu', 'idx': 3},
+        {'name': 'aeci', 'title': 'AI Usage (AECI)', 'cmap': 'RdYlBu', 'idx': 4},
+        {'name': 'ai_trust', 'title': 'AI Trust', 'cmap': 'RdYlBu', 'idx': 5}
+    ]
+    
+    print("\nCreating heatmap plots...")
+    
+    # Plot each heatmap
+    for config in configs:
+        if config['idx'] >= len(axes):
+            print(f"Warning: Not enough axes for {config['name']}")
+            continue
+        
+        ax = axes[config['idx']]
+        matrix = matrices[config['name']]
+        
+        # Print the raw matrix for debugging
+        print(f"\nMatrix for {config['name']}:")
+        for row in matrix:
+            print("  " + " ".join(f"{val:.2f}" if not np.isnan(val) else "N/A" for val in row))
+        
+        # Skip if all values are NaN
+        if np.all(np.isnan(matrix)):
+            ax.text(0.5, 0.5, f'No data for {config["title"]}', 
+                   ha='center', va='center', transform=ax.transAxes)
+            ax.set_title(config['title'])
+            continue
+        
+        # Create masked array for proper NaN handling
+        masked_matrix = np.ma.masked_where(np.isnan(matrix), matrix)
+        
+        # Find valid range for color scaling
+        valid_values = matrix[~np.isnan(matrix)]
+        if len(valid_values) > 0:
+            vmin, vmax = np.min(valid_values), np.max(valid_values)
+            
+            # Ensure we have some range for colormapping
+            if vmin == vmax:
+                vmin, vmax = vmin * 0.9, vmin * 1.1
+                if vmin == 0:
+                    vmin, vmax = -0.1, 0.1
+        else:
+            vmin, vmax = 0, 1
+        
+        # Create the heatmap
+        im = ax.imshow(masked_matrix, cmap=config['cmap'], aspect='auto', vmin=vmin, vmax=vmax)
+        
+        # Add colorbar
+        cbar = plt.colorbar(im, ax=ax)
+        cbar.set_label(config['title'])
+        
+        # Add value annotations
+        for i in range(len(dynamics_values)):
+            for j in range(len(shock_values)):
+                if not np.isnan(matrix[i, j]):
+                    text = ax.text(j, i, f'{matrix[i, j]:.2f}',
+                                 ha='center', va='center', color='black',
+                                 fontsize=9, fontweight='bold')
+        
+        # Set axis labels and title
+        ax.set_xticks(range(len(shock_values)))
+        ax.set_yticks(range(len(dynamics_values)))
+        ax.set_xticklabels(shock_values)
+        ax.set_yticklabels(dynamics_values)
+        ax.set_xlabel('Shock Magnitude')
+        ax.set_ylabel('Disaster Dynamics')
+        ax.set_title(config['title'])
+    
+    # Calculate performance score for remaining plots - THIS WAS MISSING
+    print("\nCalculating performance scores...")
+    
+    performance_data = []
+    labels = []
+    
+    # Calculate max values for normalization, handling NaN cases
+    max_mae = np.nanmax(matrices['mae'])
+    max_unmet = np.nanmax(matrices['unmet_needs'])
+    
+    # If all values are NaN, use 1.0 to avoid division by zero
+    if np.isnan(max_mae):
+        max_mae = 1.0
+    if np.isnan(max_unmet):
+        max_unmet = 1.0
+    
+    for i, dd in enumerate(dynamics_values):
+        for j, sm in enumerate(shock_values):
+            # Calculate performance score with proper error handling
+            correct_ratio = matrices['correct_ratio'][i, j]
+            mae_val = matrices['mae'][i, j]
+            unmet_val = matrices['unmet_needs'][i, j]
+            
+            if not np.isnan(correct_ratio) and not np.isnan(mae_val) and not np.isnan(unmet_val):
+                performance_score = (correct_ratio * 0.4 + 
+                                   (1 - mae_val / max_mae) * 0.3 + 
+                                   (1 - unmet_val / max_unmet) * 0.3)
+            else:
+                performance_score = 0  # Default to 0 if data is missing
+                
+            performance_data.append(performance_score)
+            labels.append(f'D={dd},S={sm}')
+    
+    # Only create the plot if we have data
+    if performance_data:
+        # Set up the performance bar chart
+        if len(axes) > 6:  # Check if we have enough axes
+            ax_bar = axes[6]
+            
+            # Convert to array for plotting
+            performance_data_arr = np.array(performance_data)
+            norm = plt.Normalize(0, 1)  # Normalize to [0,1]
+            
+            bars = ax_bar.bar(range(len(performance_data)), performance_data, 
+                             color=plt.cm.viridis(norm(performance_data_arr)))
+            
+            # Add value labels on bars
+            for i, (bar, value) in enumerate(zip(bars, performance_data)):
+                height = bar.get_height()
+                if height > 0:  # Only label non-zero bars
+                    ax_bar.text(i, height + 0.01, f'{value:.2f}', 
+                               ha='center', va='bottom')
+            
+            ax_bar.set_xticks(range(len(labels)))
+            ax_bar.set_xticklabels(labels, rotation=45)
+            ax_bar.set_ylabel('Overall Performance Score')
+            ax_bar.set_title('Combined Performance Score (40% Correct Ratio + 30% Accuracy + 30% Effectiveness)')
+            ax_bar.grid(axis='y', alpha=0.3)
+        else:
+            print("Warning: Not enough axes for performance bar chart")
+    else:
+        print("Warning: No performance data to plot")
+    
+    # Hide any unused axes
+    for i in range(7, len(axes)):
+        axes[i].axis('off')
+    
+    # Adjust layout and save
+    plt.savefig("agent_model_results/experiment_c_comprehensive.png", dpi=300, bbox_inches='tight')
+    plt.close(fig)
+    
+    print("Comprehensive plot saved successfully.")
+    
+    # Create additional time evolution plots
+    print("Creating time evolution plots...")
+    try:
+        plot_experiment_c_evolution(results_c, dynamics_values, shock_values)
+        print("Time evolution plots created successfully.")
     except Exception as e:
-        print(f"Critical error in plot_experiment_c_comprehensive: {e}")
+        print(f"Error creating time evolution plots: {e}")
         import traceback
         traceback.print_exc()
 
@@ -6567,7 +6645,7 @@ if __name__ == "__main__":
         "exploit_friend_bias": 0.1,
         "exploit_self_bias": 0.1
     }
-    num_runs = 3
+    num_runs = 2
     save_dir = "agent_model_results"
     os.makedirs(save_dir, exist_ok=True)
 
@@ -6813,7 +6891,8 @@ if __name__ == "__main__":
 
         for lr in learning_rate_values:
             res_key = (lr, eps)
-            if res_key not in resubase_confidence_bumplts_d: continue
+            # Fix the variable name here - from 'resubase_confidence_bumplts_d' to 'results_d'
+            if res_key not in results_d: continue
             res = results_d[res_key]
 
             # Extract Final SECI values per run
@@ -6829,8 +6908,8 @@ if __name__ == "__main__":
                 means_exploit.append(mean_exp); errors_exploit[0].append(mean_exp-p25_exp); errors_exploit[1].append(p75_exp-mean_exp)
                 means_explor.append(mean_er); errors_explor[0].append(mean_er-p25_er); errors_explor[1].append(p75_er-mean_er)
             else:
-                 means_exploit.append(0); errors_exploit[0].append(0); errors_exploit[1].append(0)
-                 means_explor.append(0); errors_explor[0].append(0); errors_explor[1].append(0)
+                means_exploit.append(0); errors_exploit[0].append(0); errors_exploit[1].append(0)
+                means_explor.append(0); errors_explor[0].append(0); errors_explor[1].append(0)
 
         x_pos = np.arange(len(learning_rate_values))
         ax = ax_d_seci[idx] # Use subplot for each epsilon
@@ -6847,7 +6926,11 @@ if __name__ == "__main__":
         ax.set_ylim(bottom=0)
 
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-    plt.show()
+    # Save the figure instead of just showing it
+    plt.savefig("agent_model_results/experiment_d_seci.png")
+    plt.close(fig_d_seci)
+
+    gc.collect()
 
     gc.collect()
 
