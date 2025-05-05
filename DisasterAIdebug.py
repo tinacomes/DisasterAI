@@ -3203,7 +3203,7 @@ def run_simulation(params):
     for _ in range(params.get("ticks", 150)):
         model.step()
     return model
-    
+
 def safe_convert_to_array(data_list):
     """Safely convert data to numpy array, handling mixed types."""
     if not data_list:
@@ -3902,71 +3902,64 @@ def safe_plot(ax, data_array, col_idx, label, color, linestyle='-', is_ratio=Tru
         import traceback
         traceback.print_exc()
         return False
+# Fix for plot_component_seci_distribution
 def plot_component_seci_distribution(results_dict, title_suffix=""):
     """Plots the distribution of SECI values across different components"""
-
+    
     # Extract component SECI data
-    if 'component_seci_data' in results_dict and results_dict['component_seci_data']:
-        component_seci_data = results_dict['component_seci_data']
-
-        # Extract all SECI values across all ticks and runs
-        all_seci_values = []
-        for run_data in component_seci_data:
-            for timestep_data in run_data:
-                if isinstance(timestep_data, dict) and 'component_data' in timestep_data:
-                    seci_values = list(timestep_data['component_data'].values())
-                    all_seci_values.extend([v for v in seci_values if v > 0])  # Exclude zeros
-
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
-
-        # Plot 1: SECI distribution histogram
-        if all_seci_values:
-            ax1.hist(all_seci_values, bins=30, color='skyblue', edgecolor='black', alpha=0.7)
-            ax1.axvline(np.mean(all_seci_values), color='red', linestyle='--', linewidth=2,
-                       label=f'Mean: {np.mean(all_seci_values):.3f}')
-            ax1.axvline(np.median(all_seci_values), color='green', linestyle='--', linewidth=2,
-                       label=f'Median: {np.median(all_seci_values):.3f}')
-            ax1.set_xlabel('Component SECI Value')
-            ax1.set_ylabel('Frequency')
-            ax1.set_title(f'Component SECI Distribution {title_suffix}')
-            ax1.legend()
-            ax1.grid(True, alpha=0.3)
-        else:
-            ax1.text(0.5, 0.5, 'No component SECI data', ha='center', va='center')
-
-        # Plot 2: Evolution of average component SECI
-        # Extract average values per tick
-        tick_to_avg = {}
-        for run_data in component_seci_data:
-            for timestep_data in run_data:
-                if isinstance(timestep_data, dict) and 'tick' in timestep_data and 'component_data' in timestep_data:
-                    tick = timestep_data['tick']
-                    seci_values = list(timestep_data['component_data'].values())
-                    valid_values = [v for v in seci_values if v > 0]
-                    if valid_values:
-                        if tick not in tick_to_avg:
-                            tick_to_avg[tick] = []
-                        tick_to_avg[tick].append(np.mean(valid_values))
-
-        if tick_to_avg:
-            ticks = sorted(tick_to_avg.keys())
-            means = [np.mean(tick_to_avg[t]) for t in ticks]
-
-            ax2.plot(ticks, means, 'b-', linewidth=2, label='Mean')
-            ax2.set_xlabel('Tick')
-            ax2.set_ylabel('Average Component SECI')
-            ax2.set_title(f'Component SECI Evolution {title_suffix}')
-            ax2.legend()
-            ax2.grid(True, alpha=0.3)
-        else:
-            ax2.text(0.5, 0.5, 'No component SECI evolution data', ha='center', va='center')
-
-        plt.tight_layout()
-        save_path = f"agent_model_results/component_seci_distribution_{title_suffix}.png"
-        plt.savefig(save_path.replace('(','').replace(')','').replace('=','_'))
-        plt.close()
-    else:
+    component_seci = results_dict.get('component_seci')
+    
+    if component_seci is None or not isinstance(component_seci, np.ndarray) or component_seci.size == 0:
         print(f"No component SECI data available for {title_suffix}")
+        return
+    
+    # Extract all SECI values across all ticks and runs
+    all_seci_values = []
+    
+    # Handle different data structures
+    if component_seci.ndim == 3:  # (runs, ticks, values)
+        # Get all non-zero values from the data
+        values = component_seci[:, :, 1]  # Assuming column 1 contains the values
+        all_seci_values = values[values > 0].flatten()
+    else:
+        print(f"Warning: Unexpected component SECI data shape: {component_seci.shape}")
+        return
+    
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
+    
+    # Plot 1: SECI distribution histogram
+    if len(all_seci_values) > 0:
+        ax1.hist(all_seci_values, bins=30, color='skyblue', edgecolor='black', alpha=0.7)
+        ax1.axvline(np.mean(all_seci_values), color='red', linestyle='--', linewidth=2,
+                   label=f'Mean: {np.mean(all_seci_values):.3f}')
+        ax1.axvline(np.median(all_seci_values), color='green', linestyle='--', linewidth=2,
+                   label=f'Median: {np.median(all_seci_values):.3f}')
+        ax1.set_xlabel('Component SECI Value')
+        ax1.set_ylabel('Frequency')
+        ax1.set_title(f'Component SECI Distribution {title_suffix}')
+        ax1.legend()
+        ax1.grid(True, alpha=0.3)
+    else:
+        ax1.text(0.5, 0.5, 'No component SECI data', ha='center', va='center')
+    
+    # Plot 2: Evolution of average component SECI
+    if component_seci.ndim == 3 and component_seci.shape[1] > 0:
+        mean_seci = np.mean(component_seci[:, :, 1], axis=0)
+        ticks = component_seci[0, :, 0]  # Get ticks from first run
+        
+        ax2.plot(ticks, mean_seci, 'b-', linewidth=2, label='Mean')
+        ax2.set_xlabel('Tick')
+        ax2.set_ylabel('Average Component SECI')
+        ax2.set_title(f'Component SECI Evolution {title_suffix}')
+        ax2.legend()
+        ax2.grid(True, alpha=0.3)
+    else:
+        ax2.text(0.5, 0.5, 'No component SECI evolution data', ha='center', va='center')
+    
+    plt.tight_layout()
+    save_path = f"agent_model_results/component_seci_distribution_{title_suffix}.png"
+    plt.savefig(save_path.replace('(','').replace(')','').replace('=','_'))
+    plt.close()
 
 def plot_grid_state(model, tick, save_dir="grid_plots"):
     """Plots the disaster grid state, agent locations, and tokens sent."""
@@ -6147,249 +6140,387 @@ def plot_unmet_need_evolution(unmet_needs_data, title_suffix=""):
 
     return fig
 
+# Fix for Experiment C - add error handling and data validation
 def plot_experiment_c_comprehensive(results_c, dynamics_values, shock_values):
-    """Create comprehensive visualization for experiment C"""
+    """Create comprehensive visualization for experiment C with robust error handling"""
+    
+    print("Starting comprehensive plot creation...")
     
     # Create figure with subplots
-    fig = plt.figure(figsize=(20, 16))
-    gs = fig.add_gridspec(3, 3, hspace=0.3, wspace=0.3)
-    
-    # Define the metrics we'll track
-    metrics = {
-        'correct_ratio': np.zeros((len(dynamics_values), len(shock_values))),
-        'mae_final': np.zeros((len(dynamics_values), len(shock_values))),
-        'unmet_needs': np.zeros((len(dynamics_values), len(shock_values))),
-        'seci_final': np.zeros((len(dynamics_values), len(shock_values))),
-        'aeci_final': np.zeros((len(dynamics_values), len(shock_values))),
-        'ai_trust_final': np.zeros((len(dynamics_values), len(shock_values)))
-    }
-    
-    # Collect data for each combination
-    for i, dd in enumerate(dynamics_values):
-        for j, sm in enumerate(shock_values):
-            res_key = (dd, sm)
-            if res_key not in results_c:
-                print(f"Missing data for dynamics={dd}, shock={sm}")
-                continue
-            res = results_c[res_key]
-            
-            # 1. Correct token ratio
-            if "raw_assist_counts" in res:
-                counts = res["raw_assist_counts"]
-                total_correct = (counts.get("exploit_correct", [0]) + 
-                               counts.get("explor_correct", [0]))
-                total_incorrect = (counts.get("exploit_incorrect", [0]) + 
-                                 counts.get("explor_incorrect", [0]))
+    try:
+        fig = plt.figure(figsize=(20, 16))
+        gs = fig.add_gridspec(3, 3, hspace=0.3, wspace=0.3)
+        
+        # Define the metrics we'll track
+        metrics = {
+            'correct_ratio': np.full((len(dynamics_values), len(shock_values)), np.nan),
+            'mae_final': np.full((len(dynamics_values), len(shock_values)), np.nan),
+            'unmet_needs': np.full((len(dynamics_values), len(shock_values)), np.nan),
+            'seci_final': np.full((len(dynamics_values), len(shock_values)), np.nan),
+            'aeci_final': np.full((len(dynamics_values), len(shock_values)), np.nan),
+            'ai_trust_final': np.full((len(dynamics_values), len(shock_values)), np.nan)
+        }
+        
+        print("Collecting data for each parameter combination...")
+        
+        # Collect data for each combination
+        for i, dd in enumerate(dynamics_values):
+            for j, sm in enumerate(shock_values):
+                res_key = (dd, sm)
+                if res_key not in results_c:
+                    print(f"Missing data for dynamics={dd}, shock={sm}")
+                    continue
                 
-                if total_correct and total_incorrect:
-                    total_correct_sum = sum(total_correct)
-                    total_sum = total_correct_sum + sum(total_incorrect)
-                    metrics['correct_ratio'][i, j] = total_correct_sum / total_sum if total_sum > 0 else 0
-            
-            # 2. Final mean absolute error (belief error)
-            if "belief_error" in res and res["belief_error"].size > 0:
-                # Get final error for both agent types and average
-                final_errors = res["belief_error"][:, -1, 1:]  # Get last tick, both agent types
-                metrics['mae_final'][i, j] = np.mean(final_errors)
-            
-            # 3. Final unmet needs
-            if "unmet_needs_evol" in res and res["unmet_needs_evol"]:
-                final_unmet = []
-                for run_data in res["unmet_needs_evol"]:
-                    if run_data and len(run_data) > 0:
-                        final_unmet.append(run_data[-1])
-                if final_unmet:
-                    metrics['unmet_needs'][i, j] = np.mean(final_unmet)
-            
-            # 4. Final SECI (average)
-            if "seci" in res and res["seci"].size > 0:
-                final_seci = res["seci"][:, -1, 1:]  # Last tick, both agent types
-                metrics['seci_final'][i, j] = np.mean(final_seci)
-            
-            # 5. Final AECI (average)
-            if "aeci" in res and res["aeci"].size > 0:
-                final_aeci = res["aeci"][:, -1, 1:]  # Last tick, both agent types
-                metrics['aeci_final'][i, j] = np.mean(final_aeci)
-            
-            # 6. Final AI trust
-            if "trust_stats" in res and res["trust_stats"].size > 0:
-                final_ai_trust = res["trust_stats"][:, -1, [1, 4]]  # AI trust for both agent types
-                metrics['ai_trust_final'][i, j] = np.mean(final_ai_trust)
-    
-    # Create heatmaps
-    heatmap_configs = [
-        {'metric': 'correct_ratio', 'title': 'Correct Token Ratio', 'cmap': 'RdYlGn', 'pos': (0, 0)},
-        {'metric': 'mae_final', 'title': 'Final Belief Error', 'cmap': 'RdYlGn_r', 'pos': (0, 1)},
-        {'metric': 'unmet_needs', 'title': 'Final Unmet Needs', 'cmap': 'RdYlGn_r', 'pos': (0, 2)},
-        {'metric': 'seci_final', 'title': 'Final SECI (Echo Chamber)', 'cmap': 'RdYlBu', 'pos': (1, 0)},
-        {'metric': 'aeci_final', 'title': 'Final AECI (AI Usage)', 'cmap': 'RdYlBu', 'pos': (1, 1)},
-        {'metric': 'ai_trust_final', 'title': 'Final AI Trust', 'cmap': 'RdYlBu', 'pos': (1, 2)}
-    ]
-    
-    for config in heatmap_configs:
-        ax = fig.add_subplot(gs[config['pos'][0], config['pos'][1]])
-        data = metrics[config['metric']]
+                res = results_c[res_key]
+                print(f"Processing data for dynamics={dd}, shock={sm}")
+                
+                # 1. Correct token ratio
+                try:
+                    if "raw_assist_counts" in res:
+                        counts = res["raw_assist_counts"]
+                        
+                        # Extract values safely
+                        exploit_correct = sum(counts.get("exploit_correct", [0]))
+                        exploit_incorrect = sum(counts.get("exploit_incorrect", [0]))
+                        explor_correct = sum(counts.get("explor_correct", [0]))
+                        explor_incorrect = sum(counts.get("explor_incorrect", [0]))
+                        
+                        total_correct = exploit_correct + explor_correct
+                        total_incorrect = exploit_incorrect + explor_incorrect
+                        total_sum = total_correct + total_incorrect
+                        
+                        if total_sum > 0:
+                            metrics['correct_ratio'][i, j] = total_correct / total_sum
+                except Exception as e:
+                    print(f"Error calculating correct ratio: {e}")
+                
+                # 2. Final mean absolute error (belief error)
+                try:
+                    if "belief_error" in res and isinstance(res["belief_error"], np.ndarray):
+                        belief_error = res["belief_error"]
+                        if belief_error.ndim >= 3 and belief_error.shape[1] > 0 and belief_error.shape[2] > 2:
+                            # Get the last timestep
+                            final_tick_data = belief_error[:, -1, :]
+                            
+                            # Extract the agent type columns (1 and 2)
+                            if final_tick_data.shape[1] > 2:
+                                agent_data = final_tick_data[:, 1:3]
+                                if np.any(~np.isnan(agent_data)):
+                                    metrics['mae_final'][i, j] = np.nanmean(agent_data)
+                except Exception as e:
+                    print(f"Error calculating MAE: {e}")
+                
+                # 3. Final unmet needs
+                try:
+                    if "unmet_needs_evol" in res and res["unmet_needs_evol"]:
+                        final_unmet = []
+                        for run_data in res["unmet_needs_evol"]:
+                            if isinstance(run_data, (list, np.ndarray)) and len(run_data) > 0:
+                                final_unmet.append(run_data[-1])
+                        
+                        if final_unmet:
+                            metrics['unmet_needs'][i, j] = np.nanmean(final_unmet)
+                except Exception as e:
+                    print(f"Error calculating unmet needs: {e}")
+                
+                # 4. Final SECI (average)
+                try:
+                    if "seci" in res and isinstance(res["seci"], np.ndarray):
+                        seci_data = res["seci"]
+                        if seci_data.ndim >= 3 and seci_data.shape[1] > 0 and seci_data.shape[2] > 2:
+                            final_seci = seci_data[:, -1, 1:3]  # Columns 1 and 2 for agent types
+                            if np.any(~np.isnan(final_seci)):
+                                metrics['seci_final'][i, j] = np.nanmean(final_seci)
+                except Exception as e:
+                    print(f"Error calculating SECI: {e}")
+                
+                # 5. Final AECI (average)
+                try:
+                    if "aeci" in res and isinstance(res["aeci"], np.ndarray):
+                        aeci_data = res["aeci"]
+                        if aeci_data.ndim >= 3 and aeci_data.shape[1] > 0 and aeci_data.shape[2] > 2:
+                            final_aeci = aeci_data[:, -1, 1:3]  # Columns 1 and 2 for agent types
+                            if np.any(~np.isnan(final_aeci)):
+                                metrics['aeci_final'][i, j] = np.nanmean(final_aeci)
+                except Exception as e:
+                    print(f"Error calculating AECI: {e}")
+                
+                # 6. Final AI trust
+                try:
+                    if "trust_stats" in res and isinstance(res["trust_stats"], np.ndarray):
+                        trust_data = res["trust_stats"]
+                        if trust_data.ndim >= 3 and trust_data.shape[1] > 0 and trust_data.shape[2] > 4:
+                            # Specifically extract AI trust columns (1 and 4)
+                            indices = [1, 4] if trust_data.shape[2] > 4 else [1]
+                            final_ai_trust = trust_data[:, -1, indices]
+                            if np.any(~np.isnan(final_ai_trust)):
+                                metrics['ai_trust_final'][i, j] = np.nanmean(final_ai_trust)
+                except Exception as e:
+                    print(f"Error calculating AI trust: {e}")
         
-        # Handle NaN values
-        data_masked = np.ma.masked_where(np.isnan(data), data)
+        print("Creating heatmap plots...")
         
-        im = ax.imshow(data_masked, cmap=config['cmap'], aspect='auto', 
-                      vmin=np.nanmin(data), vmax=np.nanmax(data))
+        # Create heatmaps with better error handling
+        heatmap_configs = [
+            {'metric': 'correct_ratio', 'title': 'Correct Token Ratio', 'cmap': 'RdYlGn', 'pos': (0, 0)},
+            {'metric': 'mae_final', 'title': 'Final Belief Error', 'cmap': 'RdYlGn_r', 'pos': (0, 1)},
+            {'metric': 'unmet_needs', 'title': 'Final Unmet Needs', 'cmap': 'RdYlGn_r', 'pos': (0, 2)},
+            {'metric': 'seci_final', 'title': 'Final SECI (Echo Chamber)', 'cmap': 'RdYlBu', 'pos': (1, 0)},
+            {'metric': 'aeci_final', 'title': 'Final AECI (AI Usage)', 'cmap': 'RdYlBu', 'pos': (1, 1)},
+            {'metric': 'ai_trust_final', 'title': 'Final AI Trust', 'cmap': 'RdYlBu', 'pos': (1, 2)}
+        ]
         
-        # Add colorbar
-        cbar = fig.colorbar(im, ax=ax)
-        cbar.set_label(config['title'])
+        for config in heatmap_configs:
+            try:
+                ax = fig.add_subplot(gs[config['pos'][0], config['pos'][1]])
+                data = metrics[config['metric']]
+                
+                # Check if all data is NaN
+                if np.all(np.isnan(data)):
+                    ax.text(0.5, 0.5, f'No data for {config["title"]}', 
+                           ha='center', va='center', transform=ax.transAxes)
+                    ax.set_title(config['title'])
+                    continue
+                
+                # Filter out NaN values for color scaling
+                valid_data = data[~np.isnan(data)]
+                if len(valid_data) > 0:
+                    vmin, vmax = np.nanmin(valid_data), np.nanmax(valid_data)
+                else:
+                    vmin, vmax = 0, 1
+                
+                # Create masked array for proper NaN handling
+                data_masked = np.ma.masked_where(np.isnan(data), data)
+                
+                im = ax.imshow(data_masked, cmap=config['cmap'], aspect='auto', 
+                              vmin=vmin, vmax=vmax)
+                
+                # Add colorbar
+                cbar = fig.colorbar(im, ax=ax)
+                cbar.set_label(config['title'])
+                
+                # Set ticks and labels
+                ax.set_xticks(range(len(shock_values)))
+                ax.set_yticks(range(len(dynamics_values)))
+                ax.set_xticklabels(shock_values)
+                ax.set_yticklabels(dynamics_values)
+                ax.set_xlabel('Shock Magnitude')
+                ax.set_ylabel('Disaster Dynamics')
+                ax.set_title(config['title'])
+                
+                # Add value annotations
+                for ii in range(len(dynamics_values)):
+                    for jj in range(len(shock_values)):
+                        if not np.isnan(data[ii, jj]):
+                            ax.text(jj, ii, f'{data[ii, jj]:.2f}',
+                                  ha='center', va='center', color='black',
+                                  fontsize=9, fontweight='bold')
+            except Exception as e:
+                print(f"Error creating heatmap for {config['metric']}: {e}")
         
-        # Set ticks and labels
-        ax.set_xticks(range(len(shock_values)))
-        ax.set_yticks(range(len(dynamics_values)))
-        ax.set_xticklabels(shock_values)
-        ax.set_yticklabels(dynamics_values)
-        ax.set_xlabel('Shock Magnitude')
-        ax.set_ylabel('Disaster Dynamics')
-        ax.set_title(config['title'])
+        print("Creating performance bar chart...")
         
-        # Add value annotations
-        for ii in range(len(dynamics_values)):
-            for jj in range(len(shock_values)):
-                if not np.isnan(data[ii, jj]):
-                    text = ax.text(jj, ii, f'{data[ii, jj]:.2f}',
-                                 ha='center', va='center', color='black',
-                                 fontsize=9, fontweight='bold')
-    
-    # Add performance bar chart comparing different scenarios
-    ax_bar = fig.add_subplot(gs[2, :])
-    
-    # Extract some key performance indicators for comparison
-    performance_data = []
-    labels = []
-    
-    # Calculate max values, handling NaN cases
-    max_mae = np.nanmax(metrics['mae_final'])
-    max_unmet = np.nanmax(metrics['unmet_needs'])
-    
-    # If all values are NaN, use 1.0 to avoid division by zero
-    if np.isnan(max_mae):
-        max_mae = 1.0
-    if np.isnan(max_unmet):
-        max_unmet = 1.0
-    
-    for i, dd in enumerate(dynamics_values):
-        for j, sm in enumerate(shock_values):
-            # Calculate performance score with proper error handling
-            if not np.isnan(metrics['correct_ratio'][i, j]) and not np.isnan(metrics['mae_final'][i, j]) and not np.isnan(metrics['unmet_needs'][i, j]):
-                performance_score = (metrics['correct_ratio'][i, j] * 0.4 + 
-                                   (1 - metrics['mae_final'][i, j] / max_mae) * 0.3 + 
-                                   (1 - metrics['unmet_needs'][i, j] / max_unmet) * 0.3)
+        # Fix the performance bar chart section
+        try:
+            ax_bar = fig.add_subplot(gs[2, :])
+            
+            performance_data = []
+            labels = []
+            
+            # Calculate max values, handling NaN cases
+            max_mae = np.nanmax(metrics['mae_final'])
+            max_unmet = np.nanmax(metrics['unmet_needs'])
+            
+            # If all values are NaN, use 1.0 to avoid division by zero
+            if np.isnan(max_mae):
+                max_mae = 1.0
+            if np.isnan(max_unmet):
+                max_unmet = 1.0
+            
+            for i, dd in enumerate(dynamics_values):
+                for j, sm in enumerate(shock_values):
+                    # Calculate performance score with proper error handling
+                    correct_ratio = metrics['correct_ratio'][i, j]
+                    mae_val = metrics['mae_final'][i, j]
+                    unmet_val = metrics['unmet_needs'][i, j]
+                    
+                    if not np.isnan(correct_ratio) and not np.isnan(mae_val) and not np.isnan(unmet_val):
+                        performance_score = (correct_ratio * 0.4 + 
+                                           (1 - mae_val / max_mae) * 0.3 + 
+                                           (1 - unmet_val / max_unmet) * 0.3)
+                    else:
+                        performance_score = 0  # Default to 0 if data is missing
+                        
+                    performance_data.append(performance_score)
+                    labels.append(f'D={dd},S={sm}')
+            
+            # Create bar chart only if we have data
+            if performance_data:
+                # Convert to array for plotting
+                performance_data_arr = np.array(performance_data)
+                norm = plt.Normalize(0, 1)  # Normalize to [0,1]
+                
+                bars = ax_bar.bar(range(len(performance_data)), performance_data, 
+                                 color=plt.cm.viridis(norm(performance_data_arr)))
+                
+                # Add value labels on bars
+                for i, (bar, value) in enumerate(zip(bars, performance_data)):
+                    height = bar.get_height()
+                    if height > 0:  # Only label non-zero bars
+                        ax_bar.text(i, height + 0.01, f'{value:.2f}', 
+                                   ha='center', va='bottom')
+                
+                ax_bar.set_xticks(range(len(labels)))
+                ax_bar.set_xticklabels(labels, rotation=45)
+                ax_bar.set_ylabel('Overall Performance Score')
+                ax_bar.set_title('Combined Performance Score (40% Correct Ratio + 30% Accuracy + 30% Effectiveness)')
+                ax_bar.grid(axis='y', alpha=0.3)
             else:
-                performance_score = 0  # Default to 0 if data is missing
-                
-            performance_data.append(performance_score)
-            labels.append(f'D={dd},S={sm}')
+                ax_bar.text(0.5, 0.5, 'No data for performance scores', 
+                           ha='center', va='center', transform=ax_bar.transAxes)
+        except Exception as e:
+            print(f"Error creating performance bar chart: {e}")
+        
+        print("Saving comprehensive plot...")
+        plt.tight_layout()
+        plt.savefig("agent_model_results/experiment_c_comprehensive.png", dpi=300)
+        plt.close(fig)
+        
+        print("Comprehensive plot saved successfully.")
+        
+        # Create additional time evolution plots
+        print("Creating time evolution plots...")
+        try:
+            plot_experiment_c_evolution(results_c, dynamics_values, shock_values)
+            print("Time evolution plots created successfully.")
+        except Exception as e:
+            print(f"Error creating time evolution plots: {e}")
     
-    # Create bar chart
-    bars = ax_bar.bar(range(len(performance_data)), performance_data, 
-                      color=plt.cm.viridis(np.array(performance_data)))
-    
-    # Add value labels on bars
-    for bar, value in zip(bars, performance_data):
-        height = bar.get_height()
-        ax_bar.text(bar.get_x() + bar.get_width()/2., height,
-                   f'{value:.2f}', ha='center', va='bottom')
-    
-    ax_bar.set_xticks(range(len(labels)))
-    ax_bar.set_xticklabels(labels, rotation=45)
-    ax_bar.set_ylabel('Overall Performance Score')
-    ax_bar.set_title('Combined Performance Score (40% Correct Ratio + 30% Accuracy + 30% Effectiveness)')
-    ax_bar.grid(axis='y', alpha=0.3)
-    
-    plt.tight_layout()
-    plt.savefig("agent_model_results/experiment_c_comprehensive.png", dpi=300)
-    plt.close()
-    
-    # Create additional time evolution plots for selected scenarios
-    plot_experiment_c_evolution(results_c, dynamics_values, shock_values)
+    except Exception as e:
+        print(f"Critical error in plot_experiment_c_comprehensive: {e}")
+        import traceback
+        traceback.print_exc()
 
 def plot_experiment_c_evolution(results_c, dynamics_values, shock_values):
-    """Plot time evolution for key scenarios in Experiment C"""
+    """Plot time evolution for key scenarios in Experiment C with robust error handling"""
     
-    # Select key scenarios to compare (e.g., different dynamics with same shock)
-    scenarios_to_plot = []
-    if len(dynamics_values) >= 2 and len(shock_values) >= 1:
-        scenarios_to_plot = [(dynamics_values[0], shock_values[0]), 
-                            (dynamics_values[-1], shock_values[0])]
+    print("Starting evolution plot creation...")
     
-    if not scenarios_to_plot:
-        print("Not enough data to create evolution plots")
-        return
-    
-    fig, axes = plt.subplots(2, 2, figsize=(15, 12))
-    axes = axes.reshape(4)
-    
-    colors = ['blue', 'red', 'green', 'orange']
-    metrics_to_plot = [
-        {'key': 'trust_stats', 'col_idx': [1, 4], 'title': 'AI Trust Evolution', 
-         'ylabel': 'AI Trust', 'style': '--'},
-        {'key': 'seci', 'col_idx': [1, 2], 'title': 'SECI Evolution', 
-         'ylabel': 'SECI Value', 'style': '-'},
-        {'key': 'aeci', 'col_idx': [1, 2], 'title': 'AECI Evolution', 
-         'ylabel': 'AECI Value', 'style': '-'},
-        {'key': 'belief_error', 'col_idx': [1, 2], 'title': 'Belief Error Evolution', 
-         'ylabel': 'MAE', 'style': '-'}
-    ]
-    
-    for plot_idx, metric in enumerate(metrics_to_plot):
-        ax = axes[plot_idx]
-        plots_created = False
+    # Select first and last scenarios to compare
+    try:
+        scenarios_to_plot = []
+        if len(dynamics_values) > 0 and len(shock_values) > 0:
+            # Select first and last dynamics with first shock value
+            scenarios_to_plot = [(dynamics_values[0], shock_values[0])]
+            if len(dynamics_values) > 1:
+                scenarios_to_plot.append((dynamics_values[-1], shock_values[0]))
         
-        for scenario_idx, (dd, sm) in enumerate(scenarios_to_plot):
-            res_key = (dd, sm)
-            if res_key not in results_c:
+        if not scenarios_to_plot:
+            print("Not enough data to create evolution plots")
+            return
+        
+        # Create figure and subplots
+        fig, axes = plt.subplots(2, 2, figsize=(15, 12))
+        axes = axes.flatten()  # Flatten for easier indexing
+        
+        colors = ['blue', 'red', 'green', 'orange']
+        
+        # Define metrics to plot
+        metrics_to_plot = [
+            {'key': 'trust_stats', 'col_idx': [1], 'title': 'AI Trust Evolution', 
+             'ylabel': 'AI Trust', 'style': '--'},
+            {'key': 'seci', 'col_idx': [1], 'title': 'SECI Evolution', 
+             'ylabel': 'SECI Value', 'style': '-'},
+            {'key': 'aeci', 'col_idx': [1], 'title': 'AECI Evolution', 
+             'ylabel': 'AECI Value', 'style': '-'},
+            {'key': 'belief_error', 'col_idx': [1], 'title': 'Belief Error Evolution', 
+             'ylabel': 'MAE', 'style': '-'}
+        ]
+        
+        # Create plots
+        for plot_idx, metric in enumerate(metrics_to_plot):
+            if plot_idx >= len(axes):
+                print(f"Warning: Not enough axes for metric {metric['key']}")
                 continue
-            res = results_c[res_key]
+                
+            ax = axes[plot_idx]
+            plots_created = False
             
-            data_key = metric['key']
-            if data_key in res and res[data_key].size > 0:
-                data_array = res[data_key]
-                if data_array.ndim >= 3 and data_array.shape[1] > 0:
-                    ticks = data_array[0, :, 0]
+            # Get label for metric
+            metric_label = metric.get('title', metric['key'])
+            
+            for scenario_idx, (dd, sm) in enumerate(scenarios_to_plot):
+                res_key = (dd, sm)
+                if res_key not in results_c:
+                    print(f"Data missing for scenario {res_key}")
+                    continue
                     
-                    # Plot mean for each column index
-                    for col_idx in metric['col_idx']:
-                        if col_idx < data_array.shape[2]:
-                            mean_values = np.mean(data_array[:, :, col_idx], axis=0)
-                            label = f'D={dd}, S={sm}, Type={col_idx}'
-                            color = colors[(scenario_idx * 2 + col_idx-1) % len(colors)]
-                            
-                            # Only plot if we have valid data
-                            if not np.all(np.isnan(mean_values)):
-                                ax.plot(ticks, mean_values, 
-                                       color=color,
-                                       linestyle=metric['style'],
-                                       linewidth=2,
-                                       label=label)
-                                plots_created = True
+                res = results_c[res_key]
+                data_key = metric['key']
+                
+                # Skip if data doesn't exist
+                if data_key not in res or not isinstance(res[data_key], np.ndarray) or res[data_key].size == 0:
+                    print(f"No valid {data_key} data for scenario {res_key}")
+                    continue
+                
+                data_array = res[data_key]
+                
+                # Skip if array has wrong shape
+                if data_array.ndim < 3 or data_array.shape[1] == 0:
+                    print(f"Invalid array shape for {data_key}: {data_array.shape}")
+                    continue
+                
+                # Get ticks from first column
+                ticks = np.arange(data_array.shape[1])  # Just use tick indices
+                
+                # Plot each column specified
+                for col_idx_pos, col_idx in enumerate(metric['col_idx']):
+                    # Skip if column index is invalid
+                    if col_idx >= data_array.shape[2]:
+                        print(f"Column index {col_idx} out of bounds for {data_key}")
+                        continue
+                    
+                    # Get mean values and handle NaN
+                    mean_values = np.nanmean(data_array[:, :, col_idx], axis=0)
+                    
+                    # Only plot if we have valid data
+                    if np.any(~np.isnan(mean_values)):
+                        label = f'D={dd}, S={sm}, Type={(col_idx)}'
+                        color_idx = (scenario_idx * len(metric['col_idx']) + col_idx_pos) % len(colors)
+                        
+                        ax.plot(ticks, mean_values, 
+                               color=colors[color_idx],
+                               linestyle=metric['style'],
+                               linewidth=2,
+                               label=label)
+                        plots_created = True
+            
+            # Set title and labels
+            ax.set_title(metric['title'])
+            ax.set_xlabel('Tick')
+            ax.set_ylabel(metric['ylabel'])
+            
+            # Only add legend if plots were created
+            if plots_created:
+                ax.legend()
+            else:
+                ax.text(0.5, 0.5, 'No data to display', 
+                       ha='center', va='center', transform=ax.transAxes)
+            
+            ax.grid(True, alpha=0.3)
+            
+            # Set y-limits based on the metric type
+            if metric['key'] in ['seci', 'aeci', 'trust_stats']:
+                ax.set_ylim(0, 1)
         
-        ax.set_title(metric['title'])
-        ax.set_xlabel('Tick')
-        ax.set_ylabel(metric['ylabel'])
-        
-        # Only add legend if plots were created
-        if plots_created:
-            ax.legend()
-        else:
-            ax.text(0.5, 0.5, 'No data to display', 
-                   ha='center', va='center', transform=ax.transAxes)
-        
-        ax.grid(True, alpha=0.3)
-        
-        # Set y-limits based on the metric type
-        if metric['key'] in ['seci', 'aeci', 'trust_stats']:
-            ax.set_ylim(0, 1)
+        plt.tight_layout()
+        plt.savefig("agent_model_results/experiment_c_evolution.png", dpi=300)
+        plt.close()
     
-    plt.tight_layout()
-    plt.savefig("agent_model_results/experiment_c_evolution.png", dpi=300)
-    plt.close()
+    except Exception as e:
+        print(f"Error in plot_experiment_c_evolution: {e}")
+        import traceback
+        traceback.print_exc()
 
 #########################################
 # Utility Function for CSV Export
@@ -6436,7 +6567,7 @@ if __name__ == "__main__":
         "exploit_friend_bias": 0.1,
         "exploit_self_bias": 0.1
     }
-    num_runs = 1
+    num_runs = 3
     save_dir = "agent_model_results"
     os.makedirs(save_dir, exist_ok=True)
 
@@ -6554,16 +6685,18 @@ if __name__ == "__main__":
     ##############################################
     # Experiment C: Vary Disaster Dynamics and Shock Magnitude
     ##############################################
-    dynamics_values = [1, 3]
-    shock_values = [1, 3]
+    # Replace the current plotting section with:
+
+    dynamics_values = [1, 2, 3]
+    shock_values = [1, 2, 3]
     results_c = experiment_disaster_dynamics(base_params, dynamics_values, shock_values, num_runs)
 
     # Initialize matrices for heatmaps
     exploit_correct_matrix = np.zeros((len(dynamics_values), len(shock_values)))
     explor_correct_matrix = np.zeros((len(dynamics_values), len(shock_values)))
-    final_mae_exploit_matrix = np.zeros((len(dynamics_values), len(shock_values))) # ADDED
-    final_mae_explor_matrix = np.zeros((len(dynamics_values), len(shock_values)))  # ADDED
-    final_unmet_need_matrix = np.zeros((len(dynamics_values), len(shock_values))) # ADDED
+    final_mae_exploit_matrix = np.zeros((len(dynamics_values), len(shock_values)))
+    final_mae_explor_matrix = np.zeros((len(dynamics_values), len(shock_values)))
+    final_unmet_need_matrix = np.zeros((len(dynamics_values), len(shock_values)))
 
     for i, dd in enumerate(dynamics_values):
         for j, sm in enumerate(shock_values):
@@ -6574,37 +6707,90 @@ if __name__ == "__main__":
                 continue
             res = results_c[res_key]
 
-            # --- Populate Heatmap Matrices ---
-            exploit_correct_matrix[i, j] = res["assist"]["exploit_correct"]["mean"]
-            explor_correct_matrix[i, j] = res["assist"]["explor_correct"]["mean"]
+            # Populate matrices safely
+            try:
+                exploit_correct_matrix[i, j] = res["assist"]["exploit_correct"]["mean"]
+                explor_correct_matrix[i, j] = res["assist"]["explor_correct"]["mean"]
+            except KeyError as e:
+                print(f"Missing assist data for {res_key}: {e}")
+                exploit_correct_matrix[i, j] = np.nan
+                explor_correct_matrix[i, j] = np.nan
 
             # Get final belief error (mean across runs)
-            # Assumes belief_error array shape is (runs, ticks_recorded, 3) -> [tick, exploit, explor]
             if res["belief_error"].ndim >= 3 and res["belief_error"].shape[1] > 0:
-                final_mae_exploit_matrix[i, j] = np.mean(res["belief_error"][:, -1, 1]) # Mean of last tick's exploit MAE
-                final_mae_explor_matrix[i, j] = np.mean(res["belief_error"][:, -1, 2]) # Mean of last tick's explor MAE
+                final_mae_exploit_matrix[i, j] = np.mean(res["belief_error"][:, -1, 1])
+                final_mae_explor_matrix[i, j] = np.mean(res["belief_error"][:, -1, 2])
             else:
-                final_mae_exploit_matrix[i, j] = np.nan # Use NaN if data missing/invalid
+                final_mae_exploit_matrix[i, j] = np.nan
                 final_mae_explor_matrix[i, j] = np.nan
 
             # Get final unmet need (mean across runs)
-            # unmet_needs_evol is a list of lists/arrays (runs, ticks)
             final_unmet_counts = []
             if "unmet_needs_evol" in res and res["unmet_needs_evol"]:
                 for run_data in res["unmet_needs_evol"]:
                     if run_data is not None and len(run_data) > 0:
-                        final_unmet_counts.append(run_data[-1]) # Get last value from each run
+                        final_unmet_counts.append(run_data[-1])
             final_unmet_need_matrix[i, j] = np.mean(final_unmet_counts) if final_unmet_counts else np.nan
-            # --- End Populate ---
 
-            # --- Call Bar Chart Plot (Update this call) ---
-            # plot_assistance(res["assist"], f"(Dynamics={dd}, Shock={sm})") # OLD Call
-            if "raw_assist_counts" in res: # Check if raw data exists
-                 plot_assistance_bars(res["assist"], res["raw_assist_counts"], f"(Dynamics={dd}, Shock={sm})") # NEW Call
+            # Call Bar Chart Plot individually for each combination
+            if "raw_assist_counts" in res:
+                plot_assistance_bars(res["assist"], res["raw_assist_counts"], f"(Dynamics={dd}, Shock={sm})")
             else:
-                 print(f"Warning: Raw assist counts missing for {res_key}, skipping assistance bar plot.")
-            # --- End Bar Chart Call ---
+                print(f"Warning: Raw assist counts missing for {res_key}, skipping assistance bar plot.")
 
+    # Create the heatmap plots for the matrices you built
+    print("\n--- Creating Heatmap Visualizations for Experiment C ---")
+
+    # Create a single figure with subplots for all heatmaps
+    fig, axes = plt.subplots(2, 3, figsize=(18, 12))
+    axes = axes.flatten()  # Flatten for easier indexing
+
+    heatmap_data = [
+        {'matrix': exploit_correct_matrix, 'title': 'Exploitative Correct Tokens', 'cmap': 'RdYlGn'},
+        {'matrix': explor_correct_matrix, 'title': 'Exploratory Correct Tokens', 'cmap': 'RdYlGn'},
+        {'matrix': final_mae_exploit_matrix, 'title': 'Final MAE - Exploitative', 'cmap': 'RdYlGn_r'},
+        {'matrix': final_mae_explor_matrix, 'title': 'Final MAE - Exploratory', 'cmap': 'RdYlGn_r'},
+        {'matrix': final_unmet_need_matrix, 'title': 'Final Unmet Needs', 'cmap': 'RdYlGn_r'},
+        # Add a combined metric
+        {'matrix': (exploit_correct_matrix + explor_correct_matrix) / 2, 'title': 'Average Correct Tokens', 'cmap': 'RdYlGn'}
+    ]
+
+    for idx, config in enumerate(heatmap_data):
+        ax = axes[idx]
+        data = config['matrix']
+        
+        # Handle NaN values properly
+        data_masked = np.ma.masked_where(np.isnan(data), data)
+        
+        # Create heatmap
+        im = ax.imshow(data_masked, cmap=config['cmap'], aspect='auto')
+        
+        # Add colorbar
+        cbar = plt.colorbar(im, ax=ax)
+        cbar.set_label(config['title'])
+        
+        # Set ticks and labels
+        ax.set_xticks(range(len(shock_values)))
+        ax.set_yticks(range(len(dynamics_values)))
+        ax.set_xticklabels(shock_values)
+        ax.set_yticklabels(dynamics_values)
+        ax.set_xlabel('Shock Magnitude')
+        ax.set_ylabel('Disaster Dynamics')
+        ax.set_title(config['title'])
+        
+        # Add value annotations
+        for row in range(len(dynamics_values)):
+            for col in range(len(shock_values)):
+                if not np.isnan(data[row, col]):
+                    text = ax.text(col, row, f'{data[row, col]:.2f}',
+                                ha='center', va='center', color='black',
+                                fontsize=10, fontweight='bold')
+
+    plt.tight_layout()
+    plt.savefig("agent_model_results/experiment_c_heatmaps.png", dpi=300)
+    plt.close()
+
+    # Now call the comprehensive analysis function
     print("\n--- Plotting Comprehensive Analysis for Experiment C ---")
     plot_experiment_c_comprehensive(results_c, dynamics_values, shock_values)
 
