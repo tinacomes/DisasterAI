@@ -564,10 +564,10 @@ class HumanAgent(Agent):
         if candidates:
             candidates.sort(key=lambda x: x['score'], reverse=True)
             # Debug print top candidates periodically
-            if self.model.debug_mode and self.model.tick % 10 == 1 and random.random() < 0.2:
-                print(f"DEBUG Tick {self.model.tick} Agt {self.unique_id} Top Explore Candidates:")
-                for cand in candidates[:min(5, len(candidates))]:
-                    print(f"  Cell:{cand.get('cell')} Lvl:{cand.get('level')} Conf:{cand.get('conf'):.2f} Score:{cand.get('score'):.3f}")
+            #if self.model.debug_mode and self.model.tick % 10 == 1 and random.random() < 0.2:
+               # print(f"DEBUG Tick {self.model.tick} Agt {self.unique_id} Top Explore Candidates:")
+                #for cand in candidates[:min(5, len(candidates))]:
+                    #print(f"  Cell:{cand.get('cell')} Lvl:{cand.get('level')} Conf:{cand.get('conf'):.2f} Score:{cand.get('score'):.3f}")
 
             self.exploration_targets = [c['cell'] for c in candidates[:num_targets]]
         else:
@@ -960,16 +960,16 @@ class HumanAgent(Agent):
                 decision_factors['chosen_mode'] = chosen_mode
 
             # Log decision factors periodically
-            if self.model.tick % 10 == 0 and random.random() < 0.2:  # Log ~20% of decisions every 10 ticks
-                if self.model.debug_mode:
-                    print(f"\nAgent {self.unique_id} ({self.agent_type}) source selection:")
-                    print(f"  Decision type: {decision_factors['selection_type']}")
-                    print(f"  Chosen mode: {decision_factors['chosen_mode']}")
-                    if decision_factors['selection_type'] == 'exploitation':
-                        print(f"  Base Q-values: {decision_factors['base_scores']}")
-                        print(f"  Applied biases: {decision_factors['biases']}")
-                        print(f"  Final scores: {decision_factors['final_scores']}")
-                    print(f"  AI alignment level: {self.model.ai_alignment_level}")
+            #if self.model.tick % 10 == 0 and random.random() < 0.2:  # Log ~20% of decisions every 10 ticks
+               # if self.model.debug_mode:
+                   # print(f"\nAgent {self.unique_id} ({self.agent_type}) source selection:")
+                    #print(f"  Decision type: {decision_factors['selection_type']}")
+                    #print(f"  Chosen mode: {decision_factors['chosen_mode']}")
+                    #if decision_factors['selection_type'] == 'exploitation':
+                        #print(f"  Base Q-values: {decision_factors['base_scores']}")
+                        #print(f"  Applied biases: {decision_factors['biases']}")
+                        #print(f"  Final scores: {decision_factors['final_scores']}")
+                    #print(f"  AI alignment level: {self.model.ai_alignment_level}")
 
             self.tokens_this_tick = {chosen_mode: 1}
             self.last_queried_source_ids = []
@@ -1151,9 +1151,9 @@ class HumanAgent(Agent):
                 incorrect_in_batch = 0
                 cell_rewards = []
 
-                # FIXED: Add diagnostic for reward processing
-                if self.model.debug_mode and random.random() < 0.1:
-                    print(f"Agent {self.unique_id} processing rewards for {len(cells_and_beliefs)} cells")
+                # possible diagnostic for reward processing
+                #if self.model.debug_mode and random.random() < 0.1:
+                    #print(f"Agent {self.unique_id} processing rewards for {len(cells_and_beliefs)} cells")
 
                 for cell, belief_level in cells_and_beliefs:
                     if not (0 <= cell[0] < self.model.width and 0 <= cell[1] < self.model.height):
@@ -1404,9 +1404,9 @@ class HumanAgent(Agent):
                             self.trust[ai_source] = new_trust
 
                             # Debug logging
-                            if self.model.debug_mode and random.random() < 0.1:
-                                print(f"Agent {self.unique_id} direct trust update for {ai_source}:")
-                                print(f"  - Accuracy: {accuracy:.2f}, Trust: {old_trust:.2f} -> {new_trust:.2f}")
+                            #if self.model.debug_mode and random.random() < 0.1:
+                               # print(f"Agent {self.unique_id} direct trust update for {ai_source}:")
+                               # print(f"  - Accuracy: {accuracy:.2f}, Trust: {old_trust:.2f} -> {new_trust:.2f}")
 
 
 class AIAgent(Agent):
@@ -1881,12 +1881,12 @@ class DisasterModel(Model):
            # print(f"[DEBUG] Tick {self.tick}: {message}")
 
     def calculate_aeci_variance(self):
-        """Calculate AI Echo Chamber Index variance with improved debugging"""
-        aeci_variance = 0.0
+        """Calculate AI Echo Chamber Index variance on a [-1, +1] scale."""
+        aeci_variance = 0.0  # Default neutral value
         
         # Define AI-reliant agents
-        min_calls_threshold = 2  # Reduced threshold for testing
-        min_ai_ratio = 0.1      # Reduced threshold
+        min_calls_threshold = 2
+        min_ai_ratio = 0.1
         
         ai_reliant_agents = []
         for agent in self.humans.values():
@@ -1904,8 +1904,6 @@ class DisasterModel(Model):
         if self.debug_mode and self.tick % 10 == 0:
             print(f"\nAECI Variance Calculation at Tick {self.tick}:")
             print(f"  Found {len(ai_reliant_agents)}/{len(self.humans)} AI-reliant agents")
-            for agent in list(ai_reliant_agents)[:3]:  # Sample first 3 agents
-                print(f"  Agent {agent.unique_id}: AI calls={agent.accum_calls_ai}, Total={agent.accum_calls_total}")
         
         # Get global belief variance
         all_beliefs = []
@@ -1936,15 +1934,26 @@ class DisasterModel(Model):
             # Calculate AI-reliant variance with safety check
             if len(ai_reliant_beliefs) > 1:
                 ai_reliant_var = np.var(ai_reliant_beliefs)
-                # Calculate variance reduction ratio
-                aeci_variance = max(0, min(1, (global_var - ai_reliant_var) / global_var))
+                
+                # Calculate variance effect - key change here
+                # Negative means AI reduces variance (echo chamber)
+                # Positive means AI increases variance (diversification)
+                var_diff = ai_reliant_var - global_var
+                
+                # Normalize to [-1, +1] range
+                if var_diff < 0:  # Variance reduction (echo chamber)
+                    aeci_variance = max(-1, var_diff / global_var)  # Normalize by global variance
+                else:  # Variance increase (diversification)
+                    # Find a reasonable upper bound for normalization
+                    max_possible_var = 5.0  # Given belief levels are 0-5, max variance is around 5
+                    aeci_variance = min(1, var_diff / (max_possible_var - global_var))
                 
                 if self.debug_mode and self.tick % 10 == 0:
                     print(f"  Global variance: {global_var:.4f}")
                     print(f"  AI-reliant variance: {ai_reliant_var:.4f}")
-                    print(f"  AECI variance: {aeci_variance:.4f}")
+                    print(f"  AECI variance effect: {aeci_variance:.4f}")
         
-        # Store result in a consistent format
+        # Store result in consistent format
         aeci_variance_tuple = (self.tick, aeci_variance)
         
         # Update metrics dictionary
@@ -2357,11 +2366,16 @@ class DisasterModel(Model):
 
                 # Calculate SECI safely
                 if global_var > 1e-9:  # Ensure non-zero denominator
-                    seci_val = max(0, min(1, (global_var - friend_var) / global_var))
+                    var_diff = friend_var - global_var
+                    
+                    if var_diff < 0:  # Variance reduction (echo chamber)
+                        seci_val = max(-1, var_diff / global_var)
+                    else:  # Variance increase (diversification)
+                        max_possible_var = 5.0  # Upper bound for normalization
+                        seci_val = min(1, var_diff / (max_possible_var - global_var))
                 else:
-                    seci_val = 0  # Default if global variance is essentially zero
-
-                # Store by agent type
+                    seci_val = 0  # Default if global variance is essentially zero                # Store by agent type
+                
                 if agent.agent_type == "exploitative":
                     seci_exp_list.append(seci_val)
                 else:
@@ -3295,8 +3309,8 @@ def simulation_generator(num_runs, base_params):
     for seed in range(num_runs):
         try:
             # Set seeds for reproducibility
-            random.seed(seed)
-            np.random.seed(seed)
+            random.seed(seed +42) #including offset
+            np.random.seed(seed +101)
 
             # Run the simulation with the given parameters
             print(f"Starting simulation run {seed+1}/{num_runs}...")
@@ -3611,11 +3625,51 @@ def experiment_learning_trust(base_params, learning_rate_values, epsilon_values,
 def safe_stack(data_list):
     """Safely stacks a list of numpy arrays, handling empty lists/arrays."""
     if not data_list: return np.array([])
+    
+    # Special handling for AECI variance
+    if any(isinstance(item, tuple) and len(item) == 2 for item in data_list):
+        print("Detected tuple format data (likely AECI variance) - converting to array")
+        # Convert tuples to arrays with consistent shape
+        converted_arrays = []
+        for item in data_list:
+            if isinstance(item, tuple) and len(item) == 2:
+                # Convert (tick, value) tuple to a small array
+                converted_arrays.append(np.array([[item[0], item[1]]]))
+            elif isinstance(item, np.ndarray) and item.size > 0:
+                converted_arrays.append(item)
+        
+        if converted_arrays:
+            # Make sure all arrays have same shape before stacking
+            shapes = [arr.shape for arr in converted_arrays]
+            if len(set(shapes)) > 1:
+                print(f"Warning: Inconsistent shapes in AECI variance data: {shapes}")
+                # Reshape to most common shape
+                most_common_shape = max(set(shapes), key=shapes.count)
+                for i, arr in enumerate(converted_arrays):
+                    if arr.shape != most_common_shape:
+                        try:
+                            # Try to reshape or pad
+                            new_arr = np.zeros(most_common_shape)
+                            slice_shape = tuple(min(s1, s2) for s1, s2 in zip(arr.shape, most_common_shape))
+                            slice_obj = tuple(slice(0, s) for s in slice_shape)
+                            new_arr[slice_obj] = arr[slice_obj]
+                            converted_arrays[i] = new_arr
+                        except Exception as e:
+                            print(f"Reshaping error: {e} - skipping array")
+                            converted_arrays[i] = None
+                
+                # Filter out None values
+                converted_arrays = [arr for arr in converted_arrays if arr is not None]
+            
+            # Now stack the converted arrays
+            if converted_arrays:
+                return np.stack(converted_arrays, axis=0)
+    
+    # Original implementation for normal arrays
     valid_arrays = [item for item in data_list if isinstance(item, np.ndarray) and item.size > 0]
     if not valid_arrays: return np.array([])
-    # Basic stacking, assumes consistent shapes (requires metrics to be recorded for same # of ticks)
+    
     try:
-        # Check expected dimensions - most time series here are (ticks, n_metrics_in_tuple) -> stack to (runs, ticks, n_metrics)
         # Find expected shape from first valid array
         expected_ndim = valid_arrays[0].ndim
         expected_shape_after_tick_col = valid_arrays[0].shape[1:] # Shape excluding the tick dimension
@@ -3632,7 +3686,6 @@ def safe_stack(data_list):
         return np.stack(processed_list, axis=0)
     except ValueError as e:
         print(f"Error during stacking: {e}. Returning empty array.")
-        # More sophisticated padding could be added here if tick counts vary significantly
         return np.array([])
 
 def calculate_metric_stats(data_list):
@@ -6598,6 +6651,63 @@ def export_results_to_csv(results, share_values, filename, experiment_name):
         for share in share_values:
             writer.writerow([experiment_name, share, str(results.get(share))])
 
+def debug_aeci_variance_data(results_dict, title_suffix=""):
+    """Inspects and prints detailed AECI variance data structure"""
+    print(f"\n=== AECI Variance Data Inspection for {title_suffix} ===")
+    
+    # Get aeci_variance data
+    aeci_var_data = results_dict.get("aeci_variance")
+    
+    # Basic data check
+    if aeci_var_data is None:
+        print("ERROR: aeci_variance data is None")
+        return
+    
+    if not isinstance(aeci_var_data, np.ndarray):
+        print(f"ERROR: aeci_variance isn't a numpy array (type: {type(aeci_var_data)})")
+        if isinstance(aeci_var_data, list):
+            print(f"  List length: {len(aeci_var_data)}")
+            for i, item in enumerate(aeci_var_data[:3]):
+                print(f"  Item {i}: {type(item)} - {item}")
+        return
+    
+    # Array shape analysis
+    print(f"AECI Variance array shape: {aeci_var_data.shape}")
+    
+    # Inspect dimensions
+    if aeci_var_data.ndim >= 3:
+        # Expected shape: (runs, ticks, 2) where 2nd dim is [tick, value]
+        print(f"First dimension (runs): {aeci_var_data.shape[0]}")
+        print(f"Second dimension (ticks): {aeci_var_data.shape[1]}")
+        print(f"Third dimension (data): {aeci_var_data.shape[2]}")
+        
+        # Inspect first few values
+        print("\nSample values:")
+        for run in range(min(2, aeci_var_data.shape[0])):
+            print(f"Run {run}:")
+            tick_slice = slice(0, min(5, aeci_var_data.shape[1]))
+            print(f"  First 5 ticks: {aeci_var_data[run, tick_slice, :]}")
+            
+            # Check if values are in expected range [0,1]
+            if aeci_var_data.shape[2] > 1:
+                values = aeci_var_data[run, :, 1]
+                min_val, max_val = np.nanmin(values), np.nanmax(values)
+                print(f"  Value range: [{min_val:.4f}, {max_val:.4f}]")
+                print(f"  Mean value: {np.nanmean(values):.4f}")
+                print(f"  Contains NaN: {np.isnan(values).any()}")
+                print(f"  Contains Inf: {np.isinf(values).any()}")
+    else:
+        print(f"WARNING: Expected 3D array, got {aeci_var_data.ndim}D")
+        # Try to analyze based on actual dimensions
+        if aeci_var_data.ndim == 2:
+            print("Assuming array format is (runs, values):")
+            for run in range(min(2, aeci_var_data.shape[0])):
+                print(f"Run {run}: {aeci_var_data[run, :]}")
+        elif aeci_var_data.ndim == 1:
+            print("Assuming array is a flat list of values:")
+            print(f"Values: {aeci_var_data[:min(10, len(aeci_var_data))]}")
+    
+    print("=== End AECI Variance Data Inspection ===\n")
 
 #########################################
 # Main: Run Experiments and Plot Results
@@ -6750,115 +6860,61 @@ if __name__ == "__main__":
     ##############################################
     # Experiment C: Vary Disaster Dynamics and Shock Magnitude
     ##############################################
-    # Replace the current plotting section with:
+    print("\n=== STARTING EXPERIMENT C ===")
 
-    dynamics_values = [1, 2, 3]
-    shock_values = [1, 2, 3]
-    results_c = experiment_disaster_dynamics(base_params, dynamics_values, shock_values, num_runs)
-
-    # Initialize matrices for heatmaps
-    exploit_correct_matrix = np.zeros((len(dynamics_values), len(shock_values)))
-    explor_correct_matrix = np.zeros((len(dynamics_values), len(shock_values)))
-    final_mae_exploit_matrix = np.zeros((len(dynamics_values), len(shock_values)))
-    final_mae_explor_matrix = np.zeros((len(dynamics_values), len(shock_values)))
-    final_unmet_need_matrix = np.zeros((len(dynamics_values), len(shock_values)))
-
-    for i, dd in enumerate(dynamics_values):
-        for j, sm in enumerate(shock_values):
-            res_key = (dd, sm)
-            # Ensure results exist for this key
-            if res_key not in results_c:
-                print(f"Warning: Missing results for {res_key}")
-                continue
-            res = results_c[res_key]
-
-            # Populate matrices safely
-            try:
-                exploit_correct_matrix[i, j] = res["assist"]["exploit_correct"]["mean"]
-                explor_correct_matrix[i, j] = res["assist"]["explor_correct"]["mean"]
-            except KeyError as e:
-                print(f"Missing assist data for {res_key}: {e}")
-                exploit_correct_matrix[i, j] = np.nan
-                explor_correct_matrix[i, j] = np.nan
-
-            # Get final belief error (mean across runs)
-            if res["belief_error"].ndim >= 3 and res["belief_error"].shape[1] > 0:
-                final_mae_exploit_matrix[i, j] = np.mean(res["belief_error"][:, -1, 1])
-                final_mae_explor_matrix[i, j] = np.mean(res["belief_error"][:, -1, 2])
-            else:
-                final_mae_exploit_matrix[i, j] = np.nan
-                final_mae_explor_matrix[i, j] = np.nan
-
-            # Get final unmet need (mean across runs)
-            final_unmet_counts = []
-            if "unmet_needs_evol" in res and res["unmet_needs_evol"]:
-                for run_data in res["unmet_needs_evol"]:
-                    if run_data is not None and len(run_data) > 0:
-                        final_unmet_counts.append(run_data[-1])
-            final_unmet_need_matrix[i, j] = np.mean(final_unmet_counts) if final_unmet_counts else np.nan
-
-            # Call Bar Chart Plot individually for each combination
-            if "raw_assist_counts" in res:
-                plot_assistance_bars(res["assist"], res["raw_assist_counts"], f"(Dynamics={dd}, Shock={sm})")
-            else:
-                print(f"Warning: Raw assist counts missing for {res_key}, skipping assistance bar plot.")
-
-    # Create the heatmap plots for the matrices you built
-    print("\n--- Creating Heatmap Visualizations for Experiment C ---")
-
-    # Create a single figure with subplots for all heatmaps
-    fig, axes = plt.subplots(2, 3, figsize=(18, 12))
-    axes = axes.flatten()  # Flatten for easier indexing
-
-    heatmap_data = [
-        {'matrix': exploit_correct_matrix, 'title': 'Exploitative Correct Tokens', 'cmap': 'RdYlGn'},
-        {'matrix': explor_correct_matrix, 'title': 'Exploratory Correct Tokens', 'cmap': 'RdYlGn'},
-        {'matrix': final_mae_exploit_matrix, 'title': 'Final MAE - Exploitative', 'cmap': 'RdYlGn_r'},
-        {'matrix': final_mae_explor_matrix, 'title': 'Final MAE - Exploratory', 'cmap': 'RdYlGn_r'},
-        {'matrix': final_unmet_need_matrix, 'title': 'Final Unmet Needs', 'cmap': 'RdYlGn_r'},
-        # Add a combined metric
-        {'matrix': (exploit_correct_matrix + explor_correct_matrix) / 2, 'title': 'Average Correct Tokens', 'cmap': 'RdYlGn'}
-    ]
-
-    for idx, config in enumerate(heatmap_data):
-        ax = axes[idx]
-        data = config['matrix']
+    try:
+        dynamics_values = [1, 2, 3]
+        shock_values = [1, 2, 3]
         
-        # Handle NaN values properly
-        data_masked = np.ma.masked_where(np.isnan(data), data)
+        print(f"Running experiment with {len(dynamics_values)}x{len(shock_values)} parameter combinations...")
+        results_c = experiment_disaster_dynamics(base_params, dynamics_values, shock_values, num_runs)
         
-        # Create heatmap
-        im = ax.imshow(data_masked, cmap=config['cmap'], aspect='auto')
+        print(f"Got results for {len(results_c)} parameter combinations")
         
-        # Add colorbar
-        cbar = plt.colorbar(im, ax=ax)
-        cbar.set_label(config['title'])
+        # Debug the structure of results_c
+        print("Parameter combinations in results_c:")
+        for key in sorted(results_c.keys()):
+            print(f"  {key}: {type(results_c[key])}")
         
-        # Set ticks and labels
-        ax.set_xticks(range(len(shock_values)))
-        ax.set_yticks(range(len(dynamics_values)))
-        ax.set_xticklabels(shock_values)
-        ax.set_yticklabels(dynamics_values)
-        ax.set_xlabel('Shock Magnitude')
-        ax.set_ylabel('Disaster Dynamics')
-        ax.set_title(config['title'])
+        # Generate visualizations with robust error handling
+        print("\n--- Creating Visualizations ---")
         
-        # Add value annotations
-        for row in range(len(dynamics_values)):
-            for col in range(len(shock_values)):
-                if not np.isnan(data[row, col]):
-                    text = ax.text(col, row, f'{data[row, col]:.2f}',
-                                ha='center', va='center', color='black',
-                                fontsize=10, fontweight='bold')
+        try:
+            print("Generating comprehensive analysis...")
+            plot_experiment_c_comprehensive(results_c, dynamics_values, shock_values)
+            print("Comprehensive analysis complete")
+        except Exception as e:
+            print(f"Error in comprehensive analysis: {e}")
+            import traceback
+            traceback.print_exc()
+        
+        try:
+            print("Generating evolution plots...")
+            plot_experiment_c_evolution(results_c, dynamics_values, shock_values)
+            print("Evolution plots complete")
+        except Exception as e:
+            print(f"Error in evolution plots: {e}")
+            import traceback
+            traceback.print_exc()
+        
+        # Debug one specific parameter combination
+        if (1, 1) in results_c:
+            print("\nExamining data for dynamics=1, shock=1:")
+            sample_result = results_c[(1, 1)]
+            for key in sorted(sample_result.keys()):
+                if isinstance(sample_result[key], np.ndarray):
+                    print(f"  {key}: ndarray with shape {sample_result[key].shape}")
+                elif isinstance(sample_result[key], list):
+                    print(f"  {key}: list with {len(sample_result[key])} items")
+                else:
+                    print(f"  {key}: {type(sample_result[key])}")
 
-    plt.tight_layout()
-    plt.savefig("agent_model_results/experiment_c_heatmaps.png", dpi=300)
-    plt.close()
+    except Exception as e:
+        print(f"Experiment C failed: {e}")
+        import traceback
+        traceback.print_exc()
 
-    # Now call the comprehensive analysis function
-    print("\n--- Plotting Comprehensive Analysis for Experiment C ---")
-    plot_experiment_c_comprehensive(results_c, dynamics_values, shock_values)
-
+    print("=== EXPERIMENT C COMPLETED ===")
 
     ##############################################
     # Experiment D: Vary Learning Rate and Epsilon
@@ -6916,8 +6972,6 @@ if __name__ == "__main__":
     # Save the figure instead of just showing it
     plt.savefig("agent_model_results/experiment_d_seci.png")
     plt.close(fig_d_seci)
-
-    gc.collect()
 
     gc.collect()
 
