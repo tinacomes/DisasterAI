@@ -506,8 +506,8 @@ class HumanAgent(Agent):
 
         # --- Fallback if no L1+ candidates found ---
         if not candidates:
-            if self.model.debug_mode:
-                print(f"Agent {self.unique_id} ({self.agent_type}): No L{min_level_to_explore}+ targets found. Using fallback.")
+            #if self.model.debug_mode:
+                #print(f"Agent {self.unique_id} ({self.agent_type}): No L{min_level_to_explore}+ targets found. Using fallback.")
 
             # NEW APPROACH: Look for L0 cells with highest uncertainty (lowest confidence)
             l0_candidates = []
@@ -538,10 +538,10 @@ class HumanAgent(Agent):
                 # Take the top candidate(s)
                 candidates = l0_candidates[:num_targets]
 
-                if self.model.debug_mode:
-                    print(f"  Found {len(l0_candidates)} L0 candidates, using highest uncertainty ones")
-                    for c in candidates[:min(3, len(candidates))]:
-                        print(f"  L0 Candidate: Cell:{c['cell']} Uncertainty:{c['score']:.3f} Conf:{c['conf']:.2f}")
+                #if self.model.debug_mode:
+                 #   print(f"  Found {len(l0_candidates)} L0 candidates, using highest uncertainty ones")
+                  #  for c in candidates[:min(3, len(candidates))]:
+                   #     print(f"  L0 Candidate: Cell:{c['cell']} Uncertainty:{c['score']:.3f} Conf:{c['conf']:.2f}")
             else:
                 # Ultimate fallback: pick some random cells
                 random_cells = []
@@ -1882,6 +1882,8 @@ class DisasterModel(Model):
 
     def calculate_aeci_variance(self):
         """Calculate AI Echo Chamber Index variance on a [-1, +1] scale."""
+        print(f"\nDEBUG: Starting AECI variance calculation at tick {self.tick}")
+        
         aeci_variance = 0.0  # Default neutral value
         
         # Define AI-reliant agents
@@ -1901,9 +1903,7 @@ class DisasterModel(Model):
                 ai_reliant_agents.append(agent)
         
         # Debug print
-        if self.debug_mode and self.tick % 10 == 0:
-            print(f"\nAECI Variance Calculation at Tick {self.tick}:")
-            print(f"  Found {len(ai_reliant_agents)}/{len(self.humans)} AI-reliant agents")
+        print(f"  Found {len(ai_reliant_agents)}/{len(self.humans)} AI-reliant agents")
         
         # Get global belief variance
         all_beliefs = []
@@ -1917,8 +1917,10 @@ class DisasterModel(Model):
         # Calculate global variance with safety check
         if len(all_beliefs) > 1:
             global_var = np.var(all_beliefs)
+            print(f"  Global belief variance: {global_var:.4f}")
         else:
             global_var = 0.0
+            print("  WARNING: Not enough global beliefs to calculate variance")
             
         # Only proceed if we have a valid global variance and AI-reliant agents
         if global_var > 0 and ai_reliant_agents:
@@ -1934,8 +1936,9 @@ class DisasterModel(Model):
             # Calculate AI-reliant variance with safety check
             if len(ai_reliant_beliefs) > 1:
                 ai_reliant_var = np.var(ai_reliant_beliefs)
+                print(f"  AI-reliant beliefs variance: {ai_reliant_var:.4f}")
                 
-                # Calculate variance effect - key change here
+                # Calculate variance effect
                 # Negative means AI reduces variance (echo chamber)
                 # Positive means AI increases variance (diversification)
                 var_diff = ai_reliant_var - global_var
@@ -1948,22 +1951,28 @@ class DisasterModel(Model):
                     max_possible_var = 5.0  # Given belief levels are 0-5, max variance is around 5
                     aeci_variance = min(1, var_diff / (max_possible_var - global_var))
                 
-                if self.debug_mode and self.tick % 10 == 0:
-                    print(f"  Global variance: {global_var:.4f}")
-                    print(f"  AI-reliant variance: {ai_reliant_var:.4f}")
-                    print(f"  AECI variance effect: {aeci_variance:.4f}")
+                print(f"  AECI variance effect: {aeci_variance:.4f}")
+            else:
+                print("  WARNING: Not enough AI-reliant beliefs to calculate variance")
+        else:
+            print(f"  WARNING: Invalid global variance ({global_var}) or no AI-reliant agents")
         
-        # Store result in consistent format
+        # Create a CORRECTLY formatted tuple
         aeci_variance_tuple = (self.tick, aeci_variance)
+        print(f"  Returning AECI variance tuple: {aeci_variance_tuple}")
         
-        # Update metrics dictionary
+        # Update metrics dictionary with consistent format
         self._last_metrics['aeci_variance'] = {
             'tick': self.tick,
             'value': aeci_variance
         }
         
-        # Store in the array
+        # Store in the array with consistent format
         self.aeci_variance_data.append(aeci_variance_tuple)
+        
+        # Debug: print all values in the array
+        print(f"  Current aeci_variance_data length: {len(self.aeci_variance_data)}")
+        print(f"  Last 3 entries: {self.aeci_variance_data[-3:] if len(self.aeci_variance_data) >= 3 else self.aeci_variance_data}")
         
         return aeci_variance_tuple
         
@@ -2119,9 +2128,9 @@ class DisasterModel(Model):
             # Store the knowledge map
             self.ai_knowledge_maps[ai_id] = knowledge_map
 
-            if self.debug_mode:
-                coverage = np.sum(knowledge_map) / (self.width * self.height) * 100
-                print(f"DEBUG: {ai_id} has knowledge of {coverage:.1f}% of the grid")
+            #if self.debug_mode:
+                #coverage = np.sum(knowledge_map) / (self.width * self.height) * 100
+                #print(f"DEBUG: {ai_id} has knowledge of {coverage:.1f}% of the grid")
 
     def track_ai_usage_patterns(model, tick_interval=10, save_dir="analysis_plots"):
         """Track and plot AI usage patterns over time with proper bounds."""
@@ -3132,13 +3141,14 @@ def calculate_component_seci(model, components):
 def track_component_seci_evolution(model, tick_interval=10, save_dir="analysis_plots"):
     """
     Tracks and visualizes the evolution of component SECI over time.
+    Enhanced with proper component-level tracking and run aggregation.
     """
     if model.tick % tick_interval != 0:
         return  # Only run at intervals
 
     os.makedirs(save_dir, exist_ok=True)
 
-    # Initialize storage for tracking
+    # Initialize storage for tracking - Create if not exists
     if not hasattr(model, 'component_seci_evolution'):
         model.component_seci_evolution = {
             'ticks': [],
@@ -3154,9 +3164,6 @@ def track_component_seci_evolution(model, tick_interval=10, save_dir="analysis_p
     # Record tick
     model.component_seci_evolution['ticks'].append(model.tick)
     model.component_seci_evolution['num_components'].append(num_components)
-
-    # Calculate component SECI values
-    component_seci_values = {}
 
     # Get all beliefs across all agents
     all_beliefs = {}
@@ -3175,6 +3182,7 @@ def track_component_seci_evolution(model, tick_interval=10, save_dir="analysis_p
             global_vars[cell] = np.var(levels)
 
     # Calculate SECI for each component
+    component_seci_values = {}
     for i, component in enumerate(components):
         # Only calculate SECI for components with enough agents
         if len(component) <= 1:
@@ -3221,25 +3229,31 @@ def track_component_seci_evolution(model, tick_interval=10, save_dir="analysis_p
 
     # Record individual component data with unique identifiers
     for comp_id, seci_value in component_seci_values.items():
-        if comp_id not in model.component_seci_evolution['component_data']:
-            model.component_seci_evolution['component_data'][comp_id] = []
+        # Create a unique stable identifier for this component
+        # Use the smallest node ID in the component as its identifier
+        component = list(components[comp_id])
+        comp_key = f"comp_{min(component)}"
+        
+        if comp_key not in model.component_seci_evolution['component_data']:
+            model.component_seci_evolution['component_data'][comp_key] = []
 
         # Add None for any missing ticks
-        while len(model.component_seci_evolution['component_data'][comp_id]) < len(model.component_seci_evolution['ticks']) - 1:
-            model.component_seci_evolution['component_data'][comp_id].append(None)
+        while len(model.component_seci_evolution['component_data'][comp_key]) < len(model.component_seci_evolution['ticks']) - 1:
+            model.component_seci_evolution['component_data'][comp_key].append(None)
 
         # Add current value
-        model.component_seci_evolution['component_data'][comp_id].append(seci_value)
+        model.component_seci_evolution['component_data'][comp_key].append(seci_value)
 
-    # Fill in None for components that no longer exist
-    for comp_id in model.component_seci_evolution['component_data']:
-        if comp_id not in component_seci_values:
-            # Fill with None if component doesn't exist at this tick
-            while len(model.component_seci_evolution['component_data'][comp_id]) < len(model.component_seci_evolution['ticks']):
-                model.component_seci_evolution['component_data'][comp_id].append(None)
-
-    # Store in the model's component_seci_data list format
-    model.component_seci_data.append({'tick': model.tick, 'component_data': component_seci_values})
+    # Store in the model's component_seci_data list format with consistent structure
+    if not hasattr(model, 'component_seci_data'):
+        model.component_seci_data = []
+    
+    # Store in a format that can be easily aggregated later
+    model.component_seci_data.append({
+        'tick': model.tick, 
+        'avg_component_seci': avg_component_seci,
+        'component_values': component_seci_values  # Store values for each component
+    })
 
     # Plot evolution only if we have enough data
     if len(model.component_seci_evolution['ticks']) > 1:
@@ -3251,18 +3265,106 @@ def track_component_seci_evolution(model, tick_interval=10, save_dir="analysis_p
                 model.component_seci_evolution['avg_component_seci'],
                 'k-', linewidth=2, label='Average Component SECI')
 
+        # Plot individual components if available
+        for comp_key, values in model.component_seci_evolution['component_data'].items():
+            # Extend with None values if needed
+            while len(values) < len(model.component_seci_evolution['ticks']):
+                values.append(None)
+                
+            # Convert None values to NaN for plotting
+            values_array = np.array([np.nan if v is None else v for v in values])
+            plt.plot(model.component_seci_evolution['ticks'], values_array, 
+                   '--', alpha=0.5, linewidth=1, label=comp_key)
+
         plt.xlabel('Tick')
         plt.ylabel('SECI Value')
-        plt.title('Evolution of Average Component SECI')
+        plt.title('Evolution of Component SECI')
         plt.grid(True, linestyle='--', alpha=0.7)
-        plt.legend()
+        plt.legend(loc='upper left', bbox_to_anchor=(1, 1))
 
         # Save the figure
         plt.savefig(os.path.join(save_dir, f"component_seci_evolution_tick_{model.tick}.png"),
                   dpi=300, bbox_inches='tight')
         plt.close()
 
-        print(f"Component SECI evolution plot saved at tick {model.tick}")
+def plot_component_seci_distribution(results_dict, title_suffix=""):
+    """Plots the distribution of SECI values across different components"""
+    
+    # Extract component SECI data
+    component_seci = results_dict.get('component_seci')
+    component_seci_data = results_dict.get('component_seci_data', [])
+    
+    # Check if we have component-level data
+    has_component_level_data = False
+    if component_seci_data:
+        # Check for component_values key in any item
+        for tick_data in component_seci_data:
+            if isinstance(tick_data, dict) and 'component_values' in tick_data:
+                has_component_level_data = True
+                break
+    
+    # If no component-level data, fall back to average values
+    if not has_component_level_data:
+        print(f"No component-level SECI data available for {title_suffix}")
+        # Extract all SECI values from the array data
+        all_seci_values = []
+        if component_seci is not None and isinstance(component_seci, np.ndarray):
+            if component_seci.ndim == 3 and component_seci.shape[2] > 1:
+                # Get values from column 1
+                all_seci_values = component_seci[:, :, 1].flatten()
+                all_seci_values = all_seci_values[~np.isnan(all_seci_values)]
+    else:
+        # Collect all component values from all ticks
+        all_seci_values = []
+        for tick_data in component_seci_data:
+            if isinstance(tick_data, dict) and 'component_values' in tick_data:
+                component_values = tick_data['component_values']
+                if isinstance(component_values, dict):
+                    all_seci_values.extend(component_values.values())
+    
+    # Filter out non-numeric values
+    all_seci_values = [v for v in all_seci_values if isinstance(v, (int, float)) and not np.isnan(v)]
+    
+    # Create the figure
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
+    
+    # Plot 1: SECI distribution histogram
+    if all_seci_values:
+        ax1.hist(all_seci_values, bins=30, range=(0, 1),
+                 color='skyblue', edgecolor='black', alpha=0.7)
+        ax1.axvline(np.mean(all_seci_values), color='red', linestyle='--', linewidth=2,
+                   label=f'Mean: {np.mean(all_seci_values):.3f}')
+        ax1.axvline(np.median(all_seci_values), color='green', linestyle='--', linewidth=2,
+                   label=f'Median: {np.median(all_seci_values):.3f}')
+        ax1.set_xlabel('Component SECI Value')
+        ax1.set_ylabel('Frequency')
+        ax1.set_title(f'Component SECI Distribution {title_suffix}')
+        ax1.legend()
+        ax1.grid(True, alpha=0.3)
+    else:
+        ax1.text(0.5, 0.5, 'No component SECI data', ha='center', va='center')
+    
+    # Plot 2: Evolution of average component SECI
+    if component_seci is not None and isinstance(component_seci, np.ndarray):
+        if component_seci.ndim == 3 and component_seci.shape[1] > 0:
+            mean_seci = np.nanmean(component_seci[:, :, 1], axis=0)
+            ticks = np.arange(len(mean_seci))
+            
+            ax2.plot(ticks, mean_seci, 'b-', linewidth=2, label='Mean')
+            ax2.set_xlabel('Tick')
+            ax2.set_ylabel('Average Component SECI')
+            ax2.set_title(f'Component SECI Evolution {title_suffix}')
+            ax2.legend()
+            ax2.grid(True, alpha=0.3)
+        else:
+            ax2.text(0.5, 0.5, 'Invalid component SECI shape', ha='center', va='center')
+    else:
+        ax2.text(0.5, 0.5, 'No component SECI evolution data', ha='center', va='center')
+    
+    plt.tight_layout()
+    save_path = f"agent_model_results/component_seci_distribution_{title_suffix}.png"
+    plt.savefig(save_path.replace('(','').replace(')','').replace('=','_'))
+    plt.close()
 
 def run_simulation(params):
     model = DisasterModel(**params)
@@ -3273,11 +3375,25 @@ def run_simulation(params):
 def safe_convert_to_array(data_list):
     """Safely convert data to numpy array, handling mixed types."""
     if not data_list:
+        print("WARNING: Empty data_list in safe_convert_to_array")
         return np.array([])
     
-    # Check if all elements are dictionaries (from _last_metrics)
+    # Print first few items in data_list for debugging
+    print(f"DEBUG: First few items in data_list:")
+    for i, item in enumerate(data_list[:3]):
+        print(f"  Item {i}: type={type(item)}, value={item}")
+    
+    # Case 1: Check if all elements are tuple with length 2 (AECI variance format)
+    if all(isinstance(item, tuple) and len(item) == 2 for item in data_list):
+        print(f"DEBUG: Converting tuple list to structured array")
+        # Convert to structured array with named fields
+        result = np.array(data_list, dtype=[('tick', 'i4'), ('value', 'f4')])
+        print(f"DEBUG: Result shape: {result.shape}, dtype: {result.dtype}")
+        return result
+    
+    # Case 2: Convert dict data to tuples
     if all(isinstance(item, dict) for item in data_list):
-        # Convert dict data to tuples
+        print(f"DEBUG: Converting dict list to array")
         converted = []
         for item in data_list:
             if 'tick' in item and 'value' in item:
@@ -3287,22 +3403,12 @@ def safe_convert_to_array(data_list):
             else:
                 # Handle unknown dict format
                 converted.append((item.get('tick', 0), sum(v for k, v in item.items() if k != 'tick')))
+        print(f"DEBUG: Converted dicts to {len(converted)} tuples")
         return np.array(converted)
     
-    # Check if all elements are tuples
-    elif all(isinstance(item, tuple) for item in data_list):
-        # Check tuple length consistency
-        if all(len(item) == 2 for item in data_list):
-            return np.array(data_list, dtype=[('tick', 'i4'), ('value', 'f4')])
-        elif all(len(item) == 3 for item in data_list):
-            return np.array(data_list, dtype=[('tick', 'i4'), ('exploit', 'f4'), ('explor', 'f4')])
-        else:
-            # Mixed tuple lengths - use object array
-            return np.array(data_list, dtype=object)
-    
-    # Mixed types or unknown format - use object array
-    else:
-        return np.array(data_list, dtype=object)
+    # Case 3: Mixed types or unknown format
+    print(f"DEBUG: Using object array for mixed types")
+    return np.array(data_list, dtype=object)
 
 def simulation_generator(num_runs, base_params):
     """Generator function that runs simulations and yields results one at a time."""
@@ -3317,7 +3423,17 @@ def simulation_generator(num_runs, base_params):
             model = run_simulation(base_params)
 
             # Extract all relevant data from the model
-            # In simulation_generator, update the result dict:
+            # Fix AECI variance data to ensure consistent format
+            aeci_variance_data = model.aeci_variance_data if hasattr(model, 'aeci_variance_data') else []
+            
+            # Convert list of tuples to 2D array (ticks x 2) explicitly
+            if aeci_variance_data:
+                ticks = [t for t, _ in aeci_variance_data]
+                values = [v for _, v in aeci_variance_data]
+                aeci_variance_array = np.column_stack((ticks, values))
+            else:
+                aeci_variance_array = np.array([])
+
             result = {
                 "trust_stats": np.array(model.trust_stats),
                 "seci": np.array(model.seci_data),
@@ -3329,7 +3445,7 @@ def simulation_generator(num_runs, base_params):
                 "unmet_needs_evolution": model.unmet_needs_evolution,
                 # Handle component data flexibly
                 "component_seci": safe_convert_to_array(getattr(model, 'component_seci_data', [])),
-                "aeci_variance": safe_convert_to_array(getattr(model, 'aeci_variance_data', [])),
+                "aeci_variance": aeci_variance_array,  # Use the explicitly converted 2D array
                 "component_aeci": safe_convert_to_array(getattr(model, 'component_aeci_data', [])),
                 "component_ai_trust_variance": safe_convert_to_array(getattr(model, 'component_ai_trust_variance_data', [])),
                 "event_ticks": list(getattr(model, 'event_ticks', []))
@@ -3351,25 +3467,20 @@ def simulation_generator(num_runs, base_params):
             yield {}, None
 
 
+# --- Aggregate results ---
 def aggregate_simulation_results(num_runs, base_params):
     """
     Runs multiple simulations, aggregates results, and calculates summary statistics.
-
-    Args:
-        num_runs (int): Number of simulation runs to perform.
-        base_params (dict): Base dictionary of parameters for the model.
-
-    Returns:
-        dict: A dictionary containing aggregated results (stacked arrays for time-series,
-              summary stats for assistance, raw assistance counts, etc.).
+    Enhanced to properly handle AECI variance data.
     """
-    # --- Initialize Lists for all metrics ---
     trust_list, seci_list, aeci_list, retain_aeci_list, retain_seci_list = [], [], [], [], []
     unmet_needs_evolution_list, belief_error_list, belief_variance_list = [], [], []
     component_seci_data_list = []
     # Lists for new metrics
-    component_seci_list, aeci_variance_list, component_aeci_list = [], [], []
-    component_ai_trust_variance_list = [], []
+    component_seci_list = []
+    aeci_variance_list = []
+    component_aeci_list = []
+    component_ai_trust_variance_list = []  # Fixed: Single list instead of tuple of lists
     event_ticks_list = [] # Collect event ticks from each run
     max_aeci_variance_per_run = [] # max aeci var
 
@@ -3402,9 +3513,32 @@ def aggregate_simulation_results(num_runs, base_params):
         belief_error_list.append(result.get("belief_error", np.array([])))
         belief_variance_list.append(result.get("belief_variance", np.array([])))
 
-        # Append new metrics
+        # Append new metrics with improved error handling
         component_seci_list.append(result.get("component_seci", np.array([])))
-        aeci_variance_list.append(result.get("aeci_variance", np.array([])))
+        
+        # Special handling for AECI variance data
+        aeci_variance_data = result.get("aeci_variance", np.array([]))
+        aeci_variance_list.append(aeci_variance_data)
+        
+        # Extract max AECI variance if available
+        if isinstance(aeci_variance_data, np.ndarray) and aeci_variance_data.size > 0:
+            # Handle different array structures
+            if aeci_variance_data.ndim == 3 and aeci_variance_data.shape[2] > 1:
+                # Extract values column
+                variance_values = aeci_variance_data[:, 1]  # Values column
+                if variance_values.size > 0:
+                    # Get maximum value
+                    max_variance = np.nanmax(variance_values)
+                    if not np.isnan(max_variance) and not np.isinf(max_variance):
+                        max_aeci_variance_per_run.append(max_variance)
+                        print(f"  Max AECI variance for run {successful_runs}: {max_variance:.4f}")
+                    else:
+                        print(f"  Invalid max AECI variance for run {successful_runs}")
+            else:
+                print(f"  Unexpected AECI variance data shape: {aeci_variance_data.shape}")
+        else:
+            print(f"  No valid AECI variance data for run {successful_runs}")
+        
         component_aeci_list.append(result.get("component_aeci", np.array([])))
         component_ai_trust_variance_list.append(result.get("component_ai_trust_variance", np.array([])))
         event_ticks_list.append(result.get("event_ticks", []))
@@ -3412,20 +3546,6 @@ def aggregate_simulation_results(num_runs, base_params):
             component_seci_data_list.append(model.component_seci_data)
         else:
             component_seci_data_list.append([])
-
-        # Extract max AECI variance if available
-        aeci_variance_data = result.get("aeci_variance", np.array([]))
-        if isinstance(aeci_variance_data, np.ndarray) and aeci_variance_data.size > 0:
-            if aeci_variance_data.ndim >= 3 and aeci_variance_data.shape[1] > 0 and aeci_variance_data.shape[2] > 1:
-                # Extract values from column 1 (value column)
-                aeci_variance_values = aeci_variance_data[:, :, 1]
-                # Get maximum value across all time steps
-                max_variance = np.max(aeci_variance_values)
-                max_aeci_variance_per_run.append(max_variance)
-            else:
-                print(f"Warning: Invalid AECI variance data shape for run {successful_runs}")
-        else:
-            print(f"Warning: No AECI variance data for run {successful_runs}")
 
         # --- Aggregate Assistance Counts ---
         run_exploit_correct, run_exploit_incorrect = 0, 0
@@ -3455,7 +3575,7 @@ def aggregate_simulation_results(num_runs, base_params):
     print(f"Completed {successful_runs} successful runs out of {num_runs} attempts")
     print("Aggregating results...")
 
-    # --- Stack Arrays ---
+    # --- Stack Arrays with improved error handling ---
     trust_array = safe_stack(trust_list)
     seci_array = safe_stack(seci_list)
     aeci_array = safe_stack(aeci_list)
@@ -3464,7 +3584,7 @@ def aggregate_simulation_results(num_runs, base_params):
     belief_error_array = safe_stack(belief_error_list)
     belief_variance_array = safe_stack(belief_variance_list)
 
-    # Stack new data arrays
+    # Stack new data arrays with special handling for aeci_variance
     component_seci_array = safe_stack(component_seci_list)
     aeci_variance_array = safe_stack(aeci_variance_list)
     component_aeci_array = safe_stack(component_aeci_list)
@@ -3525,6 +3645,7 @@ def aggregate_simulation_results(num_runs, base_params):
         "component_ai_trust_variance": component_ai_trust_variance_array,
         "event_ticks_list": event_ticks_list
     }
+
 
 def experiment_alignment_tipping_point(base_params, alignment_values=None, num_runs=10):
     """Run a fine-grained sweep of AI alignment values to find tipping points."""
@@ -3620,72 +3741,133 @@ def experiment_learning_trust(base_params, learning_rate_values, epsilon_values,
         results[(lr, eps)] = aggregate_simulation_results(num_runs, params)
     return results
 
+#Debug helper function
+def debug_aeci_variance_data(results_dict, title_suffix=""):
+    """Inspects and prints detailed AECI variance data structure"""
+    print(f"\n=== AECI Variance Data Inspection for {title_suffix} ===")
+    
+    # Get aeci_variance data
+    aeci_var_data = results_dict.get("aeci_variance")
+    
+    # Basic data check
+    if aeci_var_data is None:
+        print("ERROR: aeci_variance data is None")
+        return
+    
+    if not isinstance(aeci_var_data, np.ndarray):
+        print(f"ERROR: aeci_variance isn't a numpy array (type: {type(aeci_var_data)})")
+        if isinstance(aeci_var_data, list):
+            print(f"  List length: {len(aeci_var_data)}")
+            for i, item in enumerate(aeci_var_data[:3]):
+                print(f"  Item {i}: {type(item)} - {item}")
+        return
+    
+    # Array shape analysis
+    print(f"AECI Variance array shape: {aeci_var_data.shape}")
+    
+    # Inspect dimensions
+    if aeci_var_data.ndim >= 3:
+        # Expected shape: (runs, ticks, 2) where 2nd dim is [tick, value]
+        print(f"First dimension (runs): {aeci_var_data.shape[0]}")
+        print(f"Second dimension (ticks): {aeci_var_data.shape[1]}")
+        print(f"Third dimension (data): {aeci_var_data.shape[2]}")
+        
+        # Inspect first few values
+        print("\nSample values:")
+        for run in range(min(2, aeci_var_data.shape[0])):
+            print(f"Run {run}:")
+            tick_slice = slice(0, min(5, aeci_var_data.shape[1]))
+            print(f"  First 5 ticks: {aeci_var_data[run, tick_slice, :]}")
+            
+            # Check if values are in expected range [-1,1]
+            if aeci_var_data.shape[2] > 1:
+                values = aeci_var_data[run, :, 1]
+                min_val, max_val = np.nanmin(values), np.nanmax(values)
+                print(f"  Value range: [{min_val:.4f}, {max_val:.4f}]")
+                print(f"  Mean value: {np.nanmean(values):.4f}")
+                print(f"  Contains NaN: {np.isnan(values).any()}")
+                print(f"  Contains Inf: {np.isinf(values).any()}")
+    else:
+        print(f"WARNING: Expected 3D array, got {aeci_var_data.ndim}D")
+        # Try to analyze based on actual dimensions
+        if aeci_var_data.ndim == 2:
+            print("Assuming array format is (runs, values):")
+            for run in range(min(2, aeci_var_data.shape[0])):
+                print(f"Run {run}: {aeci_var_data[run, :]}")
+        elif aeci_var_data.ndim == 1:
+            print("Assuming array is a flat list of values:")
+            print(f"Values: {aeci_var_data[:min(10, len(aeci_var_data))]}")
+    
+    print("=== End AECI Variance Data Inspection ===\n")
 
 # Helper function
 def safe_stack(data_list):
-    """Safely stacks a list of numpy arrays, handling empty lists/arrays."""
-    if not data_list: return np.array([])
+    """Safely stacks a list of numpy arrays, handling empty lists/arrays and AECI variance data."""
+    if not data_list:
+        print("WARNING: Empty data_list in safe_stack")
+        return np.array([])
     
-    # Special handling for AECI variance
-    if any(isinstance(item, tuple) and len(item) == 2 for item in data_list):
-        print("Detected tuple format data (likely AECI variance) - converting to array")
-        # Convert tuples to arrays with consistent shape
-        converted_arrays = []
-        for item in data_list:
-            if isinstance(item, tuple) and len(item) == 2:
-                # Convert (tick, value) tuple to a small array
-                converted_arrays.append(np.array([[item[0], item[1]]]))
-            elif isinstance(item, np.ndarray) and item.size > 0:
-                converted_arrays.append(item)
+    # Check first few arrays for debugging
+    print(f"DEBUG: Examining first few arrays to stack:")
+    for i, item in enumerate(data_list[:3]):
+        if isinstance(item, np.ndarray):
+            print(f"  Array {i}: shape={item.shape}, dtype={item.dtype}")
+        else:
+            print(f"  Item {i}: type={type(item)}")
+    
+    # Special handling for AECI variance data (arrays with special dtype)
+    if any(isinstance(item, np.ndarray) and hasattr(item, 'dtype') and 
+           item.dtype.names is not None and 'tick' in item.dtype.names and 
+           'value' in item.dtype.names for item in data_list):
+        print("DEBUG: Detected AECI variance format with named fields")
+        # Convert structured arrays to 3D arrays with shape (runs, ticks, 2)
+        max_ticks = max(arr.shape[0] for arr in data_list if isinstance(arr, np.ndarray) and arr.ndim >= 1)
+        result = np.zeros((len(data_list), max_ticks, 2))
         
-        if converted_arrays:
-            # Make sure all arrays have same shape before stacking
-            shapes = [arr.shape for arr in converted_arrays]
-            if len(set(shapes)) > 1:
-                print(f"Warning: Inconsistent shapes in AECI variance data: {shapes}")
-                # Reshape to most common shape
-                most_common_shape = max(set(shapes), key=shapes.count)
-                for i, arr in enumerate(converted_arrays):
-                    if arr.shape != most_common_shape:
-                        try:
-                            # Try to reshape or pad
-                            new_arr = np.zeros(most_common_shape)
-                            slice_shape = tuple(min(s1, s2) for s1, s2 in zip(arr.shape, most_common_shape))
-                            slice_obj = tuple(slice(0, s) for s in slice_shape)
-                            new_arr[slice_obj] = arr[slice_obj]
-                            converted_arrays[i] = new_arr
-                        except Exception as e:
-                            print(f"Reshaping error: {e} - skipping array")
-                            converted_arrays[i] = None
-                
-                # Filter out None values
-                converted_arrays = [arr for arr in converted_arrays if arr is not None]
-            
-            # Now stack the converted arrays
-            if converted_arrays:
-                return np.stack(converted_arrays, axis=0)
+        for i, arr in enumerate(data_list):
+            if isinstance(arr, np.ndarray) and hasattr(arr, 'dtype') and arr.dtype.names is not None:
+                # Extract tick and value columns
+                ticks = arr['tick']
+                values = arr['value']
+                # Fill the result array
+                result[i, :len(ticks), 0] = ticks
+                result[i, :len(values), 1] = values
+            else:
+                print(f"  WARNING: Item {i} is not a structured array with named fields")
+        
+        print(f"DEBUG: Converted AECI variance data to shape {result.shape}")
+        return result
     
-    # Original implementation for normal arrays
+    # Handle regular arrays
     valid_arrays = [item for item in data_list if isinstance(item, np.ndarray) and item.size > 0]
-    if not valid_arrays: return np.array([])
+    if not valid_arrays:
+        print("WARNING: No valid arrays to stack")
+        return np.array([])
     
     try:
         # Find expected shape from first valid array
         expected_ndim = valid_arrays[0].ndim
         expected_shape_after_tick_col = valid_arrays[0].shape[1:] # Shape excluding the tick dimension
-
+        
+        print(f"DEBUG: Expected shape for stacking: ndim={expected_ndim}, shape[1:]={expected_shape_after_tick_col}")
+        
         processed_list = []
-        for item in valid_arrays:
-             # Only include arrays matching expected dimensions
-             if item.ndim == expected_ndim and item.shape[1:] == expected_shape_after_tick_col:
-                  processed_list.append(item)
-             else:
-                  print(f"Warning: Skipping array with shape {item.shape} during stacking (expected ndim={expected_ndim}, shape[1:]={expected_shape_after_tick_col})")
-
-        if not processed_list: return np.array([])
-        return np.stack(processed_list, axis=0)
+        for i, item in enumerate(valid_arrays):
+            # Only include arrays matching expected dimensions
+            if item.ndim == expected_ndim and item.shape[1:] == expected_shape_after_tick_col:
+                processed_list.append(item)
+            else:
+                print(f"WARNING: Skipping array with shape {item.shape} during stacking (expected ndim={expected_ndim}, shape[1:]={expected_shape_after_tick_col})")
+        
+        if not processed_list:
+            print("WARNING: No arrays with matching shapes to stack")
+            return np.array([])
+        
+        result = np.stack(processed_list, axis=0)
+        print(f"DEBUG: Successfully stacked arrays to shape {result.shape}")
+        return result
     except ValueError as e:
-        print(f"Error during stacking: {e}. Returning empty array.")
+        print(f"ERROR during stacking: {e}")
         return np.array([])
 
 def calculate_metric_stats(data_list):
@@ -3698,171 +3880,7 @@ def calculate_metric_stats(data_list):
         "upper": float(np.percentile(valid_data, 75))  # Ensure float
     }
 
-# --- Aggregate results ---
-def aggregate_simulation_results(num_runs, base_params):
-    """
-    Runs multiple simulations, aggregates results, and calculates summary statistics.
 
-    Args:
-        num_runs (int): Number of simulation runs to perform.
-        base_params (dict): Base dictionary of parameters for the model.
-
-    Returns:
-        dict: A dictionary containing aggregated results (stacked arrays for time-series,
-              summary stats for assistance, raw assistance counts, etc.).
-    """
-    # --- Initialize Lists for ALL metrics ---
-    trust_list, seci_list, aeci_list, retain_aeci_list, retain_seci_list = [], [], [], [], []
-    unmet_needs_evolution_list, belief_error_list, belief_variance_list = [], [], []
-    # <<< Lists for New Metrics >>>
-    component_seci_list, aeci_variance_list, component_aeci_list, component_ai_trust_variance_list = [], [], [], []
-    event_ticks_list = [] # Collect event ticks from each run
-    max_aeci_variance_per_run = [] #max aeci var
-
-    # --- Lists for Assistance Counts ---
-    exploit_correct_per_run, exploit_incorrect_per_run = [], []
-    explor_correct_per_run, explor_incorrect_per_run = [], []
-
-    print(f"Starting aggregation for {num_runs} runs...")
-
-    generator = simulation_generator(num_runs, base_params)
-    for run_num in range(num_runs):
-        print(f"  Starting Run {run_num + 1}/{num_runs}...")
-        try:
-            # Assuming simulation_generator yields result dict and model object
-            result, model = next(generator) # Run one sim at a time
-
-            # --- Append All Metrics (using .get for safety) ---
-            trust_list.append(result.get("trust_stats", np.array([])))
-            seci_list.append(result.get("seci", np.array([])))
-            aeci_list.append(result.get("aeci", np.array([]))) # AI Call Ratio
-            aeci_variance_data = result.get("aeci_variance", np.array([]))
-            retain_aeci_list.append(result.get("retain_aeci", np.array([])))
-            retain_seci_list.append(result.get("retain_seci", np.array([])))
-            unmet_needs_evolution_list.append(result.get("unmet_needs_evolution", [])) # List
-            belief_error_list.append(result.get("belief_error", np.array([])))
-            belief_variance_list.append(result.get("belief_variance", np.array([])))
-            # <<< APPEND New Metrics >>>
-            component_seci_list.append(result.get("component_seci", np.array([])))
-            aeci_variance_list.append(result.get("aeci_variance", np.array([])))
-            component_aeci_list.append(result.get("component_aeci", np.array([])))
-            component_ai_trust_variance_list.append(result.get("component_ai_trust_variance", np.array([])))
-            event_ticks_list.append(result.get("event_ticks", [])) # List
-
-
-            # Find maximum AECI variance value for this run
-            if isinstance(aeci_variance_data, np.ndarray) and aeci_variance_data.size > 0:
-                if aeci_variance_data.ndim >= 3 and aeci_variance_data.shape[1] > 0 and aeci_variance_data.shape[2] > 1:
-                    # Extract values from column 1 (value column)
-                    aeci_variance_values = aeci_variance_data[:, :, 1]
-                    # Get maximum value across all time steps
-                    max_variance = np.max(aeci_variance_values)
-                    max_aeci_variance_per_run.append(max_variance)
-                else:
-                    print(f"Warning: Invalid AECI variance data shape for run {run_num}")
-            else:
-                print(f"Warning: No AECI variance data for run {run_num}")
-            # --- Aggregate Assistance Counts ---
-            run_exploit_correct, run_exploit_incorrect = 0, 0
-            run_explor_correct, run_explor_incorrect = 0, 0
-            if model and hasattr(model, 'humans'): # Check if model and humans exist
-                 for agent in model.humans.values():
-                     if agent.agent_type == "exploitative":
-                         run_exploit_correct += agent.correct_targets
-                         run_exploit_incorrect += agent.incorrect_targets
-                     else: # Exploratory
-                         run_explor_correct += agent.correct_targets
-                         run_explor_incorrect += agent.incorrect_targets
-            exploit_correct_per_run.append(run_exploit_correct)
-            exploit_incorrect_per_run.append(run_exploit_incorrect)
-            explor_correct_per_run.append(run_explor_correct)
-            explor_incorrect_per_run.append(run_explor_incorrect)
-
-            print(f"  Finished Run {run_num + 1}/{num_runs}")
-
-        except StopIteration:
-            print(f"Error: simulation_generator did not yield data for run {run_num + 1}")
-            # Optionally append default empty data or handle error differently
-            continue # Skip to next run
-        except Exception as e:
-            print(f"Error during simulation run {run_num + 1}: {e}")
-            # Optionally add more details:
-            # import traceback
-            # traceback.print_exc()
-            continue # Skip to next run
-        finally:
-             # Ensure model object is deleted even if errors occur
-             if 'model' in locals() and model is not None:
-                 del model
-             gc.collect()
-
-    print("Finished all runs. Aggregating results...")
-
-    # --- Stack Arrays ---
-    trust_array = safe_stack(trust_list)
-    seci_array = safe_stack(seci_list)
-    aeci_array = safe_stack(aeci_list)
-    retain_aeci_array = safe_stack(retain_aeci_list)
-    retain_seci_array = safe_stack(retain_seci_list)
-    belief_error_array = safe_stack(belief_error_list)
-    belief_variance_array = safe_stack(belief_variance_list)
-    # <<< STACK New Data >>>
-    component_seci_array = safe_stack(component_seci_list)
-    aeci_variance_array = safe_stack(aeci_variance_list)
-    component_aeci_array = safe_stack(component_aeci_list)
-    component_ai_trust_variance_array = safe_stack(component_ai_trust_variance_list)
-
-    # --- Calculate Assistance Stats ---
-    assist_stats = {
-        "exploit_correct": calculate_metric_stats(exploit_correct_per_run),
-        "exploit_incorrect": calculate_metric_stats(exploit_incorrect_per_run),
-        "explor_correct": calculate_metric_stats(explor_correct_per_run),
-        "explor_incorrect": calculate_metric_stats(explor_incorrect_per_run)
-    }
-    # --- Calculate Ratio Stats ---
-    total_exploit_mean = assist_stats["exploit_correct"]["mean"] + assist_stats["exploit_incorrect"]["mean"]
-    total_explor_mean = assist_stats["explor_correct"]["mean"] + assist_stats["explor_incorrect"]["mean"]
-    ratio_stats = {
-        "exploit_ratio": {
-            "mean": assist_stats["exploit_correct"]["mean"] / total_exploit_mean if total_exploit_mean > 0 else 0,
-            "lower": 0, "upper": 0 # Percentiles complex for ratios
-        },
-        "explor_ratio": {
-            "mean": assist_stats["explor_correct"]["mean"] / total_explor_mean if total_explor_mean > 0 else 0,
-            "lower": 0, "upper": 0
-        }
-    }
-
-    print("Aggregation complete.")
-
-    # --- Return Dictionary ---
-    return {
-        # Original metrics
-        "trust_stats": trust_array,
-        "seci": seci_array,
-        "aeci": aeci_array, # AI Call Ratio
-        "retain_aeci": retain_aeci_array,
-        "retain_seci": retain_seci_array,
-        "belief_error": belief_error_array,
-        "belief_variance": belief_variance_array,
-        "unmet_needs_evol": unmet_needs_evolution_list, # Keep raw list of lists for plotting
-        # Assistance metrics
-        "assist": assist_stats,
-        "assist_ratio": ratio_stats,
-        "raw_assist_counts": {
-            "exploit_correct": exploit_correct_per_run,
-            "exploit_incorrect": exploit_incorrect_per_run,
-            "explor_correct": explor_correct_per_run,
-            "explor_incorrect": explor_incorrect_per_run
-        },
-        # <<<  Aggregated Arrays >>>
-        "component_seci": component_seci_array,
-        "aeci_variance": aeci_variance_array,
-        "max_aeci_variance": max_aeci_variance_per_run,
-        "component_aeci": component_aeci_array,
-        "component_ai_trust_variance": component_ai_trust_variance_array,
-        "event_ticks_list": event_ticks_list # Pass list of lists for event ticks
-    }
 #########################################
 # Plotting Functions
 #########################################
@@ -6267,9 +6285,9 @@ def plot_experiment_c_comprehensive(results_c, dynamics_values, shock_values):
     
     # Initialize all metrics matrices with NaN values
     matrices = {}
-    for name in ['correct_ratio', 'mae', 'unmet_needs', 'seci', 'aeci', 'ai_trust']:
+    for name in ['correct_ratio', 'mae', 'unmet_needs', 'seci', 'aeci', 'ai_trust', 'component_seci']:
         matrices[name] = np.full((len(dynamics_values), len(shock_values)), np.nan)
-    
+       
     # Debug print to verify all combinations
     print("\nScenarios to process:")
     for i, dd in enumerate(dynamics_values):
@@ -6388,6 +6406,39 @@ def plot_experiment_c_comprehensive(results_c, dynamics_values, shock_values):
                     print(f"  Error calculating AI Trust: {e}")
             else:
                 print("  No trust_stats data")
+
+            # 7. Calculate Component SECI
+            if "component_seci" in res and isinstance(res["component_seci"], np.ndarray):
+                try:
+                    if res["component_seci"].ndim >= 3 and res["component_seci"].shape[1] > 0:
+                        # Average Component SECI at last tick
+                        comp_seci_data = res["component_seci"][:, -1, 1]  # Last tick, value column
+                        matrices['component_seci'][i, j] = np.nanmean(comp_seci_data)
+                        print(f"  Average Component SECI: {matrices['component_seci'][i, j]:.4f}")
+                    else:
+                        print(f"  Invalid component_seci shape: {res['component_seci'].shape}")
+                except Exception as e:
+                    print(f"  Error calculating Component SECI: {e}")
+            else:
+                # Alternative approach: extract from component_seci_data list if available
+                if "component_seci_data" in res and res["component_seci_data"]:
+                    try:
+                        # Collect values from all components in last tick of each run
+                        comp_values = []
+                        for run_data in res["component_seci_data"]:
+                            if run_data:
+                                # Get the last tick's data
+                                last_tick_data = run_data[-1]
+                                if isinstance(last_tick_data, dict) and 'avg_component_seci' in last_tick_data:
+                                    comp_values.append(last_tick_data['avg_component_seci'])
+                        
+                        if comp_values:
+                            matrices['component_seci'][i, j] = np.mean(comp_values)
+                            print(f"  Average Component SECI (from list): {matrices['component_seci'][i, j]:.4f}")
+                    except Exception as e:
+                        print(f"  Error calculating Component SECI from list: {e}")
+                else:
+                    print("  No component_seci data")
     
     # Debug: Print all matrices to verify different values
     for name, matrix in matrices.items():
@@ -6402,7 +6453,8 @@ def plot_experiment_c_comprehensive(results_c, dynamics_values, shock_values):
         {'name': 'unmet_needs', 'title': 'Unmet Needs', 'cmap': 'RdYlGn_r', 'idx': 2},
         {'name': 'seci', 'title': 'Social Echo Chamber Index', 'cmap': 'RdYlBu', 'idx': 3},
         {'name': 'aeci', 'title': 'AI Usage (AECI)', 'cmap': 'RdYlBu', 'idx': 4},
-        {'name': 'ai_trust', 'title': 'AI Trust', 'cmap': 'RdYlBu', 'idx': 5}
+        {'name': 'ai_trust', 'title': 'AI Trust', 'cmap': 'RdYlBu', 'idx': 5},
+        {'name': 'component_seci', 'title': 'Component SECI', 'cmap': 'RdYlBu', 'idx': 7}
     ]
     
     print("\nCreating heatmap plots...")
