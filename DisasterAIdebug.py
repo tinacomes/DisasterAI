@@ -739,8 +739,8 @@ class HumanAgent(Agent):
                         self.accepted_ai += 1
                         
                     # Log acceptance for debugging
-                    if self.model.debug_mode and self.model.tick % 10 == 0 and random.random() < 0.1:
-                        print(f"DEBUG: Agent {self.unique_id} accepted info from {source_id} for cell {cell}")
+                    # if self.model.debug_mode and self.model.tick % 10 == 0 and random.random() < 0.1:
+                        #print(f"DEBUG: Agent {self.unique_id} accepted info from {source_id} for cell {cell}")
 
             # Return whether this update caused a significant belief change
             return significant_change
@@ -1481,9 +1481,9 @@ class AIAgent(Agent):
         )
 
         # Debug info
-        if hasattr(self.model, 'debug_mode') and self.model.debug_mode and random.random() < 0.05:
-            print(f"DEBUG: AI {self.unique_id} asked to report on area around {interest_point} with radius {query_radius}")
-            print(f"DEBUG: This gives {len(cells_to_report_on)} potential cells to report on")
+        #if hasattr(self.model, 'debug_mode') and self.model.debug_mode and random.random() < 0.05:
+            #print(f"DEBUG: AI {self.unique_id} asked to report on area around {interest_point} with radius {query_radius}")
+            #print(f"DEBUG: This gives {len(cells_to_report_on)} potential cells to report on")
 
         valid_cells_in_query = []
         sensed_vals_list = []
@@ -6204,127 +6204,146 @@ def plot_unmet_need_evolution(unmet_needs_data, title_suffix=""):
     return fig
 
 def plot_experiment_c_comprehensive(results_c, dynamics_values, shock_values):
-    """Create comprehensive visualization for experiment C with direct matrix population"""
+    """Create comprehensive visualization for experiment C with PROPERLY ISOLATED data for each scenario"""
     
     print("Starting comprehensive plot creation...")
     
-    # Create figure with subplots - use subplots directly for better control
+    # Create figure with subplots
     fig, axes = plt.subplots(3, 3, figsize=(18, 15), constrained_layout=True)
-    
-    # Flatten axes for easier indexing
     axes = axes.flatten()
     
-    # Initialize all metrics matrices
+    # Initialize all metrics matrices with NaN values
     matrices = {}
-    metric_names = ['correct_ratio', 'mae', 'unmet_needs', 'seci', 'aeci', 'ai_trust']
-    
-    for name in metric_names:
+    for name in ['correct_ratio', 'mae', 'unmet_needs', 'seci', 'aeci', 'ai_trust']:
         matrices[name] = np.full((len(dynamics_values), len(shock_values)), np.nan)
     
-    print("\nExtracting metrics for each parameter combination:")
-    print("-------------------------------------------------")
-    
-    # Explicitly populate each cell in each matrix
+    # Debug print to verify all combinations
+    print("\nScenarios to process:")
     for i, dd in enumerate(dynamics_values):
         for j, sm in enumerate(shock_values):
-            res_key = (dd, sm)
-            print(f"\nProcessing D={dd}, S={sm}:")
+            print(f"  Dynamics={dd}, Shock={sm}")
+    
+    # Explicitly process each cell in the matrices
+    print("\nExtracting metrics for each cell:")
+    for i, dd in enumerate(dynamics_values):
+        for j, sm in enumerate(shock_values):
+            key = (dd, sm)
+            print(f"\nParameters: Dynamics={dd}, Shock={sm}")
             
-            if res_key not in results_c:
-                print(f"  No data available")
+            # Skip if no data for this combination
+            if key not in results_c:
+                print(f"  No data available for this combination")
                 continue
+                
+            res = results_c[key]
             
-            res = results_c[res_key]
-            
-            # 1. Process correct token ratio
+            # 1. Calculate correct token ratio
             if "raw_assist_counts" in res:
                 try:
-                    counts = res["raw_assist_counts"]
-                    exploit_correct = sum(counts.get("exploit_correct", [0]))
-                    exploit_incorrect = sum(counts.get("exploit_incorrect", [0]))
-                    explor_correct = sum(counts.get("explor_correct", [0]))
-                    explor_incorrect = sum(counts.get("explor_incorrect", [0]))
+                    raw_counts = res["raw_assist_counts"]
+                    exploit_correct = sum(raw_counts.get("exploit_correct", [0]))
+                    exploit_incorrect = sum(raw_counts.get("exploit_incorrect", [0]))
+                    explor_correct = sum(raw_counts.get("explor_correct", [0]))
+                    explor_incorrect = sum(raw_counts.get("explor_incorrect", [0]))
                     
                     total_correct = exploit_correct + explor_correct
                     total_tokens = total_correct + exploit_incorrect + explor_incorrect
                     
                     if total_tokens > 0:
-                        ratio = total_correct / total_tokens
-                        matrices['correct_ratio'][i, j] = ratio
-                        print(f"  Correct ratio: {ratio:.4f}")
+                        matrices['correct_ratio'][i, j] = total_correct / total_tokens
+                        print(f"  Correct ratio: {matrices['correct_ratio'][i, j]:.4f}")
                     else:
                         print("  No tokens sent")
                 except Exception as e:
                     print(f"  Error calculating correct ratio: {e}")
+            else:
+                print("  No raw_assist_counts data")
             
-            # 2. Process belief error (MAE)
+            # 2. Calculate average MAE
             if "belief_error" in res and isinstance(res["belief_error"], np.ndarray):
                 try:
-                    belief_data = res["belief_error"]
-                    if belief_data.ndim >= 3 and belief_data.shape[1] > 0 and belief_data.shape[2] > 2:
-                        # Last tick, columns 1 & 2 (exploit & explor)
-                        final_data = belief_data[:, -1, 1:3]
-                        avg_mae = np.nanmean(final_data)
-                        matrices['mae'][i, j] = avg_mae
-                        print(f"  Average MAE: {avg_mae:.4f}")
+                    if res["belief_error"].ndim >= 3 and res["belief_error"].shape[1] > 0:
+                        # Average MAE across all runs, at last tick, for both agent types
+                        mae_data = res["belief_error"][:, -1, 1:3]  # Last tick, exploit & explor columns
+                        matrices['mae'][i, j] = np.nanmean(mae_data)
+                        print(f"  Average MAE: {matrices['mae'][i, j]:.4f}")
+                    else:
+                        print(f"  Invalid belief_error shape: {res['belief_error'].shape}")
                 except Exception as e:
                     print(f"  Error calculating MAE: {e}")
+            else:
+                print("  No belief_error data")
             
-            # 3. Process unmet needs
+            # 3. Calculate final unmet needs
             if "unmet_needs_evol" in res:
                 try:
-                    unmet_data = res["unmet_needs_evol"]
                     final_unmet = []
-                    
-                    for run_data in unmet_data:
-                        if isinstance(run_data, (list, np.ndarray)) and len(run_data) > 0:
+                    for run_data in res["unmet_needs_evol"]:
+                        if run_data is not None and len(run_data) > 0:
                             final_unmet.append(run_data[-1])
-                    
                     if final_unmet:
-                        avg_unmet = np.mean(final_unmet)
-                        matrices['unmet_needs'][i, j] = avg_unmet
-                        print(f"  Average unmet needs: {avg_unmet:.4f}")
+                        matrices['unmet_needs'][i, j] = np.mean(final_unmet)
+                        print(f"  Final unmet needs: {matrices['unmet_needs'][i, j]:.4f}")
+                    else:
+                        print("  No final unmet needs data")
                 except Exception as e:
                     print(f"  Error calculating unmet needs: {e}")
+            else:
+                print("  No unmet_needs_evol data")
             
-            # 4. Process SECI
+            # 4. Calculate final SECI
             if "seci" in res and isinstance(res["seci"], np.ndarray):
                 try:
-                    seci_data = res["seci"]
-                    if seci_data.ndim >= 3 and seci_data.shape[1] > 0 and seci_data.shape[2] > 2:
-                        # Last tick, columns 1 & 2 (exploit & explor)
-                        final_seci = np.nanmean(seci_data[:, -1, 1:3])
-                        matrices['seci'][i, j] = final_seci
-                        print(f"  Average SECI: {final_seci:.4f}")
+                    if res["seci"].ndim >= 3 and res["seci"].shape[1] > 0:
+                        # Average SECI at last tick, for both agent types
+                        seci_data = res["seci"][:, -1, 1:3]  # Last tick, exploit & explor columns
+                        matrices['seci'][i, j] = np.nanmean(seci_data)
+                        print(f"  Average SECI: {matrices['seci'][i, j]:.4f}")
+                    else:
+                        print(f"  Invalid seci shape: {res['seci'].shape}")
                 except Exception as e:
                     print(f"  Error calculating SECI: {e}")
+            else:
+                print("  No seci data")
             
-            # 5. Process AECI
+            # 5. Calculate final AECI (AI Call Ratio)
             if "aeci" in res and isinstance(res["aeci"], np.ndarray):
                 try:
-                    aeci_data = res["aeci"]
-                    if aeci_data.ndim >= 3 and aeci_data.shape[1] > 0 and aeci_data.shape[2] > 2:
-                        # Last tick, columns 1 & 2 (exploit & explor)
-                        final_aeci = np.nanmean(aeci_data[:, -1, 1:3])
-                        matrices['aeci'][i, j] = final_aeci
-                        print(f"  Average AECI: {final_aeci:.4f}")
+                    if res["aeci"].ndim >= 3 and res["aeci"].shape[1] > 0:
+                        # Average AECI at last tick, for both agent types
+                        aeci_data = res["aeci"][:, -1, 1:3]  # Last tick, exploit & explor columns
+                        matrices['aeci'][i, j] = np.nanmean(aeci_data)
+                        print(f"  Average AECI: {matrices['aeci'][i, j]:.4f}")
+                    else:
+                        print(f"  Invalid aeci shape: {res['aeci'].shape}")
                 except Exception as e:
                     print(f"  Error calculating AECI: {e}")
+            else:
+                print("  No aeci data")
             
-            # 6. Process AI trust
+            # 6. Calculate final AI Trust
             if "trust_stats" in res and isinstance(res["trust_stats"], np.ndarray):
                 try:
-                    trust_data = res["trust_stats"]
-                    if trust_data.ndim >= 3 and trust_data.shape[1] > 0 and trust_data.shape[2] > 1:
-                        # Last tick, column 1 (AI trust for exploitative agents)
-                        final_trust = np.nanmean(trust_data[:, -1, 1])
-                        matrices['ai_trust'][i, j] = final_trust
-                        print(f"  Average AI trust: {final_trust:.4f}")
+                    if res["trust_stats"].ndim >= 3 and res["trust_stats"].shape[1] > 0:
+                        # Get AI trust for exploitative agents at last tick
+                        ai_trust_data = res["trust_stats"][:, -1, 1]  # Last tick, AI trust column
+                        matrices['ai_trust'][i, j] = np.nanmean(ai_trust_data)
+                        print(f"  Average AI Trust: {matrices['ai_trust'][i, j]:.4f}")
+                    else:
+                        print(f"  Invalid trust_stats shape: {res['trust_stats'].shape}")
                 except Exception as e:
-                    print(f"  Error calculating AI trust: {e}")
+                    print(f"  Error calculating AI Trust: {e}")
+            else:
+                print("  No trust_stats data")
     
-    # Now create the heatmaps - one per metric
-    configs = [
+    # Debug: Print all matrices to verify different values
+    for name, matrix in matrices.items():
+        print(f"\nMatrix for {name}:")
+        for row in matrix:
+            print("  " + " ".join(f"{val:.2f}" if not np.isnan(val) else "N/A" for val in row))
+    
+    # Create heatmaps for each metric
+    heatmap_configs = [
         {'name': 'correct_ratio', 'title': 'Correct Token Ratio', 'cmap': 'RdYlGn', 'idx': 0},
         {'name': 'mae', 'title': 'Belief Error (MAE)', 'cmap': 'RdYlGn_r', 'idx': 1},
         {'name': 'unmet_needs', 'title': 'Unmet Needs', 'cmap': 'RdYlGn_r', 'idx': 2},
@@ -6334,48 +6353,28 @@ def plot_experiment_c_comprehensive(results_c, dynamics_values, shock_values):
     ]
     
     print("\nCreating heatmap plots...")
-    
-    # Plot each heatmap
-    for config in configs:
-        if config['idx'] >= len(axes):
-            print(f"Warning: Not enough axes for {config['name']}")
-            continue
-        
+    for config in heatmap_configs:
         ax = axes[config['idx']]
         matrix = matrices[config['name']]
         
-        # Print the raw matrix for debugging
-        print(f"\nMatrix for {config['name']}:")
-        for row in matrix:
-            print("  " + " ".join(f"{val:.2f}" if not np.isnan(val) else "N/A" for val in row))
-        
-        # Skip if all values are NaN
-        if np.all(np.isnan(matrix)):
-            ax.text(0.5, 0.5, f'No data for {config["title"]}', 
-                   ha='center', va='center', transform=ax.transAxes)
-            ax.set_title(config['title'])
-            continue
-        
-        # Create masked array for proper NaN handling
+        # Create masked array for NaN handling
         masked_matrix = np.ma.masked_where(np.isnan(matrix), matrix)
         
-        # Find valid range for color scaling
+        # Get valid range for the colormap
         valid_values = matrix[~np.isnan(matrix)]
         if len(valid_values) > 0:
             vmin, vmax = np.min(valid_values), np.max(valid_values)
-            
-            # Ensure we have some range for colormapping
-            if vmin == vmax:
-                vmin, vmax = vmin * 0.9, vmin * 1.1
-                if vmin == 0:
+            # Ensure range isn't zero
+            if abs(vmax - vmin) < 1e-6:  # Close to zero range
+                center = (vmin + vmax) / 2
+                vmin, vmax = center * 0.9, center * 1.1
+                if abs(center) < 1e-6:  # Center close to zero
                     vmin, vmax = -0.1, 0.1
         else:
             vmin, vmax = 0, 1
         
-        # Create the heatmap
+        # Create heatmap
         im = ax.imshow(masked_matrix, cmap=config['cmap'], aspect='auto', vmin=vmin, vmax=vmax)
-        
-        # Add colorbar
         cbar = plt.colorbar(im, ax=ax)
         cbar.set_label(config['title'])
         
@@ -6383,11 +6382,11 @@ def plot_experiment_c_comprehensive(results_c, dynamics_values, shock_values):
         for i in range(len(dynamics_values)):
             for j in range(len(shock_values)):
                 if not np.isnan(matrix[i, j]):
-                    text = ax.text(j, i, f'{matrix[i, j]:.2f}',
-                                 ha='center', va='center', color='black',
-                                 fontsize=9, fontweight='bold')
+                    ax.text(j, i, f'{matrix[i, j]:.2f}', 
+                           ha='center', va='center', color='black', 
+                           fontsize=9, fontweight='bold')
         
-        # Set axis labels and title
+        # Set labels and title
         ax.set_xticks(range(len(shock_values)))
         ax.set_yticks(range(len(dynamics_values)))
         ax.set_xticklabels(shock_values)
@@ -6396,88 +6395,76 @@ def plot_experiment_c_comprehensive(results_c, dynamics_values, shock_values):
         ax.set_ylabel('Disaster Dynamics')
         ax.set_title(config['title'])
     
-    # Calculate performance score for remaining plots - THIS WAS MISSING
+    # Calculate performance score for performance bar chart
     print("\nCalculating performance scores...")
-    
     performance_data = []
     labels = []
     
-    # Calculate max values for normalization, handling NaN cases
-    max_mae = np.nanmax(matrices['mae'])
-    max_unmet = np.nanmax(matrices['unmet_needs'])
+    # Normalization values for performance calculation
+    max_mae = np.nanmax(matrices['mae']) if not np.all(np.isnan(matrices['mae'])) else 1.0
+    max_unmet = np.nanmax(matrices['unmet_needs']) if not np.all(np.isnan(matrices['unmet_needs'])) else 1.0
     
-    # If all values are NaN, use 1.0 to avoid division by zero
-    if np.isnan(max_mae):
-        max_mae = 1.0
-    if np.isnan(max_unmet):
-        max_unmet = 1.0
-    
+    # Create a proper list of scenarios
+    scenarios = []
     for i, dd in enumerate(dynamics_values):
         for j, sm in enumerate(shock_values):
-            # Calculate performance score with proper error handling
-            correct_ratio = matrices['correct_ratio'][i, j]
-            mae_val = matrices['mae'][i, j]
-            unmet_val = matrices['unmet_needs'][i, j]
-            
-            if not np.isnan(correct_ratio) and not np.isnan(mae_val) and not np.isnan(unmet_val):
-                performance_score = (correct_ratio * 0.4 + 
-                                   (1 - mae_val / max_mae) * 0.3 + 
-                                   (1 - unmet_val / max_unmet) * 0.3)
-            else:
-                performance_score = 0  # Default to 0 if data is missing
-                
-            performance_data.append(performance_score)
-            labels.append(f'D={dd},S={sm}')
+            scenarios.append((i, j, dd, sm))
     
-    # Only create the plot if we have data
-    if performance_data:
-        # Set up the performance bar chart
-        if len(axes) > 6:  # Check if we have enough axes
-            ax_bar = axes[6]
-            
-            # Convert to array for plotting
-            performance_data_arr = np.array(performance_data)
-            norm = plt.Normalize(0, 1)  # Normalize to [0,1]
-            
-            bars = ax_bar.bar(range(len(performance_data)), performance_data, 
-                             color=plt.cm.viridis(norm(performance_data_arr)))
-            
-            # Add value labels on bars
-            for i, (bar, value) in enumerate(zip(bars, performance_data)):
-                height = bar.get_height()
-                if height > 0:  # Only label non-zero bars
-                    ax_bar.text(i, height + 0.01, f'{value:.2f}', 
-                               ha='center', va='bottom')
-            
-            ax_bar.set_xticks(range(len(labels)))
-            ax_bar.set_xticklabels(labels, rotation=45)
-            ax_bar.set_ylabel('Overall Performance Score')
-            ax_bar.set_title('Combined Performance Score (40% Correct Ratio + 30% Accuracy + 30% Effectiveness)')
-            ax_bar.grid(axis='y', alpha=0.3)
+    # Calculate performance for each scenario
+    for i, j, dd, sm in scenarios:
+        # Skip if missing essential data
+        if np.isnan(matrices['correct_ratio'][i, j]) or np.isnan(matrices['mae'][i, j]) or np.isnan(matrices['unmet_needs'][i, j]):
+            performance_data.append(0)
+            print(f"  Setting zero performance for D={dd}, S={sm} (missing data)")
         else:
-            print("Warning: Not enough axes for performance bar chart")
-    else:
-        print("Warning: No performance data to plot")
+            # Calculate weighted performance score
+            performance = (
+                matrices['correct_ratio'][i, j] * 0.4 +                  # 40% weight on correct tokens
+                (1 - matrices['mae'][i, j] / max_mae) * 0.3 +            # 30% weight on accuracy (inverted)
+                (1 - matrices['unmet_needs'][i, j] / max_unmet) * 0.3    # 30% weight on meeting needs (inverted)
+            )
+            performance_data.append(performance)
+            print(f"  Performance for D={dd}, S={sm}: {performance:.4f}")
+        
+        labels.append(f'D={dd},S={sm}')
+    
+    # Debug print performance data
+    print("\nPerformance data:")
+    for label, perf in zip(labels, performance_data):
+        print(f"  {label}: {perf:.4f}")
+    
+    # Create performance bar chart
+    if len(performance_data) > 0 and len(axes) > 6:
+        ax_bar = axes[6]
+        
+        # Use viridis colormap based on performance values
+        norm = plt.Normalize(0, max(performance_data)) if max(performance_data) > 0 else plt.Normalize(0, 1)
+        colors = plt.cm.viridis(norm(performance_data))
+        
+        # Create bars with varying heights
+        bars = ax_bar.bar(range(len(performance_data)), performance_data, color=colors)
+        
+        # Add value labels on bars
+        for i, (bar, value) in enumerate(zip(bars, performance_data)):
+            height = bar.get_height()
+            if height > 0:  # Only label non-zero bars
+                ax_bar.text(i, height + 0.01, f'{value:.2f}', 
+                           ha='center', va='bottom')
+        
+        ax_bar.set_xticks(range(len(labels)))
+        ax_bar.set_xticklabels(labels, rotation=45)
+        ax_bar.set_ylabel('Overall Performance Score')
+        ax_bar.set_title('Combined Performance Score (40% Correct Ratio + 30% Accuracy + 30% Effectiveness)')
+        ax_bar.grid(axis='y', alpha=0.3)
     
     # Hide any unused axes
     for i in range(7, len(axes)):
         axes[i].axis('off')
     
-    # Adjust layout and save
     plt.savefig("agent_model_results/experiment_c_comprehensive.png", dpi=300, bbox_inches='tight')
     plt.close(fig)
     
     print("Comprehensive plot saved successfully.")
-    
-    # Create additional time evolution plots
-    print("Creating time evolution plots...")
-    try:
-        plot_experiment_c_evolution(results_c, dynamics_values, shock_values)
-        print("Time evolution plots created successfully.")
-    except Exception as e:
-        print(f"Error creating time evolution plots: {e}")
-        import traceback
-        traceback.print_exc()
 
 def plot_experiment_c_evolution(results_c, dynamics_values, shock_values):
     """Plot time evolution for key scenarios in Experiment C with robust error handling"""
