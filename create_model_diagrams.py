@@ -314,11 +314,11 @@ def create_figure4_qlearning():
                            boxstyle="round,pad=0.1",
                            edgecolor='black', facecolor='#e1f5ff', linewidth=2)
     ax.add_patch(qtable)
-    ax.text(2, 6.5, 'Q-Table', ha='center', fontsize=11, fontweight='bold')
+    ax.text(2, 6.5, 'Q-Table (Initial → Updated)', ha='center', fontsize=11, fontweight='bold')
     ax.text(2, 6.0,
-            'Self: 0.0\n'
-            'Human: 0.05\n'
-            'AI_0-4: 0.0',
+            'Self: 0.0 → learned\n'
+            'Human: 0.05 → learned\n'
+            'AI_0-4: 0.0 → learned',
             ha='center', va='top', fontsize=8)
 
     # Epsilon-greedy decision
