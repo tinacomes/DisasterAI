@@ -126,7 +126,7 @@ flowchart LR
 
     G --> H[Query & Update<br/>Beliefs]
     H --> I[Send Relief<br/>to High-L Cells]
-    I --> J[Wait 2 Ticks]
+    I --> J[Latency:<br/>Wait 2 Ticks]
     J --> K{Reward<br/>Calculation}
 
     K -->|L5| L[R = +5.0]
@@ -134,7 +134,7 @@ flowchart LR
     K -->|L3| N[R = +1.5]
     K -->|L0| O[R = -2.0]
 
-    L --> P[Update Q-Table<br/>Q ← Q + α·R - Q]
+    L --> P[Update Q-Table<br/>Q ← Q + α·(R - Q)]
     M --> P
     N --> P
     O --> P
