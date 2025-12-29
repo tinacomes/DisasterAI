@@ -6991,6 +6991,10 @@ if __name__ == "__main__":
     learning_rate_values = [0.03, 0.05, 0.07]
     epsilon_values = [0.2, 0.3]
     results_d = experiment_learning_trust(base_params, learning_rate_values, epsilon_values, num_runs)
+    with open(os.path.join(save_dir, "results_experiment_D.pkl"), "wb") as f:
+        pickle.dump(results_d, f)
+    print(f"✓ Saved Experiment D results")
+
 
     # --- Plot 1: Final SECI vs LR/Epsilon (Bar Chart) ---
     fig_d_seci, ax_d_seci = plt.subplots(1, 2, figsize=(12, 5), sharey=True)
