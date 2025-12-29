@@ -1,6 +1,20 @@
+"""
+DisasterAI Model - Filter Bubble Dynamics with AI and Human Agents
+
+This Mesa-based simulation explores filter bubble formation in disaster response scenarios
+with AI agents and two types of human agents (exploratory vs exploitative).
+
+RECENT FIXES:
+- Fixed Bug #1: Removed double-counting of AI acceptances (critical for metrics accuracy)
+- Fixed Bug #2: Removed duplicate get_neighborhood() call in sense_environment()
+- Fixed Bug #3: Made pip install command compatible with both Colab and standard Python
+- Fixed Bug #4: Added memory cleanup for ai_info_sources and last_belief_update dictionaries
+"""
 
 # Install mesa if not already installed
-!pip install mesa
+# Note: For Colab, uncomment the following line:
+# !pip install mesa
+# For standard Python, ensure mesa is installed via: pip install mesa
 
 import os
 import random
@@ -309,7 +323,6 @@ class HumanAgent(Agent):
     def sense_environment(self):
         pos = self.pos
         radius = 2 if self.agent_type == "exploitative" else 3
-        cells = self.model.grid.get_neighborhood(pos, moore=True, radius=radius, include_center=True)
         cells = self.model.grid.get_neighborhood(pos, moore=True, radius=radius, include_center=True)
         for cell in cells:
             if 0 <= cell[0] < self.model.width and 0 <= cell[1] < self.model.height:
@@ -1052,20 +1065,7 @@ class HumanAgent(Agent):
                 # Track if this was a significant belief update
                 if significant_update:
                     belief_updates += 1
-
-                    # Track source acceptance (for metrics)
-                    if source_id:
-                        if source_id.startswith("H_"):
-                            self.accepted_human += 1
-                            if source_id in self.friends:
-                                self.accepted_friend += 1
-                        elif source_id.startswith("A_"):
-                            # INCREMENT AI ACCEPTANCE COUNTER HERE
-                            self.accepted_ai += 1
-
-                            # DEBUG PRINT to track AI info acceptance
-                            #if self.model.debug_mode and random.random() < 0.05:  # 5% of the time
-                                #print(f"DEBUG: Agent {self.unique_id} accepted info from AI {source_id} for cell {cell}")
+                    # Note: Acceptance tracking is handled in update_belief_bayesian() to avoid double-counting
 
         except Exception as e:
             print(f"ERROR in Agent {self.unique_id} seek_information at tick {self.model.tick}: {e}")
@@ -1356,6 +1356,22 @@ class HumanAgent(Agent):
         # Skip if we don't have both tracking measures
         if not hasattr(self, 'ai_acceptances') or not hasattr(self, 'ai_info_sources'):
             return
+
+        # Memory cleanup: Remove old entries from tracking dictionaries to prevent memory leaks
+        cleanup_threshold_ticks = 10  # Clean up entries older than 10 ticks
+
+        # Clean up ai_info_sources dictionary
+        if hasattr(self, 'ai_info_sources'):
+            for cell in list(self.ai_info_sources.keys()):
+                last_update_tick = self.last_belief_update.get(cell, 0) if hasattr(self, 'last_belief_update') else 0
+                if self.model.tick - last_update_tick > cleanup_threshold_ticks:
+                    self.ai_info_sources.pop(cell, None)
+
+        # Clean up last_belief_update dictionary
+        if hasattr(self, 'last_belief_update'):
+            for cell in list(self.last_belief_update.keys()):
+                if self.model.tick - self.last_belief_update[cell] > cleanup_threshold_ticks:
+                    self.last_belief_update.pop(cell, None)
 
         # Check each cell where we accepted AI information
         for cell, tick in list(self.ai_acceptances.items()):
