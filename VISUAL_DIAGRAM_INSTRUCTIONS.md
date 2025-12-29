@@ -134,7 +134,7 @@ flowchart LR
     K -->|L3| N[R = +1.5]
     K -->|L0| O[R = -2.0]
 
-    L --> P[Update Q-Table<br/>Q ← Q + α·(R - Q)]
+    L --> P["<b>Update Q-Table</b><br/>Q ← Q + α(R - Q)"]
     M --> P
     N --> P
     O --> P
@@ -146,7 +146,62 @@ flowchart LR
     style K fill:#ffe1e1
     style P fill:#e1ffe1
 ```
+### Diagram 3: Alternative
+```mermaid
+flowchart TD
+    %% Global Styling and Logic
+    subgraph MODULE_1 ["fa:fa-database <b>Source Selection</b><br/>(Agent)"]
+        A["<b>Q-Table State</b><br/>Self: 0.0 | Human: 0.05 | AI: 0.0"]
+        B{fa:fa-dice Random < ε?}
+        
+        B -- "Yes 30%" --> C["fa:fa-shuffle Explore:<br/>Random Source"]
+        B -- "No 70%" --> D["fa:fa-magnifying-glass Exploit:<br/>Max Q + Bias"]
 
+        subgraph BIAS ["fa:fa-scale-balanced Biases"]
+            E["<b>Exploitative:</b><br/>+0.1 Human/Self"]
+            F["<b>Exploratory:</b><br/>-0.05 Self + (α * AI)"]
+        end
+        
+        D --- BIAS
+    end
+
+    %% Final Selection Point
+    C & BIAS --> G["fa:fa-hand-pointer Choose Source"]
+
+    subgraph MODULE_2 ["fa:fa-bolt <b>Execution</b> (Environment)"]
+        G --> H["fa:fa-satellite-dish Query & Update<br/>Beliefs"]
+        H --> I["fa:fa-truck-medical Send Relief<br/>to High-L Cells"]
+        I --> J["fa:fa-hourglass-half Latency 2 Ticks"]
+    end
+
+    subgraph MODULE_3 ["fa:fa-medal <b>Reward Calculation</b>"]
+        J --> K{fa:fa-chart-line Disaster Needs Met?}
+        K -- "Yes, very high" --> L["R = +5.0"]
+        K -- "Yes, high" --> M["R = +3.0"]
+        K -- "Yes, somewhat" --> N["R = +1.5"]
+        K -- "No, cell not in need" --> O["R = -2.0"]
+    end
+
+    subgraph MODULE_4 ["fa:fa-brain Learning Update"]
+        L & M & N & O --> P["<b>Update Q-Table</b><br/>Q ← Q + α(R - Q)"]
+    end
+
+    %% Return Path
+    P ==>|Feedback Loop| A
+
+    %% Styling
+    style MODULE_1 fill:#f0f7ff,stroke:#00509d,stroke-width:2px
+    style MODULE_2 fill:#fff9f0,stroke:#d4a017,stroke-width:2px
+    style MODULE_3 fill:#fff0f0,stroke:#c62828,stroke-width:2px
+    style MODULE_4 fill:#f0fff4,stroke:#2e7d32,stroke-width:2px
+    
+    style A fill:#ffffff,stroke:#00509d
+    style B fill:#fff4e1,stroke:#d4a017
+    style K fill:#ffe1e1,stroke:#c62828
+    style P fill:#e1ffe1,stroke:#2e7d32,stroke-width:3px
+    style BIAS fill:#ffffff,stroke-dasharray: 5 5
+```
+    
 ### Diagram 4: AI Alignment Mechanism
 
 ```mermaid
