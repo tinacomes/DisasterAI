@@ -7021,8 +7021,8 @@ if __name__ == "__main__":
                 mean_exp = np.mean(seci_exploit_final); p25_exp = np.percentile(seci_exploit_final, 25); p75_exp = np.percentile(seci_exploit_final, 75)
                 mean_er = np.mean(seci_explor_final); p25_er = np.percentile(seci_explor_final, 25); p75_er = np.percentile(seci_explor_final, 75)
 
-                means_exploit.append(mean_exp); errors_exploit[0].append(mean_exp-p25_exp); errors_exploit[1].append(p75_exp-mean_exp)
-                means_explor.append(mean_er); errors_explor[0].append(mean_er-p25_er); errors_explor[1].append(p75_er-mean_er)
+                means_exploit.append(mean_exp); errors_exploit[0].append(abs(mean_exp-p25_exp)); errors_exploit[1].append(abs(p75_exp-mean_exp))
+                means_explor.append(mean_er); errors_explor[0].append(abs(mean_er-p25_er)); errors_explor[1].append(abs(p75_er-mean_er))
             else:
                 means_exploit.append(0); errors_exploit[0].append(0); errors_exploit[1].append(0)
                 means_explor.append(0); errors_explor[0].append(0); errors_explor[1].append(0)
