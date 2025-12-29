@@ -70,6 +70,13 @@ Agents maintain Q-values for each information source:
 - **Learning rate**: α = 0.15
 - **Reward calculation**: Based on disaster relief accuracy (delayed by 2 ticks)
 
+**Q-table Initialization**:
+```
+Q(self_action) = 0.0
+Q(human) = 0.05      # Slight initial bias toward human consultation
+Q(AI_k) = 0.0        # For all AI agents k ∈ {0,1,2,3,4}
+```
+
 **Q-value Update**:
 ```
 Q(s) ← Q(s) + α · [R - Q(s)]

@@ -377,7 +377,7 @@ def create_figure4_qlearning():
     ax.add_patch(update)
     ax.text(2, 1.7, 'Update Q-Value', ha='center', fontsize=11, fontweight='bold')
     ax.text(2, 1.2,
-            'Q ← Q + α(R - Q)\n'
+            'Q ← Q + α · (R - Q)\n'
             'α = 0.15',
             ha='center', va='top', fontsize=8)
 
