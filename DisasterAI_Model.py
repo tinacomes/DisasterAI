@@ -90,7 +90,8 @@ class HumanAgent(Agent):
         self.pending_rewards = [] # [(tick_due, mode, [(cell, belief_level), ...]), ...]
         self.tokens_this_tick = {} # Tracks mode choice leading to send_relief THIS tick
         self.last_queried_source_ids = [] # Temp store for source IDs
-
+        self.last_belief_update = {}  # Tracks when each cell was last updated
+                     
         # --- Q-Table for Source Values ---
         self.q_table = {f"A_{k}": 0.0 for k in range(model.num_ai)}
         self.q_table["human"] = 0.05 # Represents generic value of querying humans
