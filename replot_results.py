@@ -6,6 +6,7 @@ No need to rerun simulations - just replot!
 
 import os
 import pickle
+import sys
 
 # Detect Colab and set paths
 try:
@@ -38,7 +39,7 @@ if not os.path.exists(file_b_pkl):
                 print(f"  - {f}")
     else:
         print(f"  Directory {save_dir} does not exist!")
-    exit(1)
+    sys.exit(1)
 
 print(f"✅ Found results file: {file_b_pkl}")
 print("📊 Loading data...")
