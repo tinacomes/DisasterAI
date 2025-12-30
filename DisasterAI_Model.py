@@ -1900,21 +1900,41 @@ class DisasterModel(Model):
         # Lowered from 10 to 5 for 150-tick simulations where agents query infrequently
         min_calls_threshold = 5    # Need stable sample size (5 calls sufficient for 150 ticks)
         min_ai_ratio = 0.5         # Majority (50%+) queries to AI
-        
+
+        # Enhanced diagnostics: check qualification at different thresholds
+        threshold_tests = [3, 5, 7, 10]
+        qualification_counts = {}
+
+        for test_threshold in threshold_tests:
+            count = 0
+            for agent in self.humans.values():
+                if not hasattr(agent, 'accum_calls_total') or not hasattr(agent, 'accum_calls_ai'):
+                    continue
+                total_calls = max(1, agent.accum_calls_total)
+                ai_ratio = agent.accum_calls_ai / total_calls
+                if total_calls >= test_threshold and ai_ratio >= min_ai_ratio:
+                    count += 1
+            qualification_counts[test_threshold] = count
+
+        print(f"  Threshold diagnostics (agents with ≥50% AI queries):")
+        for thresh, count in sorted(qualification_counts.items()):
+            print(f"    ≥{thresh} total queries: {count}/{len(self.humans)} agents qualify")
+
+        # Now get actual AI-reliant agents using chosen threshold
         ai_reliant_agents = []
         for agent in self.humans.values():
             # Safety checks for valid counters
             if not hasattr(agent, 'accum_calls_total') or not hasattr(agent, 'accum_calls_ai'):
                 continue
-                
+
             total_calls = max(1, agent.accum_calls_total)  # Prevent division by zero
             ai_ratio = agent.accum_calls_ai / total_calls
-            
+
             if total_calls >= min_calls_threshold and ai_ratio >= min_ai_ratio:
                 ai_reliant_agents.append(agent)
-        
-        # Debug print
-        print(f"  Found {len(ai_reliant_agents)}/{len(self.humans)} AI-reliant agents")
+
+        # Summary
+        print(f"  → Using threshold={min_calls_threshold}: {len(ai_reliant_agents)}/{len(self.humans)} AI-reliant agents")
         
         # Get global belief variance
         all_beliefs = []
@@ -7312,40 +7332,41 @@ if __name__ == "__main__":
     ##############################################
     # Experiment A: Vary share_exploitative
     ##############################################
-    share_values = [0.3, 0.6]
-    file_a_pkl = os.path.join(save_dir, "results_experiment_A.pkl")
-    file_a_csv = os.path.join(save_dir, "results_experiment_A.csv")
-
-    param_name_a = "Share Exploitative"
-    print("Running Experiment A...")
-    results_a = experiment_share_exploitative(base_params, share_values, num_runs)
-    with open(file_a_pkl, "wb") as f:
-        pickle.dump(results_a, f)
-    export_results_to_csv(results_a, share_values, file_a_csv, "Experiment A")
-
-    print("\n--- Plotting Aggregated Time Evolution for Experiment A ---")
-    for share in share_values:
-        print(f"{param_name_a} = {share}")
-        results_dict = results_a.get(share, {})
-        title_suffix = f"({param_name_a}={share})"
-
-        if results_dict:
-            # Call consolidated plot functions
-            plot_simulation_overview(results_dict, title_suffix)
-            plot_echo_chamber_indices(results_dict, title_suffix)
-            plot_trust_evolution(results_dict["trust_stats"], title_suffix)
-        else:
-            print(f"  Skipping plots for {param_name_a}={share} (missing data)")
-
-    # --- Plot SUMMARY Comparisons Across Parameters (AFTER LOOP) ---
-    print("\n--- Plotting Summary Comparisons for Experiment A ---")
-    if results_a:
-        plot_correct_token_shares_bars(results_a, share_values)
-
-        # NEW: Advanced bubble mechanics visualizations
-        print("\n--- Plotting Advanced Bubble Mechanics for Experiment A ---")
-        plot_phase_diagram_bubbles(results_a, share_values, param_name="Share Exploitative")
-        plot_tipping_point_waterfall(results_a, share_values, param_name="Share Exploitative")
+    # COMMENTED OUT - Focus on Experiment B for now
+    # share_values = [0.3, 0.6]
+    # file_a_pkl = os.path.join(save_dir, "results_experiment_A.pkl")
+    # file_a_csv = os.path.join(save_dir, "results_experiment_A.csv")
+    #
+    # param_name_a = "Share Exploitative"
+    # print("Running Experiment A...")
+    # results_a = experiment_share_exploitative(base_params, share_values, num_runs)
+    # with open(file_a_pkl, "wb") as f:
+    #     pickle.dump(results_a, f)
+    # export_results_to_csv(results_a, share_values, file_a_csv, "Experiment A")
+    #
+    # print("\n--- Plotting Aggregated Time Evolution for Experiment A ---")
+    # for share in share_values:
+    #     print(f"{param_name_a} = {share}")
+    #     results_dict = results_a.get(share, {})
+    #     title_suffix = f"({param_name_a}={share})"
+    #
+    #     if results_dict:
+    #         # Call consolidated plot functions
+    #         plot_simulation_overview(results_dict, title_suffix)
+    #         plot_echo_chamber_indices(results_dict, title_suffix)
+    #         plot_trust_evolution(results_dict["trust_stats"], title_suffix)
+    #     else:
+    #         print(f"  Skipping plots for {param_name_a}={share} (missing data)")
+    #
+    # # --- Plot SUMMARY Comparisons Across Parameters (AFTER LOOP) ---
+    # print("\n--- Plotting Summary Comparisons for Experiment A ---")
+    # if results_a:
+    #     plot_correct_token_shares_bars(results_a, share_values)
+    #
+    #     # NEW: Advanced bubble mechanics visualizations
+    #     print("\n--- Plotting Advanced Bubble Mechanics for Experiment A ---")
+    #     plot_phase_diagram_bubbles(results_a, share_values, param_name="Share Exploitative")
+    #     plot_tipping_point_waterfall(results_a, share_values, param_name="Share Exploitative")
 
     ##############################################
     # Experiment B: Vary AI Alignment Level
