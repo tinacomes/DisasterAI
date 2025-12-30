@@ -1,16 +1,6 @@
 
-# Install mesa if not already installed
-!pip install mesa
-
-# Mount Google Drive FIRST (for Colab)
-try:
-    from google.colab import drive
-    drive.mount('/content/drive')
-    IN_COLAB = True
-    print("✓ Running in Google Colab - results will be saved to Drive")
-except:
-    IN_COLAB = False
-    print("✓ Running locally - results will be saved to local directory")
+# DisasterAI Model
+# Agent-based model for disaster response with AI assistance
 
 import os
 import random
@@ -26,11 +16,21 @@ import csv
 from mesa import Agent, Model
 from mesa.space import MultiGrid
 
-# Set save directory (Drive if in Colab, local otherwise)
-if IN_COLAB:
-    save_dir = "/content/drive/MyDrive/DisasterAI_Results"
-else:
-    save_dir = "agent_model_results"
+# Detect environment and set save directory
+# This will be overridden by environment variable if set in Colab
+try:
+    from google.colab import drive
+    IN_COLAB = True
+    # Check if Drive is already mounted
+    if not os.path.exists('/content/drive/MyDrive'):
+        print("Warning: Google Drive not mounted. Results will save locally.")
+        save_dir = "agent_model_results"
+    else:
+        save_dir = os.environ.get('SAVE_DIR', "/content/drive/MyDrive/DisasterAI_Results")
+except:
+    IN_COLAB = False
+    save_dir = os.environ.get('SAVE_DIR', "agent_model_results")
+
 os.makedirs(save_dir, exist_ok=True)
 print(f"✓ Results will be saved to: {save_dir}")
 
