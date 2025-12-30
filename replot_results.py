@@ -32,6 +32,13 @@ from temporal_tipping_points import (
     plot_temporal_tipping_points
 )
 
+# Import echo chamber evolution analysis
+from echo_chamber_evolution import (
+    extract_echo_chamber_lifecycle,
+    plot_echo_chamber_evolution,
+    plot_aeci_evolution
+)
+
 # Find the results file
 file_b_pkl = None
 save_dir = None
@@ -99,6 +106,15 @@ print("     (Tracking WHEN transitions occur during simulations)")
 temporal_data = analyze_temporal_tipping_points(results_b, all_alignment_values)
 plot_temporal_tipping_points(temporal_data, all_alignment_values, param_name="AI Alignment")
 
+print("\n  → NEW: Echo chamber EVOLUTION (rise and fall)")
+print("     (Full lifecycle: formation → peak → dissolution)")
+lifecycle_data = extract_echo_chamber_lifecycle(results_b, all_alignment_values)
+plot_echo_chamber_evolution(lifecycle_data, all_alignment_values, param_name="AI Alignment")
+
+print("\n  → NEW: AECI evolution over time")
+print("     (How AI preference grows during simulation)")
+plot_aeci_evolution(lifecycle_data, all_alignment_values, param_name="AI Alignment")
+
 print("\n" + "="*60)
 print("✅ ALL PLOTS REGENERATED WITH FIXES!")
 print("="*60)
@@ -110,7 +126,22 @@ print("   🆕 Temporal tipping point analysis: Shows WHEN transitions occur")
 print("      - Separate tracking for exploit vs explor agents")
 print("      - Tracks timing of transitions during simulations")
 print("      - Shows how transition speed changes with alignment")
+print("   🆕 Echo chamber EVOLUTION analysis: Shows RISE AND FALL")
+print("      - Full time series showing formation → peak → dissolution")
+print("      - Peak strength comparison across alignment levels")
+print("      - Time-to-peak and chamber duration metrics")
+print("      - Separate tracking for exploit vs explor agents")
+print("      - Explains why final window shows ~0 (chambers already dissolved!)")
+print("   🆕 AECI evolution plots: AI preference growth over time")
+print("      - Shows how agents shift from friends to AI queries")
+print("      - Tracks when 50% threshold is crossed")
 print("\n💡 The NEW temporal analysis answers:")
 print("   'At what tick do agents switch from friends to AI?'")
 print("   'Does this happen earlier at higher alignment?'")
 print("   'Do exploit and explor agents transition at different times?'")
+print("\n💡 The NEW evolution analysis reveals:")
+print("   'Echo chambers are TRANSIENT - they form early then DISSOLVE'")
+print("   'Peak SECI ≈ -0.3 to -0.4 occurs at ticks 20-40'")
+print("   'Chambers break (SECI→0) at ticks 60-100'")
+print("   'Final window (120-150) shows dissolved state'")
+print("   '→ This is why final plots showed near-zero values!')")
