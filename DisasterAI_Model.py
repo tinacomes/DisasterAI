@@ -2,6 +2,16 @@
 # Install mesa if not already installed
 !pip install mesa
 
+# Mount Google Drive FIRST (for Colab)
+try:
+    from google.colab import drive
+    drive.mount('/content/drive')
+    IN_COLAB = True
+    print("✓ Running in Google Colab - results will be saved to Drive")
+except:
+    IN_COLAB = False
+    print("✓ Running locally - results will be saved to local directory")
+
 import os
 import random
 import math
@@ -12,14 +22,17 @@ import itertools
 import pickle
 import gc
 import csv
-import os
-import math
 
 from mesa import Agent, Model
 from mesa.space import MultiGrid
 
-save_dir = "agent_model_results"
+# Set save directory (Drive if in Colab, local otherwise)
+if IN_COLAB:
+    save_dir = "/content/drive/MyDrive/DisasterAI_Results"
+else:
+    save_dir = "agent_model_results"
 os.makedirs(save_dir, exist_ok=True)
+print(f"✓ Results will be saved to: {save_dir}")
 
 #########################################
 # Helper Classes and Agent Definitions
@@ -7373,6 +7386,4 @@ if __name__ == "__main__":
     # plt.close(fig_d_seci)
     # gc.collect()
 
-# Google Colab Drive mount (keep at end for saving results)
-from google.colab import drive
-drive.mount('/content/drive')
+# Note: Google Drive is mounted at the top of the file for Colab compatibility
