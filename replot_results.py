@@ -26,6 +26,12 @@ from DisasterAI_Model import (
     plot_tipping_point_waterfall
 )
 
+# Import new temporal tipping point analysis
+from temporal_tipping_points import (
+    analyze_temporal_tipping_points,
+    plot_temporal_tipping_points
+)
+
 # Find the results file
 file_b_pkl = None
 save_dir = None
@@ -85,15 +91,26 @@ plot_summary_performance_vs_alignment(results_b, all_alignment_values, title_suf
 print("  → Phase diagram bubbles")
 plot_phase_diagram_bubbles(results_b, all_alignment_values, param_name="AI Alignment")
 
-print("  → Tipping point waterfall")
+print("  → Tipping point waterfall (old method)")
 plot_tipping_point_waterfall(results_b, all_alignment_values, param_name="AI Alignment")
+
+print("\n  → NEW: Temporal tipping point analysis")
+print("     (Tracking WHEN transitions occur during simulations)")
+temporal_data = analyze_temporal_tipping_points(results_b, all_alignment_values)
+plot_temporal_tipping_points(temporal_data, all_alignment_values, param_name="AI Alignment")
 
 print("\n" + "="*60)
 print("✅ ALL PLOTS REGENERATED WITH FIXES!")
 print("="*60)
-print("\n📋 What should be fixed now:")
+print("\n📋 What's new:")
 print("   ✅ Phase diagram AI bubble strength: color-coded bars (blue/gray/red)")
-print("   ✅ AECI-Var values: should show real numbers, not zeros")
-print("   ✅ SECI values: should show real numbers in plots")
-print("\n💡 If tipping points are still empty, that means no sharp transitions")
-print("   were detected in your data (this can be normal for smooth changes).")
+print("   ✅ AECI-Var values: showing real numbers, not zeros")
+print("   ✅ SECI values: showing real numbers in plots")
+print("   🆕 Temporal tipping point analysis: Shows WHEN transitions occur")
+print("      - Separate tracking for exploit vs explor agents")
+print("      - Tracks timing of transitions during simulations")
+print("      - Shows how transition speed changes with alignment")
+print("\n💡 The NEW temporal analysis answers:")
+print("   'At what tick do agents switch from friends to AI?'")
+print("   'Does this happen earlier at higher alignment?'")
+print("   'Do exploit and explor agents transition at different times?'")
