@@ -3634,23 +3634,31 @@ def aggregate_simulation_results(num_runs, base_params):
         # Special handling for AECI variance data
         aeci_variance_data = result.get("aeci_variance", np.array([]))
         aeci_variance_list.append(aeci_variance_data)
-        
+
         # Extract max AECI variance if available
         if isinstance(aeci_variance_data, np.ndarray) and aeci_variance_data.size > 0:
             # Handle different array structures
-            if aeci_variance_data.ndim == 3 and aeci_variance_data.shape[2] > 1:
-                # Extract values column
+            if aeci_variance_data.ndim == 2 and aeci_variance_data.shape[1] >= 2:
+                # Individual run data: (ticks, 2) where column 0=tick, column 1=value
                 variance_values = aeci_variance_data[:, 1]  # Values column
                 if variance_values.size > 0:
-                    # Get maximum value
-                    max_variance = np.nanmax(variance_values)
+                    # Get maximum absolute value to capture both positive and negative effects
+                    max_variance = np.nanmax(np.abs(variance_values))
                     if not np.isnan(max_variance) and not np.isinf(max_variance):
                         max_aeci_variance_per_run.append(max_variance)
-                        print(f"  Max AECI variance for run {successful_runs}: {max_variance:.4f}")
+                        print(f"  Max |AECI variance| for run {successful_runs}: {max_variance:.4f}")
                     else:
                         print(f"  Invalid max AECI variance for run {successful_runs}")
+            elif hasattr(aeci_variance_data, 'dtype') and aeci_variance_data.dtype.names is not None:
+                # Structured array with named fields
+                if 'value' in aeci_variance_data.dtype.names:
+                    variance_values = aeci_variance_data['value']
+                    max_variance = np.nanmax(np.abs(variance_values))
+                    if not np.isnan(max_variance) and not np.isinf(max_variance):
+                        max_aeci_variance_per_run.append(max_variance)
+                        print(f"  Max |AECI variance| for run {successful_runs}: {max_variance:.4f}")
             else:
-                print(f"  Unexpected AECI variance data shape: {aeci_variance_data.shape}")
+                print(f"  Unexpected AECI variance data shape: {aeci_variance_data.shape}, ndim={aeci_variance_data.ndim}")
         else:
             print(f"  No valid AECI variance data for run {successful_runs}")
         
@@ -6966,8 +6974,9 @@ def plot_phase_diagram_bubbles(results_dict, param_values, param_name="AI Alignm
         for i, (param, val) in enumerate(zip(param_values, aeci_var_final)):
             print(f"  {param_name}={param:.2f}: AECI-Var={val:.4f}")
 
+        # Color coding: Blue=AI diversifies (>0.01), White=neutral (-0.01 to 0.01), Red=AI echo chamber (<-0.01)
         bars = ax.barh(range(num_params), aeci_var_final, height=0.6,
-                      color=['blue' if v > 0.1 else 'white' if v > -0.1 else 'red' for v in aeci_var_final],
+                      color=['blue' if v > 0.01 else 'lightgray' if v > -0.01 else 'red' for v in aeci_var_final],
                       edgecolor='black', linewidth=0.5)
 
         # Add value labels on bars
