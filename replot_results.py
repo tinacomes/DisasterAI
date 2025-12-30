@@ -8,14 +8,13 @@ import os
 import pickle
 import sys
 
-# Detect Colab and set paths
-try:
-    from google.colab import drive
-    save_dir = "/content/drive/MyDrive/DisasterAI_Results"
-except:
-    save_dir = "agent_model_results"
+# Check both possible locations for results
+possible_dirs = [
+    "agent_model_results",  # Local directory
+    "/content/drive/MyDrive/DisasterAI_Results"  # Drive directory
+]
 
-print(f"📁 Loading results from: {save_dir}\n")
+print(f"🔍 Searching for results...\n")
 
 # Import plotting functions from main file
 from DisasterAI_Model import (
@@ -27,18 +26,33 @@ from DisasterAI_Model import (
     plot_tipping_point_waterfall
 )
 
-# Load Experiment B results
-file_b_pkl = os.path.join(save_dir, "results_AI_Alignment_Tipping_Point.pkl")
+# Find the results file
+file_b_pkl = None
+save_dir = None
 
-if not os.path.exists(file_b_pkl):
-    print(f"❌ Results file not found: {file_b_pkl}")
-    print("\nAvailable files:")
-    if os.path.exists(save_dir):
-        for f in os.listdir(save_dir):
-            if f.endswith('.pkl'):
-                print(f"  - {f}")
+for directory in possible_dirs:
+    test_path = os.path.join(directory, "results_AI_Alignment_Tipping_Point.pkl")
+    if os.path.exists(test_path):
+        file_b_pkl = test_path
+        save_dir = directory
+        print(f"✅ Found results in: {directory}")
+        break
     else:
-        print(f"  Directory {save_dir} does not exist!")
+        print(f"  ✗ Not in {directory}")
+
+if file_b_pkl is None:
+    print(f"\n❌ Results file not found in any location!")
+    print("\nSearched locations:")
+    for directory in possible_dirs:
+        print(f"  - {directory}")
+        if os.path.exists(directory):
+            pkl_files = [f for f in os.listdir(directory) if f.endswith('.pkl')]
+            if pkl_files:
+                print(f"    Available files: {pkl_files}")
+            else:
+                print(f"    No .pkl files found")
+        else:
+            print(f"    Directory does not exist")
     sys.exit(1)
 
 print(f"✅ Found results file: {file_b_pkl}")
