@@ -5063,7 +5063,8 @@ def plot_final_echo_indices_vs_alignment(results_b, alignment_values, title_suff
         res = results_b.get(align)
         if not res: continue
 
-        # Helper to extract final mean and IQR error across runs
+        # Helper to extract final window mean and IQR error across runs
+        # Uses last 20% of simulation instead of single final tick (more robust)
         def get_final_stats(data_array, col_index):
             if data_array is None or not isinstance(data_array, np.ndarray) or data_array.size == 0:
                 return 0, [0, 0]
@@ -5071,8 +5072,14 @@ def plot_final_echo_indices_vs_alignment(results_b, alignment_values, title_suff
             if data_array.ndim < 3 or data_array.shape[1] == 0 or col_index >= data_array.shape[2]:
                 return 0, [0, 0]
 
-            # Get final values for all runs
-            final_vals = data_array[:, -1, col_index]
+            # Average over final 20% of simulation (e.g., ticks 120-150 for 150-tick sim)
+            # More robust than single final tick - captures steady state if reached
+            num_ticks = data_array.shape[1]
+            window_size = max(1, int(num_ticks * 0.2))  # Last 20%
+            start_tick = num_ticks - window_size
+
+            # Get average over final window for all runs
+            final_vals = np.mean(data_array[:, start_tick:, col_index], axis=1)
 
             # Calculate mean and percentiles
             mean = np.mean(final_vals)
@@ -6884,7 +6891,20 @@ def plot_phase_diagram_bubbles(results_dict, param_values, param_name="AI Alignm
         # Prepare data matrices for heatmaps
         num_params = len(param_values)
 
-        # Extract final values for each metric
+        # Helper: extract average over final 20% window (more robust than single tick)
+        def get_window_mean(data, runs_axis, ticks_axis, col_index):
+            """Average over last 20% of simulation instead of single final tick."""
+            if data.ndim <= ticks_axis or data.shape[ticks_axis] == 0:
+                return 0
+            num_ticks = data.shape[ticks_axis]
+            window_size = max(1, int(num_ticks * 0.2))
+            start_tick = num_ticks - window_size
+
+            if runs_axis == 0 and ticks_axis == 1:  # (runs, ticks, cols)
+                return np.mean(data[:, start_tick:, col_index])
+            return 0
+
+        # Extract final window averages for each metric
         seci_exploit_final = []
         seci_explor_final = []
         aeci_var_final = []
@@ -6899,8 +6919,8 @@ def plot_phase_diagram_bubbles(results_dict, param_values, param_name="AI Alignm
             # SECI (Social Echo Chamber Index)
             seci = res.get("seci", np.array([]))
             if seci.ndim >= 3 and seci.shape[1] > 0:
-                seci_exploit_final.append(np.mean(seci[:, -1, 1]))  # Final tick, exploit column
-                seci_explor_final.append(np.mean(seci[:, -1, 2]))   # Final tick, explor column
+                seci_exploit_final.append(get_window_mean(seci, 0, 1, 1))  # Exploit column
+                seci_explor_final.append(get_window_mean(seci, 0, 1, 2))   # Explor column
             else:
                 seci_exploit_final.append(0)
                 seci_explor_final.append(0)
@@ -6910,10 +6930,11 @@ def plot_phase_diagram_bubbles(results_dict, param_values, param_name="AI Alignm
             if isinstance(aeci_var, np.ndarray) and aeci_var.size > 0:
                 try:
                     if aeci_var.ndim == 3:  # (runs, ticks, 2)
-                        final_values = aeci_var[:, -1, 1]  # Last tick, value column
-                        aeci_var_final.append(np.mean(final_values))
-                    elif aeci_var.ndim == 2:  # (ticks, 2)
-                        aeci_var_final.append(aeci_var[-1, 1])  # Last tick, value column
+                        aeci_var_final.append(get_window_mean(aeci_var, 0, 1, 1))
+                    elif aeci_var.ndim == 2:  # (ticks, 2) - single run or aggregated
+                        num_ticks = aeci_var.shape[0]
+                        window_size = max(1, int(num_ticks * 0.2))
+                        aeci_var_final.append(np.mean(aeci_var[-window_size:, 1]))
                     else:
                         aeci_var_final.append(0)
                 except:
@@ -6924,8 +6945,8 @@ def plot_phase_diagram_bubbles(results_dict, param_values, param_name="AI Alignm
             # Info Diversity (Shannon Entropy)
             info_div = res.get("info_diversity", np.array([]))
             if info_div.ndim >= 3 and info_div.shape[1] > 0:
-                info_div_exploit_final.append(np.mean(info_div[:, -1, 1]))  # Final tick, exploit
-                info_div_explor_final.append(np.mean(info_div[:, -1, 2]))   # Final tick, explor
+                info_div_exploit_final.append(get_window_mean(info_div, 0, 1, 1))  # Exploit
+                info_div_explor_final.append(get_window_mean(info_div, 0, 1, 2))   # Explor
             else:
                 info_div_exploit_final.append(0)
                 info_div_explor_final.append(0)
@@ -6933,10 +6954,15 @@ def plot_phase_diagram_bubbles(results_dict, param_values, param_name="AI Alignm
             # Trust levels
             trust = res.get("trust_stats", np.array([]))
             if trust.ndim >= 3 and trust.shape[1] > 0:
-                # Avg AI trust across both agent types
-                ai_trust_final.append(np.mean([trust[:, -1, 1], trust[:, -1, 4]]))  # AI exp, AI expl
-                # Avg Friend trust across both agent types
-                friend_trust_final.append(np.mean([trust[:, -1, 2], trust[:, -1, 5]]))  # Friend exp, Friend expl
+                # Avg AI trust across both agent types (using final window)
+                ai_trust_exploit = get_window_mean(trust, 0, 1, 1)  # AI exploit
+                ai_trust_explor = get_window_mean(trust, 0, 1, 4)   # AI explor
+                ai_trust_final.append(np.mean([ai_trust_exploit, ai_trust_explor]))
+
+                # Avg Friend trust across both agent types (using final window)
+                friend_trust_exploit = get_window_mean(trust, 0, 1, 2)  # Friend exploit
+                friend_trust_explor = get_window_mean(trust, 0, 1, 5)   # Friend explor
+                friend_trust_final.append(np.mean([friend_trust_exploit, friend_trust_explor]))
             else:
                 ai_trust_final.append(0)
                 friend_trust_final.append(0)
