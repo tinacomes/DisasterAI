@@ -7371,7 +7371,7 @@ if __name__ == "__main__":
     ##############################################
     # Experiment B: Vary AI Alignment Level
     ##############################################
-    alignment_values = [0.0, 0.25, 0.5, 0.75, 0.95]  # Initial scan
+    alignment_values = [0.0, 0.25, 0.5, 0.75, 1.0]  # Initial scan (1.0 = perfect alignment)
     param_name_b = "AI Alignment Tipping Point"
     file_b_pkl = os.path.join(save_dir, f"results_{param_name_b.replace(' ','_')}.pkl")
 

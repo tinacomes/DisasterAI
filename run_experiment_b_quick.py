@@ -68,7 +68,7 @@ base_params = {
 }
 
 # Experiment parameters
-alignment_values = [0.0, 0.25, 0.5, 0.75, 0.95]
+alignment_values = [0.0, 0.25, 0.5, 0.75, 1.0]  # 1.0 = perfect alignment
 num_runs = 5  # Quick test with fewer runs
 param_name = "AI Alignment Tipping Point"
 
