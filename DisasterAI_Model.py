@@ -7304,14 +7304,14 @@ if __name__ == "__main__":
         "exploit_friend_bias": 0.1,
         "exploit_self_bias": 0.1
     }
-    num_runs = 2
+    num_runs = 10
     save_dir = "agent_model_results"
     os.makedirs(save_dir, exist_ok=True)
 
     ##############################################
     # Experiment A: Vary share_exploitative
     ##############################################
-    share_values = [0.3, 0.6]
+    share_values = [0.2, 0,5, 0.8]
     file_a_pkl = os.path.join(save_dir, "results_experiment_A.pkl")
     file_a_csv = os.path.join(save_dir, "results_experiment_A.csv")
 
@@ -7349,7 +7349,7 @@ if __name__ == "__main__":
     ##############################################
     # Experiment B: Vary AI Alignment Level
     ##############################################
-    alignment_values = [0.0, 0.25, 0.5, 0.75, 0.95]  # Initial scan
+    alignment_values = [0.0, 0.25, 0.5, 0.75, 1.0]  # Sweep
     param_name_b = "AI Alignment Tipping Point"
     file_b_pkl = os.path.join(save_dir, f"results_{param_name_b.replace(' ','_')}.pkl")
 
