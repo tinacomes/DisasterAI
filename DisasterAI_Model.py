@@ -1733,6 +1733,7 @@ class DisasterModel(Model):
         self.aeci_variance_data = []   # AI Echo Chamber Index (Variance-based)
         self.component_aeci_data = []  # Component-level AI Engagement
         self.component_ai_trust_variance_data = []  # AI Trust Clustering
+        self.info_diversity_data = []  # Information Diversity (Shannon Entropy)
 
         # Initialize disaster grid with Gaussian decay around an epicenter.
         self.disaster_grid = np.zeros((width, height), dtype=int)
@@ -1976,7 +1977,55 @@ class DisasterModel(Model):
         print(f"  Last 3 entries: {self.aeci_variance_data[-3:] if len(self.aeci_variance_data) >= 3 else self.aeci_variance_data}")
         
         return aeci_variance_tuple
-        
+
+    def calculate_info_diversity(self):
+        """Calculate Information Diversity (Shannon Entropy of source usage).
+
+        Returns tuple: (tick, exploit_entropy, explor_entropy)
+        - Higher entropy = diverse information sources (anti-bubble)
+        - Lower entropy = concentrated sources (echo chamber)
+        - Range: 0 (single source) to log2(num_sources) (perfectly distributed)
+        """
+        from math import log2
+
+        # Separate agents by type
+        exploitative_agents = [a for a in self.humans.values() if a.agent_type == "exploitative"]
+        exploratory_agents = [a for a in self.humans.values() if a.agent_type == "exploratory"]
+
+        def calculate_entropy(agents):
+            """Calculate Shannon entropy of source usage for a group of agents."""
+            if not agents:
+                return 0.0
+
+            # Count source usage across all agents in group
+            source_counts = {}
+            total_queries = 0
+
+            for agent in agents:
+                # Check if agent has tracked source usage
+                if hasattr(agent, 'tokens_this_tick'):
+                    for source_mode in agent.tokens_this_tick.keys():
+                        source_counts[source_mode] = source_counts.get(source_mode, 0) + 1
+                        total_queries += 1
+
+            # If no queries made, return 0 (no diversity)
+            if total_queries == 0:
+                return 0.0
+
+            # Calculate Shannon entropy: H = -sum(p_i * log2(p_i))
+            entropy = 0.0
+            for count in source_counts.values():
+                if count > 0:
+                    p = count / total_queries
+                    entropy -= p * log2(p)
+
+            return entropy
+
+        exploit_entropy = calculate_entropy(exploitative_agents)
+        explor_entropy = calculate_entropy(exploratory_agents)
+
+        return (self.tick, exploit_entropy, explor_entropy)
+
     def initialize_social_network(self):
         """Initialize social network with multiple components and meaningful homophily."""
         # Calculate how many exploitative and exploratory agents we have
@@ -2330,7 +2379,8 @@ class DisasterModel(Model):
                 'component_ai_trust_variance': {'tick': 0, 'value': 0},
                 'trust_stats': {'tick': 0, 'ai_exp': 0, 'friend_exp': 0, 'nonfriend_exp': 0,
                               'ai_expl': 0, 'friend_expl': 0, 'nonfriend_expl': 0},
-                'running_aeci': {'tick': 0, 'exploit': 0, 'explor': 0}
+                'running_aeci': {'tick': 0, 'exploit': 0, 'explor': 0},
+                'info_diversity': {'tick': 0, 'exploit': 0, 'explor': 0}
             }
 
         # Every 5 ticks, compute additional metrics.
@@ -2632,6 +2682,17 @@ class DisasterModel(Model):
 
             self.running_aeci_data.append((self.tick, self.running_aeci_exp, self.running_aeci_expl))
 
+            # --- Information Diversity (Shannon Entropy) ---
+            info_diversity_result = self.calculate_info_diversity()
+            self.info_diversity_data.append(info_diversity_result)
+
+            # Update last metrics
+            self._last_metrics['info_diversity'] = {
+                'tick': info_diversity_result[0],
+                'exploit': info_diversity_result[1],
+                'explor': info_diversity_result[2]
+            }
+
             # --- Retainment Metrics ---
             retain_aeci_exp_list = []
             retain_aeci_expl_list = []
@@ -2753,6 +2814,13 @@ class DisasterModel(Model):
                 self.tick,
                 self._last_metrics['aeci']['exploit'],
                 self._last_metrics['aeci']['explor']
+            ))
+
+            # For info_diversity - use last calculated values
+            self.info_diversity_data.append((
+                self.tick,
+                self._last_metrics['info_diversity']['exploit'],
+                self._last_metrics['info_diversity']['explor']
             ))
 
             # For component_seci - use last calculated value
@@ -3449,6 +3517,7 @@ def simulation_generator(num_runs, base_params):
                 "aeci_variance": aeci_variance_array,  # Use the explicitly converted 2D array
                 "component_aeci": safe_convert_to_array(getattr(model, 'component_aeci_data', [])),
                 "component_ai_trust_variance": safe_convert_to_array(getattr(model, 'component_ai_trust_variance_data', [])),
+                "info_diversity": np.array(getattr(model, 'info_diversity_data', [])),
                 "event_ticks": list(getattr(model, 'event_ticks', []))
             }
 
@@ -3482,6 +3551,7 @@ def aggregate_simulation_results(num_runs, base_params):
     aeci_variance_list = []
     component_aeci_list = []
     component_ai_trust_variance_list = []  # Fixed: Single list instead of tuple of lists
+    info_diversity_list = []  # Information Diversity (Shannon Entropy)
     event_ticks_list = [] # Collect event ticks from each run
     max_aeci_variance_per_run = [] # max aeci var
 
@@ -3516,7 +3586,8 @@ def aggregate_simulation_results(num_runs, base_params):
 
         # Append new metrics with improved error handling
         component_seci_list.append(result.get("component_seci", np.array([])))
-        
+        info_diversity_list.append(result.get("info_diversity", np.array([])))
+
         # Special handling for AECI variance data
         aeci_variance_data = result.get("aeci_variance", np.array([]))
         aeci_variance_list.append(aeci_variance_data)
@@ -3590,6 +3661,7 @@ def aggregate_simulation_results(num_runs, base_params):
     aeci_variance_array = safe_stack(aeci_variance_list)
     component_aeci_array = safe_stack(component_aeci_list)
     component_ai_trust_variance_array = safe_stack(component_ai_trust_variance_list)
+    info_diversity_array = safe_stack(info_diversity_list)
 
     # --- Calculate Assistance Stats ---
     assist_stats = {
@@ -3644,6 +3716,7 @@ def aggregate_simulation_results(num_runs, base_params):
         "max_aeci_variance": max_aeci_variance_per_run,
         "component_aeci": component_aeci_array,
         "component_ai_trust_variance": component_ai_trust_variance_array,
+        "info_diversity": info_diversity_array,
         "event_ticks_list": event_ticks_list
     }
 
@@ -6704,6 +6777,321 @@ def export_results_to_csv(results, share_values, filename, experiment_name):
         for share in share_values:
             writer.writerow([experiment_name, share, str(results.get(share))])
 
+#########################################
+# NEW: Advanced Bubble Mechanics Visualizations
+#########################################
+
+def plot_phase_diagram_bubbles(results_dict, param_values, param_name="AI Alignment"):
+    """
+    Phase diagram showing bubble regimes across parameter space.
+
+    Creates a multi-panel heatmap showing:
+    1. Social bubble strength (SECI)
+    2. AI bubble strength (AECI-Var)
+    3. Information diversity
+    4. Dominant information source
+
+    Args:
+        results_dict: Dictionary mapping parameter values to aggregated results
+        param_values: List of parameter values (e.g., alignment levels)
+        param_name: Name of the parameter being varied
+    """
+    print(f"\n=== Generating Phase Diagram for {param_name} ===")
+
+    try:
+        fig, axes = plt.subplots(2, 2, figsize=(16, 12))
+        fig.suptitle(f"Filter Bubble Phase Diagram vs {param_name}", fontsize=16, fontweight='bold')
+
+        # Prepare data matrices for heatmaps
+        num_params = len(param_values)
+
+        # Extract final values for each metric
+        seci_exploit_final = []
+        seci_explor_final = []
+        aeci_var_final = []
+        info_div_exploit_final = []
+        info_div_explor_final = []
+        ai_trust_final = []
+        friend_trust_final = []
+
+        for param_val in param_values:
+            res = results_dict.get(param_val, {})
+
+            # SECI (Social Echo Chamber Index)
+            seci = res.get("seci", np.array([]))
+            if seci.ndim >= 3 and seci.shape[1] > 0:
+                seci_exploit_final.append(np.mean(seci[:, -1, 1]))  # Final tick, exploit column
+                seci_explor_final.append(np.mean(seci[:, -1, 2]))   # Final tick, explor column
+            else:
+                seci_exploit_final.append(0)
+                seci_explor_final.append(0)
+
+            # AECI-Var (AI Echo Chamber - Variance based)
+            aeci_var = res.get("aeci_variance", np.array([]))
+            if isinstance(aeci_var, np.ndarray) and aeci_var.size > 0:
+                try:
+                    if aeci_var.ndim == 3:  # (runs, ticks, 2)
+                        final_values = aeci_var[:, -1, 1]  # Last tick, value column
+                        aeci_var_final.append(np.mean(final_values))
+                    elif aeci_var.ndim == 2:  # (ticks, 2)
+                        aeci_var_final.append(aeci_var[-1, 1])  # Last tick, value column
+                    else:
+                        aeci_var_final.append(0)
+                except:
+                    aeci_var_final.append(0)
+            else:
+                aeci_var_final.append(0)
+
+            # Info Diversity (Shannon Entropy)
+            info_div = res.get("info_diversity", np.array([]))
+            if info_div.ndim >= 3 and info_div.shape[1] > 0:
+                info_div_exploit_final.append(np.mean(info_div[:, -1, 1]))  # Final tick, exploit
+                info_div_explor_final.append(np.mean(info_div[:, -1, 2]))   # Final tick, explor
+            else:
+                info_div_exploit_final.append(0)
+                info_div_explor_final.append(0)
+
+            # Trust levels
+            trust = res.get("trust_stats", np.array([]))
+            if trust.ndim >= 3 and trust.shape[1] > 0:
+                # Avg AI trust across both agent types
+                ai_trust_final.append(np.mean([trust[:, -1, 1], trust[:, -1, 4]]))  # AI exp, AI expl
+                # Avg Friend trust across both agent types
+                friend_trust_final.append(np.mean([trust[:, -1, 2], trust[:, -1, 5]]))  # Friend exp, Friend expl
+            else:
+                ai_trust_final.append(0)
+                friend_trust_final.append(0)
+
+        # Panel 1: Social Bubble Strength (SECI)
+        ax = axes[0, 0]
+        seci_combined = [(seci_exploit_final[i] + seci_explor_final[i]) / 2 for i in range(num_params)]
+        bars = ax.barh(range(num_params), seci_combined,
+                       color=['red' if v < -0.2 else 'yellow' if v < 0.1 else 'green' for v in seci_combined])
+        ax.set_yticks(range(num_params))
+        ax.set_yticklabels([f"{v:.2f}" for v in param_values])
+        ax.set_xlabel("SECI (Social Echo Chamber Index)", fontsize=11)
+        ax.set_ylabel(param_name, fontsize=11)
+        ax.set_title("Social Bubble Strength\n(Red=Strong, Yellow=Moderate, Green=Weak)", fontsize=12)
+        ax.axvline(0, color='black', linestyle='--', linewidth=1, alpha=0.5)
+        ax.grid(True, axis='x', alpha=0.3)
+
+        # Panel 2: AI Bubble Strength (AECI-Var)
+        ax = axes[0, 1]
+        bars = ax.barh(range(num_params), aeci_var_final,
+                      color=['blue' if v > 0.1 else 'white' if v > -0.1 else 'red' for v in aeci_var_final])
+        ax.set_yticks(range(num_params))
+        ax.set_yticklabels([f"{v:.2f}" for v in param_values])
+        ax.set_xlabel("AECI-Var (AI Echo Chamber Index)", fontsize=11)
+        ax.set_ylabel(param_name, fontsize=11)
+        ax.set_title("AI Bubble Strength\n(Blue=Diversifies, Red=Echo Chamber)", fontsize=12)
+        ax.axvline(0, color='black', linestyle='--', linewidth=1, alpha=0.5)
+        ax.grid(True, axis='x', alpha=0.3)
+
+        # Panel 3: Information Diversity
+        ax = axes[1, 0]
+        x = np.arange(num_params)
+        width = 0.35
+        ax.barh(x - width/2, info_div_exploit_final, width, label='Exploitative', alpha=0.8, color='coral')
+        ax.barh(x + width/2, info_div_explor_final, width, label='Exploratory', alpha=0.8, color='skyblue')
+        ax.set_yticks(range(num_params))
+        ax.set_yticklabels([f"{v:.2f}" for v in param_values])
+        ax.set_xlabel("Shannon Entropy (bits)", fontsize=11)
+        ax.set_ylabel(param_name, fontsize=11)
+        ax.set_title("Information Source Diversity\n(Higher=More Diverse Sources)", fontsize=12)
+        ax.legend(loc='best')
+        ax.grid(True, axis='x', alpha=0.3)
+
+        # Panel 4: Dominant Source (AI vs Friends)
+        ax = axes[1, 1]
+        trust_ratio = [ai_trust_final[i] - friend_trust_final[i] for i in range(num_params)]
+        bars = ax.barh(range(num_params), trust_ratio,
+                      color=['orange' if v > 0.1 else 'gray' if abs(v) <= 0.1 else 'purple' for v in trust_ratio])
+        ax.set_yticks(range(num_params))
+        ax.set_yticklabels([f"{v:.2f}" for v in param_values])
+        ax.set_xlabel("Trust Difference (AI - Friends)", fontsize=11)
+        ax.set_ylabel(param_name, fontsize=11)
+        ax.set_title("Dominant Information Source\n(Orange=AI, Purple=Friends, Gray=Mixed)", fontsize=12)
+        ax.axvline(0, color='black', linestyle='--', linewidth=1, alpha=0.5)
+        ax.grid(True, axis='x', alpha=0.3)
+
+        plt.tight_layout()
+        plt.savefig("agent_model_results/phase_diagram_bubbles.png", dpi=300, bbox_inches='tight')
+        print("Phase diagram saved successfully")
+        plt.close()
+
+    except Exception as e:
+        print(f"Error in plot_phase_diagram_bubbles: {e}")
+        import traceback
+        traceback.print_exc()
+
+
+def plot_tipping_point_waterfall(results_dict, param_values, param_name="AI Alignment"):
+    """
+    Waterfall diagram showing sequential behavioral transitions (tipping points).
+
+    Identifies and visualizes when:
+    1. AI trust exceeds friend trust (aggregate)
+    2. Social bubble breaks (SECI crosses zero)
+    3. AI bubble breaks (AECI crosses zero)
+    4. Exploitative agents prefer AI over friends
+    5. Information diversity increases significantly
+
+    Args:
+        results_dict: Dictionary mapping parameter values to aggregated results
+        param_values: List of parameter values (sorted)
+        param_name: Name of the parameter being varied
+    """
+    print(f"\n=== Generating Tipping Point Waterfall for {param_name} ===")
+
+    try:
+        fig, ax = plt.subplots(figsize=(14, 8))
+
+        # Track transitions for each metric
+        tipping_points = {
+            'AI Trust > Friend Trust': None,
+            'Social Bubble Breaks (SECI→0)': None,
+            'AI Bubble Breaks (AECI→0)': None,
+            'Exploiters Prefer AI': None,
+            'Info Diversity Surge': None
+        }
+
+        # Baseline values for comparison
+        prev_ai_trust = 0
+        prev_friend_trust = 0
+        prev_seci = 0
+        prev_aeci_var = 0
+        prev_exploit_ai_pref = 0
+        prev_info_div = 0
+
+        for i, param_val in enumerate(sorted(param_values)):
+            res = results_dict.get(param_val, {})
+
+            # Calculate current metrics
+            trust = res.get("trust_stats", np.array([]))
+            if trust.ndim >= 3 and trust.shape[1] > 0:
+                curr_ai_trust = np.mean([trust[:, -1, 1], trust[:, -1, 4]])
+                curr_friend_trust = np.mean([trust[:, -1, 2], trust[:, -1, 5]])
+            else:
+                curr_ai_trust = prev_ai_trust
+                curr_friend_trust = prev_friend_trust
+
+            seci = res.get("seci", np.array([]))
+            if seci.ndim >= 3 and seci.shape[1] > 0:
+                curr_seci = np.mean([seci[:, -1, 1], seci[:, -1, 2]])
+            else:
+                curr_seci = prev_seci
+
+            aeci_var = res.get("aeci_variance", np.array([]))
+            if isinstance(aeci_var, np.ndarray) and aeci_var.size > 0:
+                try:
+                    if aeci_var.ndim == 3:
+                        curr_aeci_var = np.mean(aeci_var[:, -1, 1])
+                    elif aeci_var.ndim == 2:
+                        curr_aeci_var = aeci_var[-1, 1]
+                    else:
+                        curr_aeci_var = prev_aeci_var
+                except:
+                    curr_aeci_var = prev_aeci_var
+            else:
+                curr_aeci_var = prev_aeci_var
+
+            # Check for exploiter preference (from AECI data)
+            aeci = res.get("aeci", np.array([]))
+            if aeci.ndim >= 3 and aeci.shape[1] > 0:
+                curr_exploit_ai_pref = np.mean(aeci[:, -1, 1])  # Exploitative AECI
+            else:
+                curr_exploit_ai_pref = prev_exploit_ai_pref
+
+            # Info diversity
+            info_div = res.get("info_diversity", np.array([]))
+            if info_div.ndim >= 3 and info_div.shape[1] > 0:
+                curr_info_div = np.mean([info_div[:, -1, 1], info_div[:, -1, 2]])
+            else:
+                curr_info_div = prev_info_div
+
+            # Detect tipping points (only if not already detected)
+            if i > 0:
+                # AI trust overtakes friend trust
+                if tipping_points['AI Trust > Friend Trust'] is None:
+                    if prev_ai_trust < prev_friend_trust and curr_ai_trust > curr_friend_trust:
+                        tipping_points['AI Trust > Friend Trust'] = (param_values[i-1] + param_val) / 2
+
+                # SECI crosses zero (social bubble breaks)
+                if tipping_points['Social Bubble Breaks (SECI→0)'] is None:
+                    if prev_seci < -0.05 and curr_seci > -0.05:
+                        tipping_points['Social Bubble Breaks (SECI→0)'] = (param_values[i-1] + param_val) / 2
+
+                # AECI crosses zero (AI bubble breaks)
+                if tipping_points['AI Bubble Breaks (AECI→0)'] is None:
+                    if prev_aeci_var < -0.05 and curr_aeci_var > -0.05:
+                        tipping_points['AI Bubble Breaks (AECI→0)'] = (param_values[i-1] + param_val) / 2
+
+                # Exploiters prefer AI (AECI > 0.5)
+                if tipping_points['Exploiters Prefer AI'] is None:
+                    if prev_exploit_ai_pref < 0.5 and curr_exploit_ai_pref >= 0.5:
+                        tipping_points['Exploiters Prefer AI'] = (param_values[i-1] + param_val) / 2
+
+                # Info diversity surge (50% increase)
+                if tipping_points['Info Diversity Surge'] is None:
+                    if prev_info_div > 0 and curr_info_div / prev_info_div > 1.5:
+                        tipping_points['Info Diversity Surge'] = (param_values[i-1] + param_val) / 2
+
+            # Update previous values
+            prev_ai_trust = curr_ai_trust
+            prev_friend_trust = curr_friend_trust
+            prev_seci = curr_seci
+            prev_aeci_var = curr_aeci_var
+            prev_exploit_ai_pref = curr_exploit_ai_pref
+            prev_info_div = curr_info_div
+
+        # Plot tipping points as vertical lines
+        colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A', '#98D8C8']
+        y_positions = [0.8, 0.6, 0.4, 0.2, 0.1]
+
+        for (label, tp_value), color, y_pos in zip(tipping_points.items(), colors, y_positions):
+            if tp_value is not None:
+                ax.axvline(tp_value, color=color, linestyle='--', linewidth=2.5, alpha=0.8, label=label)
+                ax.text(tp_value, y_pos, f'{tp_value:.3f}',
+                       rotation=90, verticalalignment='bottom', fontsize=10,
+                       bbox=dict(boxstyle='round', facecolor=color, alpha=0.3))
+
+        # Formatting
+        ax.set_xlim(min(param_values), max(param_values))
+        ax.set_ylim(0, 1)
+        ax.set_xlabel(param_name, fontsize=13, fontweight='bold')
+        ax.set_ylabel("Tipping Point Cascade", fontsize=13, fontweight='bold')
+        ax.set_title(f"Sequential Behavioral Transitions vs {param_name}\n(Critical Points Where System Dynamics Shift)",
+                    fontsize=14, fontweight='bold')
+        ax.legend(loc='upper left', fontsize=10, framealpha=0.9)
+        ax.grid(True, axis='x', alpha=0.3, linestyle=':')
+        ax.set_yticks([])
+
+        # Add shaded regions for qualitative regimes
+        if len([v for v in tipping_points.values() if v is not None]) > 0:
+            first_tp = min([v for v in tipping_points.values() if v is not None])
+            last_tp = max([v for v in tipping_points.values() if v is not None])
+
+            ax.axvspan(min(param_values), first_tp, alpha=0.1, color='red', label='Pre-transition')
+            ax.axvspan(first_tp, last_tp, alpha=0.1, color='yellow', label='Transition zone')
+            ax.axvspan(last_tp, max(param_values), alpha=0.1, color='green', label='Post-transition')
+
+        plt.tight_layout()
+        plt.savefig("agent_model_results/tipping_point_waterfall.png", dpi=300, bbox_inches='tight')
+        print("Tipping point waterfall saved successfully")
+        print(f"\nDetected tipping points:")
+        for label, value in tipping_points.items():
+            if value is not None:
+                print(f"  {label}: {param_name} = {value:.3f}")
+            else:
+                print(f"  {label}: Not detected")
+        plt.close()
+
+    except Exception as e:
+        print(f"Error in plot_tipping_point_waterfall: {e}")
+        import traceback
+        traceback.print_exc()
+
+
 def debug_aeci_variance_data(results_dict, title_suffix=""):
     """Inspects and prints detailed AECI variance data structure"""
     print(f"\n=== AECI Variance Data Inspection for {title_suffix} ===")
@@ -6882,6 +7270,11 @@ if __name__ == "__main__":
         #print(f"\n--- Plotting Boxplot Summaries for {param_name_b} ---")
         #plot_summary_echo_indices_vs_alignment(results_b, all_alignment_values, title_suffix="Tipping Points")
         #plot_summary_performance_vs_alignment(results_b, all_alignment_values, title_suffix="Tipping Points")
+
+        # NEW: Advanced bubble mechanics visualizations
+        #print(f"\n--- Plotting Advanced Bubble Mechanics for {param_name_b} ---")
+        #plot_phase_diagram_bubbles(results_b, all_alignment_values, param_name="AI Alignment")
+        #plot_tipping_point_waterfall(results_b, all_alignment_values, param_name="AI Alignment")
 
     # --- Plot Aggregated Time Evolution for EACH Alignment Level ---
     #print(f"\n--- Plotting Aggregated Time Evolution for {param_name_b} ---")
