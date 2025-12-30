@@ -7061,6 +7061,10 @@ def plot_tipping_point_waterfall(results_dict, param_values, param_name="AI Alig
         prev_exploit_ai_pref = 0
         prev_info_div = 0
 
+        # Diagnostic output
+        print(f"\n=== Tipping Point Detection Diagnostics ===")
+        print(f"Looking for transitions across {len(param_values)} parameter values: {param_values}")
+
         for i, param_val in enumerate(sorted(param_values)):
             res = results_dict.get(param_val, {})
 
@@ -7107,8 +7111,21 @@ def plot_tipping_point_waterfall(results_dict, param_values, param_name="AI Alig
             else:
                 curr_info_div = prev_info_div
 
+            # Diagnostic output for each parameter value
+            print(f"\n{param_name}={param_val:.2f}:")
+            print(f"  AI trust: {curr_ai_trust:.4f}, Friend trust: {curr_friend_trust:.4f}, Diff: {curr_ai_trust - curr_friend_trust:.4f}")
+            print(f"  SECI: {curr_seci:.4f}, AECI-Var: {curr_aeci_var:.4f}")
+            print(f"  Exploit AI pref: {curr_exploit_ai_pref:.4f}, Info div: {curr_info_div:.4f}")
+
             # Detect tipping points (only if not already detected)
             if i > 0:
+                print(f"  Checking transitions from previous parameter value:")
+                print(f"    AI > Friend? prev: AI={prev_ai_trust:.4f} < Friend={prev_friend_trust:.4f} → curr: AI={curr_ai_trust:.4f} > Friend={curr_friend_trust:.4f}? {prev_ai_trust < prev_friend_trust and curr_ai_trust > curr_friend_trust}")
+                print(f"    SECI→0? prev: {prev_seci:.4f} < -0.05 → curr: {curr_seci:.4f} > -0.05? {prev_seci < -0.05 and curr_seci > -0.05}")
+                print(f"    AECI→0? prev: {prev_aeci_var:.4f} < -0.05 → curr: {curr_aeci_var:.4f} > -0.05? {prev_aeci_var < -0.05 and curr_aeci_var > -0.05}")
+                print(f"    Exploit prefer AI? prev: {prev_exploit_ai_pref:.4f} < 0.5 → curr: {curr_exploit_ai_pref:.4f} >= 0.5? {prev_exploit_ai_pref < 0.5 and curr_exploit_ai_pref >= 0.5}")
+                print(f"    Info surge? prev: {prev_info_div:.4f} → curr: {curr_info_div:.4f} (ratio: {curr_info_div/prev_info_div if prev_info_div > 0 else 0:.2f}x)? {prev_info_div > 0 and curr_info_div / prev_info_div > 1.5}")
+
                 # AI trust overtakes friend trust
                 if tipping_points['AI Trust > Friend Trust'] is None:
                     if prev_ai_trust < prev_friend_trust and curr_ai_trust > curr_friend_trust:
@@ -7133,6 +7150,8 @@ def plot_tipping_point_waterfall(results_dict, param_values, param_name="AI Alig
                 if tipping_points['Info Diversity Surge'] is None:
                     if prev_info_div > 0 and curr_info_div / prev_info_div > 1.5:
                         tipping_points['Info Diversity Surge'] = (param_values[i-1] + param_val) / 2
+            else:
+                print(f"  (First parameter value - establishing baseline)")
 
             # Update previous values
             prev_ai_trust = curr_ai_trust
