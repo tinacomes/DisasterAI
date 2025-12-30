@@ -7304,7 +7304,7 @@ if __name__ == "__main__":
         "exploit_friend_bias": 0.1,
         "exploit_self_bias": 0.1
     }
-    num_runs = 2
+    num_runs = 10  # Standard for statistically meaningful results
     save_dir = "agent_model_results"
     os.makedirs(save_dir, exist_ok=True)
 
