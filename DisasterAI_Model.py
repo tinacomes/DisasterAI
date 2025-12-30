@@ -7190,236 +7190,189 @@ if __name__ == "__main__":
     ##############################################
     # Experiment A: Vary share_exploitative
     ##############################################
-   # share_values = [0.3, 0.6]
-   # file_a_pkl = os.path.join(save_dir, "results_experiment_A.pkl")
-   # file_a_csv = os.path.join(save_dir, "results_experiment_A.csv")
+    share_values = [0.3, 0.6]
+    file_a_pkl = os.path.join(save_dir, "results_experiment_A.pkl")
+    file_a_csv = os.path.join(save_dir, "results_experiment_A.csv")
 
-   # param_name_a = "Share Exploitative"
-  #  print("Running Experiment A...")
-   # results_a = experiment_share_exploitative(base_params, share_values, num_runs)
-   # with open(file_a_pkl, "wb") as f:
-  #      pickle.dump(results_a, f)
-  #  export_results_to_csv(results_a, share_values, file_a_csv, "Experiment A")
+    param_name_a = "Share Exploitative"
+    print("Running Experiment A...")
+    results_a = experiment_share_exploitative(base_params, share_values, num_runs)
+    with open(file_a_pkl, "wb") as f:
+        pickle.dump(results_a, f)
+    export_results_to_csv(results_a, share_values, file_a_csv, "Experiment A")
 
- #   print("\n--- Plotting Aggregated Time Evolution for Experiment A ---")
-  #  for share in share_values:
-  #      print(f"{param_name_a} = {share}")
- #       # Load data for this parameter setting from the saved dictionary
-  #      results_dict = results_a.get(share, {})
- #       title_suffix = f"({param_name_a}={share})"
+    print("\n--- Plotting Aggregated Time Evolution for Experiment A ---")
+    for share in share_values:
+        print(f"{param_name_a} = {share}")
+        results_dict = results_a.get(share, {})
+        title_suffix = f"({param_name_a}={share})"
 
- #       if results_dict:
-            # Call  consolidated plot functions
-       #     plot_simulation_overview(results_dict, title_suffix)
-            # Ensure your aggregation collects component data for this one:
-      #      plot_echo_chamber_indices(results_dict, title_suffix)
-            # Call the original trust plot function (it's already well-structured)
-      #      plot_trust_evolution(results_dict["trust_stats"], title_suffix)
-
-            # Optional: Call final state bar plot for assistance
-            # if "assist" in results_dict and "raw_assist_counts" in results_dict:
-            #    plot_assistance_bars(results_dict["assist"], results_dict["raw_assist_counts"], title_suffix)
-
-      #  else:
-       #     print(f"  Skipping plots for {param_name_a}={share} (missing data)")
+        if results_dict:
+            # Call consolidated plot functions
+            plot_simulation_overview(results_dict, title_suffix)
+            plot_echo_chamber_indices(results_dict, title_suffix)
+            plot_trust_evolution(results_dict["trust_stats"], title_suffix)
+        else:
+            print(f"  Skipping plots for {param_name_a}={share} (missing data)")
 
     # --- Plot SUMMARY Comparisons Across Parameters (AFTER LOOP) ---
-   # print("\n--- Plotting Summary Comparisons for Experiment A ---")
-    # Plot how correct token share changes with the parameter
-   # if results_a: # Check if results exist before plotting summary
-    #    plot_correct_token_shares_bars(results_a, share_values)
+    print("\n--- Plotting Summary Comparisons for Experiment A ---")
+    if results_a:
+        plot_correct_token_shares_bars(results_a, share_values)
 
-    # Add these lines to Experiment A's plotting section:
-   # print("\n--- Plotting Boxplot Summaries for Experiment A ---")
-    # Create temporary versions of boxplot functions that work with share values instead of alignment values
-  #  plot_summary_echo_indices_by_share = lambda results, shares, suffix: plot_summary_echo_indices_vs_alignment(
-  #      results, shares, f"Share Exploitative {suffix}")
-  #  plot_summary_performance_by_share = lambda results, shares, suffix: plot_summary_performance_vs_alignment(
-    #    results, shares, f"Share Exploitative {suffix}")
-
-    # Call the adapted functions
- #   plot_summary_echo_indices_by_share(results_a, share_values, "")
-  #  plot_summary_performance_by_share(results_a, share_values, "")
+        # NEW: Advanced bubble mechanics visualizations
+        print("\n--- Plotting Advanced Bubble Mechanics for Experiment A ---")
+        plot_phase_diagram_bubbles(results_a, share_values, param_name="Share Exploitative")
+        plot_tipping_point_waterfall(results_a, share_values, param_name="Share Exploitative")
 
     ##############################################
     # Experiment B: Vary AI Alignment Level
     ##############################################
+    alignment_values = [0.0, 0.25, 0.5, 0.75, 0.95]  # Initial scan
+    param_name_b = "AI Alignment Tipping Point"
+    file_b_pkl = os.path.join(save_dir, f"results_{param_name_b.replace(' ','_')}.pkl")
 
-    #alignment_values = [0.0, 0.25, 0.5, 0.75, 0.95]  # Initial scan
-    #param_name_b = "AI Alignment Tipping Point"
-    #file_b_pkl = os.path.join(save_dir, f"results_{param_name_b.replace(' ','_')}.pkl")
-
-    #print(f"\nRunning {param_name_b} Experiment...")
-    #results_b = experiment_alignment_tipping_point(base_params, alignment_values, num_runs=10)
+    print(f"\nRunning {param_name_b} Experiment...")
+    results_b = experiment_alignment_tipping_point(base_params, alignment_values, num_runs=10)
 
     # Save results
-    #with open(file_b_pkl, "wb") as f:
-        #pickle.dump(results_b, f)
+    with open(file_b_pkl, "wb") as f:
+        pickle.dump(results_b, f)
 
     # Get all alignment values (including fine-grained ones added by tipping point detection)
-    #all_alignment_values = sorted(list(results_b.keys()))
+    all_alignment_values = sorted(list(results_b.keys()))
 
     # --- Plot SUMMARY Comparisons (only once, after getting all results) ---
-    #print(f"\n--- Plotting Summary Comparisons for {param_name_b} ---")
-    #if results_b:
+    print(f"\n--- Plotting Summary Comparisons for {param_name_b} ---")
+    if results_b:
         # Use all alignment values found in results
-        #plot_final_echo_indices_vs_alignment(results_b, all_alignment_values, title_suffix="Tipping Points")
-        #plot_average_performance_vs_alignment(results_b, all_alignment_values, title_suffix="Tipping Points")
+        plot_final_echo_indices_vs_alignment(results_b, all_alignment_values, title_suffix="Tipping Points")
+        plot_average_performance_vs_alignment(results_b, all_alignment_values, title_suffix="Tipping Points")
 
         # Boxplot summaries
-        #print(f"\n--- Plotting Boxplot Summaries for {param_name_b} ---")
-        #plot_summary_echo_indices_vs_alignment(results_b, all_alignment_values, title_suffix="Tipping Points")
-        #plot_summary_performance_vs_alignment(results_b, all_alignment_values, title_suffix="Tipping Points")
+        print(f"\n--- Plotting Boxplot Summaries for {param_name_b} ---")
+        plot_summary_echo_indices_vs_alignment(results_b, all_alignment_values, title_suffix="Tipping Points")
+        plot_summary_performance_vs_alignment(results_b, all_alignment_values, title_suffix="Tipping Points")
 
         # NEW: Advanced bubble mechanics visualizations
-        #print(f"\n--- Plotting Advanced Bubble Mechanics for {param_name_b} ---")
-        #plot_phase_diagram_bubbles(results_b, all_alignment_values, param_name="AI Alignment")
-        #plot_tipping_point_waterfall(results_b, all_alignment_values, param_name="AI Alignment")
-
-    # --- Plot Aggregated Time Evolution for EACH Alignment Level ---
-    #print(f"\n--- Plotting Aggregated Time Evolution for {param_name_b} ---")
-    #for align in all_alignment_values:  # Use all values, not just the initial ones
-       # print(f"{param_name_b} = {align}")
-        #results_dict = results_b.get(align, {})
-       # title_suffix = f"(AI Alignment={align})"
-
-       # if results_dict:
-            # Call the consolidated plotting functions
-           # plot_simulation_overview(results_dict, title_suffix)
-           # plot_trust_evolution(results_dict.get("trust_stats"), title_suffix)
-           # plot_echo_chamber_indices(results_dict, title_suffix)
-           # plot_component_seci_distribution(results_dict, title_suffix)
-
-            # Generate trust vs alignment plot
-         #   model_params = base_params.copy()
-         #   model_params["ai_alignment_level"] = align
-         #   temp_model = run_simulation(model_params)
-         #   plot_ai_trust_vs_alignment(temp_model, save_dir=f"{save_dir}/trust_plots")
-         #   del temp_model
-       # else:
-         #   print(f"  Skipping plots for {param_name_b}={align} (missing data)")
-
-    # Optional: Create a comparison plot of component SECI across all alignment values
-    #if results_b:
-     #   plot_component_seci_comparison(results_b, all_alignment_values, title_suffix="Tipping Points")
+        print(f"\n--- Plotting Advanced Bubble Mechanics for {param_name_b} ---")
+        plot_phase_diagram_bubbles(results_b, all_alignment_values, param_name="AI Alignment")
+        plot_tipping_point_waterfall(results_b, all_alignment_values, param_name="AI Alignment")
 
     ##############################################
     # Experiment C: Vary Disaster Dynamics and Shock Magnitude
     ##############################################
-    print("\n=== STARTING EXPERIMENT C ===")
-
-    try:
-        dynamics_values = [1, 2, 3]
-        shock_values = [1, 2, 3]
-        
-        print(f"Running experiment with {len(dynamics_values)}x{len(shock_values)} parameter combinations...")
-        results_c = experiment_disaster_dynamics(base_params, dynamics_values, shock_values, num_runs)
-        
-        print(f"Got results for {len(results_c)} parameter combinations")
-        
-        # Debug the structure of results_c
-        print("Parameter combinations in results_c:")
-        for key in sorted(results_c.keys()):
-            print(f"  {key}: {type(results_c[key])}")
-        
-        # Generate visualizations with robust error handling
-        print("\n--- Creating Visualizations ---")
-        
-        try:
-            print("Generating comprehensive analysis...")
-            plot_experiment_c_comprehensive(results_c, dynamics_values, shock_values)
-            print("Comprehensive analysis complete")
-        except Exception as e:
-            print(f"Error in comprehensive analysis: {e}")
-            import traceback
-            traceback.print_exc()
-        
-        try:
-            print("Generating evolution plots...")
-            plot_experiment_c_evolution(results_c, dynamics_values, shock_values)
-            print("Evolution plots complete")
-        except Exception as e:
-            print(f"Error in evolution plots: {e}")
-            import traceback
-            traceback.print_exc()
-        
-        # Debug one specific parameter combination
-        if (1, 1) in results_c:
-            print("\nExamining data for dynamics=1, shock=1:")
-            sample_result = results_c[(1, 1)]
-            for key in sorted(sample_result.keys()):
-                if isinstance(sample_result[key], np.ndarray):
-                    print(f"  {key}: ndarray with shape {sample_result[key].shape}")
-                elif isinstance(sample_result[key], list):
-                    print(f"  {key}: list with {len(sample_result[key])} items")
-                else:
-                    print(f"  {key}: {type(sample_result[key])}")
-
-    except Exception as e:
-        print(f"Experiment C failed: {e}")
-        import traceback
-        traceback.print_exc()
-
-    print("=== EXPERIMENT C COMPLETED ===")
+    # COMMENTED OUT - Focus on Experiments A and B
+    # print("\n=== STARTING EXPERIMENT C ===")
+    #
+    # try:
+    #     dynamics_values = [1, 2, 3]
+    #     shock_values = [1, 2, 3]
+    #
+    #     print(f"Running experiment with {len(dynamics_values)}x{len(shock_values)} parameter combinations...")
+    #     results_c = experiment_disaster_dynamics(base_params, dynamics_values, shock_values, num_runs)
+    #
+    #     print(f"Got results for {len(results_c)} parameter combinations")
+    #
+    #     # Debug the structure of results_c
+    #     print("Parameter combinations in results_c:")
+    #     for key in sorted(results_c.keys()):
+    #         print(f"  {key}: {type(results_c[key])}")
+    #
+    #     # Generate visualizations with robust error handling
+    #     print("\n--- Creating Visualizations ---")
+    #
+    #     try:
+    #         print("Generating comprehensive analysis...")
+    #         plot_experiment_c_comprehensive(results_c, dynamics_values, shock_values)
+    #         print("Comprehensive analysis complete")
+    #     except Exception as e:
+    #         print(f"Error in comprehensive analysis: {e}")
+    #         import traceback
+    #         traceback.print_exc()
+    #
+    #     try:
+    #         print("Generating evolution plots...")
+    #         plot_experiment_c_evolution(results_c, dynamics_values, shock_values)
+    #         print("Evolution plots complete")
+    #     except Exception as e:
+    #         print(f"Error in evolution plots: {e}")
+    #         import traceback
+    #         traceback.print_exc()
+    #
+    #     # Debug one specific parameter combination
+    #     if (1, 1) in results_c:
+    #         print("\nExamining data for dynamics=1, shock=1:")
+    #         sample_result = results_c[(1, 1)]
+    #         for key in sorted(sample_result.keys()):
+    #             if isinstance(sample_result[key], np.ndarray):
+    #                 print(f"  {key}: ndarray with shape {sample_result[key].shape}")
+    #             elif isinstance(sample_result[key], list):
+    #                 print(f"  {key}: list with {len(sample_result[key])} items")
+    #             else:
+    #                 print(f"  {key}: {type(sample_result[key])}")
+    #
+    # except Exception as e:
+    #     print(f"Experiment C failed: {e}")
+    #     import traceback
+    #     traceback.print_exc()
+    #
+    # print("=== EXPERIMENT C COMPLETED ===")
 
     ##############################################
     # Experiment D: Vary Learning Rate and Epsilon
     ##############################################
-    learning_rate_values = [0.03, 0.05, 0.07]
-    epsilon_values = [0.2, 0.3]
-    results_d = experiment_learning_trust(base_params, learning_rate_values, epsilon_values, num_runs)
+    # COMMENTED OUT - Focus on Experiments A and B
+    # learning_rate_values = [0.03, 0.05, 0.07]
+    # epsilon_values = [0.2, 0.3]
+    # results_d = experiment_learning_trust(base_params, learning_rate_values, epsilon_values, num_runs)
+    #
+    # # --- Plot 1: Final SECI vs LR/Epsilon (Bar Chart) ---
+    # fig_d_seci, ax_d_seci = plt.subplots(1, 2, figsize=(12, 5), sharey=True)
+    # fig_d_seci.suptitle("Experiment D: Final SECI vs Learning Rate / Epsilon (Mean & IQR)")
+    # bar_width = 0.35
+    #
+    # for idx, eps in enumerate(epsilon_values):
+    #     means_exploit = []; errors_exploit = [[],[]]
+    #     means_explor = []; errors_explor = [[],[]]
+    #
+    #     for lr in learning_rate_values:
+    #         res_key = (lr, eps)
+    #         if res_key not in results_d: continue
+    #         res = results_d[res_key]
+    #
+    #         if res["seci"].ndim >= 3 and res["seci"].shape[1] > 0:
+    #             seci_exploit_final = res["seci"][:, -1, 1]
+    #             seci_explor_final = res["seci"][:, -1, 2]
+    #
+    #             mean_exp = np.mean(seci_exploit_final); p25_exp = np.percentile(seci_exploit_final, 25); p75_exp = np.percentile(seci_exploit_final, 75)
+    #             mean_er = np.mean(seci_explor_final); p25_er = np.percentile(seci_explor_final, 25); p75_er = np.percentile(seci_explor_final, 75)
+    #
+    #             means_exploit.append(mean_exp); errors_exploit[0].append(mean_exp-p25_exp); errors_exploit[1].append(p75_exp-mean_exp)
+    #             means_explor.append(mean_er); errors_explor[0].append(mean_er-p25_er); errors_explor[1].append(p75_er-mean_er)
+    #         else:
+    #             means_exploit.append(0); errors_exploit[0].append(0); errors_exploit[1].append(0)
+    #             means_explor.append(0); errors_explor[0].append(0); errors_explor[1].append(0)
+    #
+    #     x_pos = np.arange(len(learning_rate_values))
+    #     ax = ax_d_seci[idx]
+    #     rects1 = ax.bar(x_pos - bar_width/2, means_exploit, bar_width, yerr=errors_exploit, capsize=4, label='Exploitative', color='tab:blue', error_kw=dict(alpha=0.5))
+    #     rects2 = ax.bar(x_pos + bar_width/2, means_explor, bar_width, yerr=errors_explor, capsize=4, label='Exploratory', color='tab:orange', error_kw=dict(alpha=0.5))
+    #
+    #     ax.set_xlabel("Learning Rate")
+    #     ax.set_ylabel("Mean Final SECI")
+    #     ax.set_title(f"Epsilon = {eps}")
+    #     ax.set_xticks(x_pos)
+    #     ax.set_xticklabels(learning_rate_values)
+    #     ax.legend()
+    #     ax.grid(True, axis='y', linestyle='--', alpha=0.6)
+    #     ax.set_ylim(bottom=0)
+    #
+    # plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+    # plt.savefig("agent_model_results/experiment_d_seci.png")
+    # plt.close(fig_d_seci)
+    # gc.collect()
 
-    # --- Plot 1: Final SECI vs LR/Epsilon (Bar Chart) ---
-    fig_d_seci, ax_d_seci = plt.subplots(1, 2, figsize=(12, 5), sharey=True)
-    fig_d_seci.suptitle("Experiment D: Final SECI vs Learning Rate / Epsilon (Mean & IQR)")
-    bar_width = 0.35
-
-    for idx, eps in enumerate(epsilon_values):
-        means_exploit = []; errors_exploit = [[],[]] # [lower_err, upper_err]
-        means_explor = []; errors_explor = [[],[]]
-
-        for lr in learning_rate_values:
-            res_key = (lr, eps)
-            # Fix the variable name here - from 'resubase_confidence_bumplts_d' to 'results_d'
-            if res_key not in results_d: continue
-            res = results_d[res_key]
-
-            # Extract Final SECI values per run
-            # Assumes seci array shape (runs, ticks_recorded, 3) -> [tick, exploit, explor]
-            if res["seci"].ndim >= 3 and res["seci"].shape[1] > 0:
-                seci_exploit_final = res["seci"][:, -1, 1] # Last tick's exploit SECI for all runs
-                seci_explor_final = res["seci"][:, -1, 2] # Last tick's explor SECI for all runs
-
-                # Calculate stats
-                mean_exp = np.mean(seci_exploit_final); p25_exp = np.percentile(seci_exploit_final, 25); p75_exp = np.percentile(seci_exploit_final, 75)
-                mean_er = np.mean(seci_explor_final); p25_er = np.percentile(seci_explor_final, 25); p75_er = np.percentile(seci_explor_final, 75)
-
-                means_exploit.append(mean_exp); errors_exploit[0].append(mean_exp-p25_exp); errors_exploit[1].append(p75_exp-mean_exp)
-                means_explor.append(mean_er); errors_explor[0].append(mean_er-p25_er); errors_explor[1].append(p75_er-mean_er)
-            else:
-                means_exploit.append(0); errors_exploit[0].append(0); errors_exploit[1].append(0)
-                means_explor.append(0); errors_explor[0].append(0); errors_explor[1].append(0)
-
-        x_pos = np.arange(len(learning_rate_values))
-        ax = ax_d_seci[idx] # Use subplot for each epsilon
-        rects1 = ax.bar(x_pos - bar_width/2, means_exploit, bar_width, yerr=errors_exploit, capsize=4, label='Exploitative', color='tab:blue', error_kw=dict(alpha=0.5))
-        rects2 = ax.bar(x_pos + bar_width/2, means_explor, bar_width, yerr=errors_explor, capsize=4, label='Exploratory', color='tab:orange', error_kw=dict(alpha=0.5))
-
-        ax.set_xlabel("Learning Rate")
-        ax.set_ylabel("Mean Final SECI")
-        ax.set_title(f"Epsilon = {eps}")
-        ax.set_xticks(x_pos)
-        ax.set_xticklabels(learning_rate_values)
-        ax.legend()
-        ax.grid(True, axis='y', linestyle='--', alpha=0.6)
-        ax.set_ylim(bottom=0)
-
-    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-    # Save the figure instead of just showing it
-    plt.savefig("agent_model_results/experiment_d_seci.png")
-    plt.close(fig_d_seci)
-
-    gc.collect()
-
+# Google Colab Drive mount (keep at end for saving results)
 from google.colab import drive
 drive.mount('/content/drive')
