@@ -124,12 +124,18 @@ def extract_echo_chamber_lifecycle(results_dict, param_values):
             peak_metrics['aeci_var_peak'] = aeci_var_mean[aeci_var_peak_idx]
             peak_metrics['aeci_var_peak_tick'] = aeci_var_peak_idx
 
-        # Chamber duration: ticks where SECI < -0.1 (moderate chamber threshold)
-        seci_exploit_chamber_ticks = np.sum(seci_exploit_mean < -0.1)
-        seci_explor_chamber_ticks = np.sum(seci_explor_mean < -0.1)
+        # Chamber metrics: Use data-driven approach instead of arbitrary threshold
+        # Calculate "significant chamber" as ticks where SECI is in bottom 25% of its range
+        seci_exploit_p25 = np.percentile(seci_exploit_mean, 25)
+        seci_explor_p25 = np.percentile(seci_explor_mean, 25)
+
+        seci_exploit_chamber_ticks = np.sum(seci_exploit_mean < seci_exploit_p25)
+        seci_explor_chamber_ticks = np.sum(seci_explor_mean < seci_explor_p25)
 
         peak_metrics['seci_exploit_duration'] = seci_exploit_chamber_ticks
         peak_metrics['seci_explor_duration'] = seci_explor_chamber_ticks
+        peak_metrics['seci_exploit_threshold'] = seci_exploit_p25
+        peak_metrics['seci_explor_threshold'] = seci_explor_p25
 
         lifecycle_data['peak_metrics'][param_val] = peak_metrics
 
@@ -137,7 +143,7 @@ def extract_echo_chamber_lifecycle(results_dict, param_values):
         print(f"  SECI explor peak: {peak_metrics['seci_explor_peak']:.3f} at tick {peak_metrics['seci_explor_peak_tick']}")
         if 'aeci_var_peak' in peak_metrics:
             print(f"  AECI-Var peak: {peak_metrics['aeci_var_peak']:.3f} at tick {peak_metrics['aeci_var_peak_tick']}")
-        print(f"  Chamber duration (SECI<-0.1): exploit={seci_exploit_chamber_ticks} ticks, explor={seci_explor_chamber_ticks} ticks")
+        print(f"  Chamber duration (SECI < p25={seci_exploit_p25:.3f}): exploit={seci_exploit_chamber_ticks} ticks, explor={seci_explor_chamber_ticks} ticks")
 
     return lifecycle_data
 
@@ -180,7 +186,6 @@ def plot_echo_chamber_evolution(lifecycle_data, param_values, param_name="AI Ali
                          color=colors[i], alpha=0.2)
 
     ax1.axhline(y=0, color='black', linestyle='--', linewidth=1, alpha=0.5, label='Neutral (SECI=0)')
-    ax1.axhline(y=-0.1, color='red', linestyle=':', linewidth=1, alpha=0.5, label='Chamber threshold')
 
     ax1.set_xlabel("Simulation Tick", fontsize=12, fontweight='bold')
     ax1.set_ylabel("SECI (Social Echo Chamber Index)", fontsize=12, fontweight='bold')
@@ -190,8 +195,11 @@ def plot_echo_chamber_evolution(lifecycle_data, param_values, param_name="AI Ali
     ax1.set_ylim([-0.5, 0.2])
 
     # Add annotations
-    ax1.text(0.02, 0.98, "📉 Negative SECI = Social homophily\n(agents prefer similar friends)",
-             transform=ax1.transAxes, fontsize=9, verticalalignment='top',
+    ax1.text(0.02, 0.98, "📉 Negative SECI = Friend network homophily\n"
+             "(friends have lower belief variance than population)\n\n"
+             "⚠️  Limited alignment sensitivity:\n"
+             "Social network is fixed at initialization",
+             transform=ax1.transAxes, fontsize=8, verticalalignment='top',
              bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.3))
 
     # ========================================
@@ -211,8 +219,7 @@ def plot_echo_chamber_evolution(lifecycle_data, param_values, param_name="AI Ali
         ax2.fill_between(ticks, mean_explor - std_explor, mean_explor + std_explor,
                          color=colors[i], alpha=0.2)
 
-    ax2.axhline(y=0, color='black', linestyle='--', linewidth=1, alpha=0.5)
-    ax2.axhline(y=-0.1, color='red', linestyle=':', linewidth=1, alpha=0.5)
+    ax2.axhline(y=0, color='black', linestyle='--', linewidth=1, alpha=0.5, label='Neutral (SECI=0)')
 
     ax2.set_xlabel("Simulation Tick", fontsize=12, fontweight='bold')
     ax2.set_ylabel("SECI (Social Echo Chamber Index)", fontsize=12, fontweight='bold')
@@ -332,8 +339,8 @@ def plot_echo_chamber_evolution(lifecycle_data, param_values, param_name="AI Ali
             color='lightgreen', alpha=0.8, edgecolor='black')
 
     ax6.set_xlabel(param_name, fontsize=11, fontweight='bold')
-    ax6.set_ylabel("Duration (ticks with SECI<-0.1)", fontsize=11, fontweight='bold')
-    ax6.set_title("How Long Do Chambers Persist?", fontsize=12, fontweight='bold')
+    ax6.set_ylabel("Duration (ticks in bottom quartile)", fontsize=11, fontweight='bold')
+    ax6.set_title("How Long Do Chambers Persist?\n(Data-driven threshold: 25th percentile)", fontsize=11, fontweight='bold')
     ax6.set_xticks(x)
     ax6.set_xticklabels(param_values)
     ax6.legend(loc='best', fontsize=9)
