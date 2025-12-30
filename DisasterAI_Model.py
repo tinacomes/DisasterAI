@@ -1418,10 +1418,11 @@ class HumanAgent(Agent):
 
 
 class AIAgent(Agent):
-    def __init__(self, unique_id, model):
+    def __init__(self, unique_id, model, bias=0.0):
         super(AIAgent, self).__init__(model)
         self.unique_id = unique_id
         self.model = model
+        self.bias = bias  # Systematic directional bias for this AI (e.g., -2 to +2)
         self.memory = {}
         self.sensed = {}
         self.total_cells = self.model.width * self.model.height
@@ -1642,7 +1643,16 @@ class AIAgent(Agent):
             corrected = np.round(sensed_vals + adjustments)
             corrected = np.clip(corrected, 0, 5)  # Keep values in valid range
 
-        # Build the report dictionary with aligned values
+        # --- NEW: Apply systematic AI bias ---
+        # This is a directional offset applied to ALL responses from this AI
+        # bias > 0: Overestimates (alarmist AI)
+        # bias < 0: Underestimates (minimizer AI)
+        # bias = 0: No systematic bias
+        if hasattr(self, 'bias') and self.bias != 0:
+            corrected = corrected + self.bias
+            corrected = np.clip(corrected, 0, 5)  # Keep in valid range
+
+        # Build the report dictionary with aligned and biased values
         for i, cell in enumerate(valid_cells_in_query):
             report[cell] = int(corrected[i])
 
@@ -1665,6 +1675,7 @@ class DisasterModel(Model):
                  shock_magnitude=2,
                  trust_update_mode="average",
                  ai_alignment_level=0.3,
+                 ai_bias_spread=0.0,  # NEW: Heterogeneous AI biases (0=all neutral, 2=high diversity)
                  low_trust_amplification_factor=0.3,
                  exploitative_correction_factor=1.0,
                  width=30, height=30,
@@ -1698,6 +1709,7 @@ class DisasterModel(Model):
         self.trust_update_mode = trust_update_mode
         self.exploitative_correction_factor = exploitative_correction_factor
         self.ai_alignment_level = ai_alignment_level
+        self.ai_bias_spread = ai_bias_spread  # NEW: Spread of AI biases
         self.lambda_parameter = lambda_parameter
         self.learning_rate = learning_rate
         self.epsilon = epsilon
@@ -1839,11 +1851,24 @@ class DisasterModel(Model):
                 agent_rumor = self.agent_rumors.get(agent.unique_id, None)
                 agent.initialize_beliefs(assigned_rumor=agent_rumor) # Pass rumor details
 
-       # Create AI agents.
+       # Create AI agents with heterogeneous biases
         self.ais = {}
         for k in range(self.num_ai):
-            ai_agent = AIAgent(unique_id=f"A_{k}", model=self)
+            # Calculate systematic bias for this AI
+            # Distribute biases evenly from -bias_spread to +bias_spread
+            # For 5 AIs with bias_spread=2.0: [-2.0, -1.0, 0.0, +1.0, +2.0]
+            if self.num_ai > 1:
+                position = k / (self.num_ai - 1)  # 0.0 to 1.0
+                bias = (position - 0.5) * 2 * self.ai_bias_spread  # -spread to +spread
+            else:
+                bias = 0.0  # Single AI has no bias
+
+            ai_agent = AIAgent(unique_id=f"A_{k}", model=self, bias=bias)
             self.ais[f"A_{k}"] = ai_agent
+
+            # Debug output
+            if k == 0 or k == self.num_ai - 1:  # Print first and last AI
+                print(f"  Created {ai_agent.unique_id} with bias={bias:.2f}")
             self.agent_list.append(ai_agent)
             pos = (random.randrange(width), random.randrange(height))
             self.grid.place_agent(ai_agent, pos)
@@ -3844,6 +3869,49 @@ def experiment_ai_alignment(base_params, alignment_values, num_runs=20):
         params["ai_alignment_level"] = align
         print(f"Running ai_alignment_level = {align}")
         results[align] = aggregate_simulation_results(num_runs, params)
+    return results
+
+def experiment_heterogeneous_ai_bias(base_params, bias_spread_values, num_runs=20):
+    """
+    Experiment B-bis: Test echo chamber formation with heterogeneous AI biases.
+
+    Tests whether agents self-select into different AI information sources with
+    different systematic biases, creating persistent echo chambers.
+
+    Args:
+        base_params: Base simulation parameters
+        bias_spread_values: List of bias spread values (e.g., [0.0, 0.5, 1.0, 1.5, 2.0])
+                           bias_spread=0: All AIs neutral [0, 0, 0, 0, 0]
+                           bias_spread=2: High diversity [-2, -1, 0, +1, +2]
+        num_runs: Number of simulation runs per bias_spread value
+
+    Returns:
+        dict: Results keyed by bias_spread value
+    """
+    results = {}
+
+    for bias_spread in bias_spread_values:
+        params = base_params.copy()
+        params["ai_bias_spread"] = bias_spread
+        params["ai_alignment_level"] = 0.0  # No confirmation bias, only systematic bias
+
+        # Calculate actual AI biases for reporting
+        num_ai = 5
+        ai_biases = [(i / (num_ai - 1) - 0.5) * 2 * bias_spread for i in range(num_ai)]
+
+        print(f"\n{'='*70}")
+        print(f"EXPERIMENT B-bis: Heterogeneous AI Bias")
+        print(f"  bias_spread = {bias_spread}")
+        print(f"  AI biases: {[f'{b:+.2f}' for b in ai_biases]}")
+        print(f"  alignment_level = {params['ai_alignment_level']} (systematic bias only)")
+        print(f"  {num_runs} runs")
+        print(f"{'='*70}")
+
+        result = aggregate_simulation_results(num_runs, params)
+        results[bias_spread] = result
+
+        print(f"✓ Completed bias_spread={bias_spread}")
+
     return results
 
 def experiment_disaster_dynamics(base_params, dynamics_values, shock_values, num_runs=20):
