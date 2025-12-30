@@ -6911,8 +6911,20 @@ def plot_phase_diagram_bubbles(results_dict, param_values, param_name="AI Alignm
         # Panel 1: Social Bubble Strength (SECI)
         ax = axes[0, 0]
         seci_combined = [(seci_exploit_final[i] + seci_explor_final[i]) / 2 for i in range(num_params)]
-        bars = ax.barh(range(num_params), seci_combined,
-                       color=['red' if v < -0.2 else 'yellow' if v < 0.1 else 'green' for v in seci_combined])
+
+        # Debug output
+        print(f"\nSocial Bubble Strength (SECI) values:")
+        for i, (param, val) in enumerate(zip(param_values, seci_combined)):
+            print(f"  {param_name}={param:.2f}: SECI={val:.4f}")
+
+        bars = ax.barh(range(num_params), seci_combined, height=0.6,
+                       color=['red' if v < -0.2 else 'yellow' if v < 0.1 else 'green' for v in seci_combined],
+                       edgecolor='black', linewidth=0.5)
+
+        # Add value labels on bars
+        for i, (bar, val) in enumerate(zip(bars, seci_combined)):
+            ax.text(val, i, f' {val:.3f}', va='center', fontsize=9)
+
         ax.set_yticks(range(num_params))
         ax.set_yticklabels([f"{v:.2f}" for v in param_values])
         ax.set_xlabel("SECI (Social Echo Chamber Index)", fontsize=11)
@@ -6923,8 +6935,20 @@ def plot_phase_diagram_bubbles(results_dict, param_values, param_name="AI Alignm
 
         # Panel 2: AI Bubble Strength (AECI-Var)
         ax = axes[0, 1]
-        bars = ax.barh(range(num_params), aeci_var_final,
-                      color=['blue' if v > 0.1 else 'white' if v > -0.1 else 'red' for v in aeci_var_final])
+
+        # Debug output
+        print(f"\nAI Bubble Strength (AECI-Var) values:")
+        for i, (param, val) in enumerate(zip(param_values, aeci_var_final)):
+            print(f"  {param_name}={param:.2f}: AECI-Var={val:.4f}")
+
+        bars = ax.barh(range(num_params), aeci_var_final, height=0.6,
+                      color=['blue' if v > 0.1 else 'white' if v > -0.1 else 'red' for v in aeci_var_final],
+                      edgecolor='black', linewidth=0.5)
+
+        # Add value labels on bars
+        for i, (bar, val) in enumerate(zip(bars, aeci_var_final)):
+            ax.text(val, i, f' {val:.3f}', va='center', fontsize=9)
+
         ax.set_yticks(range(num_params))
         ax.set_yticklabels([f"{v:.2f}" for v in param_values])
         ax.set_xlabel("AECI-Var (AI Echo Chamber Index)", fontsize=11)
@@ -6935,10 +6959,25 @@ def plot_phase_diagram_bubbles(results_dict, param_values, param_name="AI Alignm
 
         # Panel 3: Information Diversity
         ax = axes[1, 0]
+
+        # Debug output
+        print(f"\nInformation Diversity (Shannon Entropy) values:")
+        for i, (param, exploit, explor) in enumerate(zip(param_values, info_div_exploit_final, info_div_explor_final)):
+            print(f"  {param_name}={param:.2f}: Exploit={exploit:.4f}, Explor={explor:.4f}")
+
         x = np.arange(num_params)
         width = 0.35
-        ax.barh(x - width/2, info_div_exploit_final, width, label='Exploitative', alpha=0.8, color='coral')
-        ax.barh(x + width/2, info_div_explor_final, width, label='Exploratory', alpha=0.8, color='skyblue')
+        bars1 = ax.barh(x - width/2, info_div_exploit_final, width, label='Exploitative', alpha=0.8, color='coral', edgecolor='black', linewidth=0.5)
+        bars2 = ax.barh(x + width/2, info_div_explor_final, width, label='Exploratory', alpha=0.8, color='skyblue', edgecolor='black', linewidth=0.5)
+
+        # Add value labels on bars
+        for i, val in enumerate(info_div_exploit_final):
+            if val > 0.01:  # Only show label if value is significant
+                ax.text(val, i - width/2, f' {val:.2f}', va='center', fontsize=8)
+        for i, val in enumerate(info_div_explor_final):
+            if val > 0.01:  # Only show label if value is significant
+                ax.text(val, i + width/2, f' {val:.2f}', va='center', fontsize=8)
+
         ax.set_yticks(range(num_params))
         ax.set_yticklabels([f"{v:.2f}" for v in param_values])
         ax.set_xlabel("Shannon Entropy (bits)", fontsize=11)
@@ -6950,8 +6989,21 @@ def plot_phase_diagram_bubbles(results_dict, param_values, param_name="AI Alignm
         # Panel 4: Dominant Source (AI vs Friends)
         ax = axes[1, 1]
         trust_ratio = [ai_trust_final[i] - friend_trust_final[i] for i in range(num_params)]
-        bars = ax.barh(range(num_params), trust_ratio,
-                      color=['orange' if v > 0.1 else 'gray' if abs(v) <= 0.1 else 'purple' for v in trust_ratio])
+
+        # Debug output
+        print(f"\nDominant Information Source (Trust Difference) values:")
+        for i, (param, ai_tr, fr_tr, ratio) in enumerate(zip(param_values, ai_trust_final, friend_trust_final, trust_ratio)):
+            print(f"  {param_name}={param:.2f}: AI={ai_tr:.4f}, Friend={fr_tr:.4f}, Diff={ratio:.4f}")
+
+        bars = ax.barh(range(num_params), trust_ratio, height=0.6,
+                      color=['orange' if v > 0.1 else 'gray' if abs(v) <= 0.1 else 'purple' for v in trust_ratio],
+                      edgecolor='black', linewidth=0.5)
+
+        # Add value labels on bars
+        for i, (bar, val) in enumerate(zip(bars, trust_ratio)):
+            label_x = val if val > 0 else val  # Position label at end of bar
+            ax.text(label_x, i, f' {val:.3f}', va='center', fontsize=9)
+
         ax.set_yticks(range(num_params))
         ax.set_yticklabels([f"{v:.2f}" for v in param_values])
         ax.set_xlabel("Trust Difference (AI - Friends)", fontsize=11)
