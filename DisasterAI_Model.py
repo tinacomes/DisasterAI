@@ -1132,7 +1132,8 @@ class HumanAgent(Agent):
                     self.last_queried_source_ids
                 ))
 
-            self.tokens_this_tick = {}
+            # NOTE: Don't clear tokens_this_tick here! It's cleared at the START of model.step()
+            # to ensure calculate_info_diversity() can read it at the END of the tick
 
         except Exception as e:
             print(f"ERROR in Agent {self.unique_id} send_relief at tick {self.model.tick}: {e}")
@@ -2321,6 +2322,14 @@ class DisasterModel(Model):
     def step(self):
         self.tick += 1
         self.tokens_this_tick = {}
+
+        # Clear all agents' source tracking from previous tick
+        # This must happen BEFORE agents run, so they can populate it fresh
+        # and BEFORE data collection at the end of the tick reads it
+        for agent in self.agent_list:
+            if isinstance(agent, HumanAgent):
+                agent.tokens_this_tick = {}
+
         self.update_disaster()
         random.shuffle(self.agent_list)
 
@@ -5700,7 +5709,9 @@ def plot_echo_chamber_indices(results_dict, title_suffix=""):
     ax.set_ylabel("Index / Ratio")
     ax.grid(True, linestyle='--', alpha=0.6)
     ax.legend(fontsize='small')
-    ax.set_ylim(bottom=0, top=1.05)
+    ax.set_ylim(-1.05, 1.05)  # SECI ranges from -1 to +1 (negative = echo chamber)
+    ax.axhline(0, color='black', linestyle='-', linewidth=0.8, alpha=0.5)  # Zero reference line
+    ax.set_xlim(left=0)  # Start x-axis at 0
 
     # --- Subplot 2: Retainment ---
     ax = axes [0, 1]
@@ -5743,6 +5754,7 @@ def plot_echo_chamber_indices(results_dict, title_suffix=""):
     ax.grid(True, linestyle='--', alpha=0.6)
     ax.legend(fontsize='small')
     ax.set_ylim(bottom=0, top=1.05)
+    ax.set_xlim(left=0)  # Start x-axis at 0
 
     # --- Subplot 3: Component & AI Variance Indices ---
     ax = axes[1, 0]
@@ -5755,7 +5767,9 @@ def plot_echo_chamber_indices(results_dict, title_suffix=""):
     ax.set_xlabel("Tick")
     ax.grid(True, linestyle='--', alpha=0.6)
     ax.legend(fontsize='small')
-    ax.set_ylim(bottom=0, top=1.05)  # Set explicit limits for consistency
+    ax.set_ylim(-1.05, 1.05)  # Allow negative values (echo chambers)
+    ax.axhline(0, color='black', linestyle='-', linewidth=0.8, alpha=0.5)  # Zero reference
+    ax.set_xlim(left=0)  # Start x-axis at 0
 
     # --- Subplot 4: AI Trust Clustering ---
     ax = axes[1, 1]
@@ -5767,6 +5781,7 @@ def plot_echo_chamber_indices(results_dict, title_suffix=""):
     ax.grid(True, linestyle='--', alpha=0.6)
     ax.legend(fontsize='small')
     ax.set_ylim(bottom=0)  # Only set bottom for variance
+    ax.set_xlim(left=0)  # Start x-axis at 0
 
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])
     # Save or show
@@ -5792,8 +5807,8 @@ def plot_seci_aeci_evolution(seci_array, aeci_array, title_suffix=""):
             data_slice = data_array[:, :, index]
             data_slice = np.where(np.isinf(data_slice), np.nan, data_slice)
 
-            # For SECI/AECI, ensure values are bounded in [0,1]
-            data_slice = np.clip(data_slice, 0.0, 1.0)
+            # Don't clip SECI - it can range from -1 to +1 (negative = echo chamber)
+            # Only clip if it's a ratio metric (handled separately)
 
             # Calculate stats
             mean = np.nanmean(data_slice, axis=0)
