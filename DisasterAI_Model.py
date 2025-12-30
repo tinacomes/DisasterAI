@@ -2,6 +2,16 @@
 # Install mesa if not already installed
 !pip install mesa
 
+# Mount Google Drive FIRST (for Colab)
+try:
+    from google.colab import drive
+    drive.mount('/content/drive')
+    IN_COLAB = True
+    print("✓ Running in Google Colab - results will be saved to Drive")
+except:
+    IN_COLAB = False
+    print("✓ Running locally - results will be saved to local directory")
+
 import os
 import random
 import math
@@ -12,14 +22,17 @@ import itertools
 import pickle
 import gc
 import csv
-import os
-import math
 
 from mesa import Agent, Model
 from mesa.space import MultiGrid
 
-save_dir = "agent_model_results"
+# Set save directory (Drive if in Colab, local otherwise)
+if IN_COLAB:
+    save_dir = "/content/drive/MyDrive/DisasterAI_Results"
+else:
+    save_dir = "agent_model_results"
 os.makedirs(save_dir, exist_ok=True)
+print(f"✓ Results will be saved to: {save_dir}")
 
 #########################################
 # Helper Classes and Agent Definitions
@@ -719,7 +732,10 @@ class HumanAgent(Agent):
             }
 
             # Determine if this was a significant belief change
-            significant_change = abs(posterior_level - prior_level) >= 1
+            # FIXED: More nuanced threshold - count if level OR confidence changes significantly
+            level_change = abs(posterior_level - prior_level)
+            confidence_change = abs(posterior_confidence - prior_confidence)
+            significant_change = (level_change >= 1 or confidence_change >= 0.1)
 
             # Track AI source information for later trust updates
             is_ai_source = hasattr(self, 'ai_info_sources') and cell in self.ai_info_sources
@@ -727,21 +743,11 @@ class HumanAgent(Agent):
                 if not hasattr(self, 'ai_acceptances'):
                     self.ai_acceptances = {}
                 self.ai_acceptances[cell] = self.model.tick
-                
-            # Track acceptance statistics based on significant changes
-            if significant_change:
-                # Using the source_id parameter
-                if source_id is not None:
-                    if source_id.startswith("H_"):
-                        self.accepted_human += 1
-                        if source_id in self.friends:
-                            self.accepted_friend += 1
-                    elif source_id.startswith("A_"):
-                        self.accepted_ai += 1
-                        
-                    # Log acceptance for debugging
-                    # if self.model.debug_mode and self.model.tick % 10 == 0 and random.random() < 0.1:
-                        #print(f"DEBUG: Agent {self.unique_id} accepted info from {source_id} for cell {cell}")
+
+            # BUG FIX: Removed duplicate acceptance tracking from here
+            # Acceptance is now ONLY tracked in seek_information() (lines ~1070-1077)
+            # to avoid double-counting. Previously this incremented counters,
+            # then seek_information incremented them again = 2x inflation!
 
             # Return whether this update caused a significant belief change
             return significant_change
@@ -1126,7 +1132,8 @@ class HumanAgent(Agent):
                     self.last_queried_source_ids
                 ))
 
-            self.tokens_this_tick = {}
+            # NOTE: Don't clear tokens_this_tick here! It's cleared at the START of model.step()
+            # to ensure calculate_info_diversity() can read it at the END of the tick
 
         except Exception as e:
             print(f"ERROR in Agent {self.unique_id} send_relief at tick {self.model.tick}: {e}")
@@ -1888,9 +1895,10 @@ class DisasterModel(Model):
         
         aeci_variance = 0.0  # Default neutral value
         
-        # Define AI-reliant agents
-        min_calls_threshold = 2
-        min_ai_ratio = 0.1
+        # Define AI-reliant agents with moderate threshold
+        # Agent must have made enough queries (10+) AND majority to AI (50%+)
+        min_calls_threshold = 10   # Need stable sample size
+        min_ai_ratio = 0.5         # Majority (50%+) queries to AI
         
         ai_reliant_agents = []
         for agent in self.humans.values():
@@ -2314,6 +2322,14 @@ class DisasterModel(Model):
     def step(self):
         self.tick += 1
         self.tokens_this_tick = {}
+
+        # Clear all agents' source tracking from previous tick
+        # This must happen BEFORE agents run, so they can populate it fresh
+        # and BEFORE data collection at the end of the tick reads it
+        for agent in self.agent_list:
+            if isinstance(agent, HumanAgent):
+                agent.tokens_this_tick = {}
+
         self.update_disaster()
         random.shuffle(self.agent_list)
 
@@ -2636,7 +2652,9 @@ class DisasterModel(Model):
                 agent.accum_calls_ai = max(0, agent.accum_calls_ai)
                 agent.accum_calls_total = max(0, agent.accum_calls_total)
 
-                # Calculate AECI with robust error handling
+                # Calculate AECI (AI Query Ratio) with robust error handling
+                # NOTE: AECI measures proportion of QUERIES to AI, not acceptances
+                # High AECI = agent frequently queries AI (regardless of whether they accept the info)
                 if agent.accum_calls_total > 0:
                     # Ensure ratio is properly bounded between 0 and 1
                     ratio = max(0.0, min(1.0, agent.accum_calls_ai / agent.accum_calls_total))
@@ -2713,6 +2731,10 @@ class DisasterModel(Model):
             for agent in self.humans.values():
                 total_accepted = agent.accepted_human + agent.accepted_ai
                 total_accepted = total_accepted if total_accepted > 0 else 1
+
+                # CLARIFICATION: retain_aeci = AI ACCEPTANCE ratio (accepted from AI / total accepted)
+                # This is different from AECI which measures QUERY ratio (queries to AI / total queries)
+                # retain_aeci shows actual AI INFLUENCE on beliefs
                 retain_aeci_val = agent.accepted_ai / total_accepted if total_accepted > 0 else 0
                 retain_seci_val = agent.accepted_friend / total_accepted if total_accepted > 0 else 0
 
@@ -4371,9 +4393,9 @@ def plot_summary_echo_indices_vs_alignment(results_b, alignment_values, title_su
             # Handle NaNs and infinities
             values = values[~np.isnan(values) & ~np.isinf(values)]
 
-            # Clip ratio metrics to [0,1]
-            if any(x in str(col_index) for x in ['aeci', 'seci']) or col_index in [1, 2]:
-                values = np.clip(values, 0.0, 1.0)
+            # IMPORTANT: Don't clip SECI or AECI-Var! They range from -1 to +1
+            # Negative values indicate echo chambers, which we need to see!
+            # Only AI call ratios are true [0,1] proportions
 
             return values
 
@@ -4399,10 +4421,11 @@ def plot_summary_echo_indices_vs_alignment(results_b, alignment_values, title_su
                              flierprops=dict(marker='o', markerfacecolor='salmon', markersize=3, alpha=0.7),
                              medianprops=dict(color='black'))
     ax.set_ylabel("SECI Value")
-    ax.set_title("Social Echo Chamber (SECI)")
+    ax.set_title("Social Echo Chamber (SECI)\n(Negative = Echo Chamber, Positive = Diversification)")
     ax.legend([bplot_exploit["boxes"][0], bplot_explor["boxes"][0]], ['Exploit', 'Explor'], loc='best')
     ax.grid(True, axis='y', linestyle='--', alpha=0.6)
-    ax.set_ylim(0, 1)
+    ax.axhline(0, color='black', linestyle='-', linewidth=0.8, alpha=0.5)  # Zero reference line
+    ax.set_ylim(-1.05, 1.05)  # SECI ranges from -1 to +1, allow full range
 
     # Plot AECI Variance boxplots
     ax = axes[0, 1]
@@ -4412,10 +4435,11 @@ def plot_summary_echo_indices_vs_alignment(results_b, alignment_values, title_su
                               flierprops=dict(marker='o', markerfacecolor='magenta', markersize=3, alpha=0.7),
                               medianprops=dict(color='black'))
     ax.set_ylabel("AI Belief Variance Reduction")
-    ax.set_title("AI Echo Chamber (AECI-Var)")
+    ax.set_title("AI Echo Chamber (AECI-Var)\n(Negative = AI Echo Chamber, Positive = AI Diversifies)")
     ax.legend([bplot_aeci_var["boxes"][0]], ['AI Reliant Group'], loc='best')
     ax.grid(True, axis='y', linestyle='--', alpha=0.6)
-    ax.set_ylim(0, 1)
+    ax.axhline(0, color='black', linestyle='-', linewidth=0.8, alpha=0.5)  # Zero reference line
+    ax.set_ylim(-1.05, 1.05)  # AECI-Var ranges from -1 to +1, allow full range
 
     # Plot AI Call Ratio boxplots
     ax = axes[1, 0]
@@ -4764,10 +4788,11 @@ def plot_summary_echo_indices_vs_alignment(results_b, alignment_values, title_su
                              flierprops=dict(marker='o', markerfacecolor='salmon', markersize=3, alpha=0.7),
                              medianprops=dict(color='black'))
     ax.set_ylabel("SECI Value")
-    ax.set_title("Social Echo Chamber (SECI)")
+    ax.set_title("Social Echo Chamber (SECI)\n(Negative = Echo Chamber, Positive = Diversification)")
     ax.legend([bplot_exploit["boxes"][0], bplot_explor["boxes"][0]], ['Exploit', 'Explor'], loc='best')
     ax.grid(True, axis='y', linestyle='--', alpha=0.6)
-    ax.set_ylim(0, 1)
+    ax.axhline(0, color='black', linestyle='-', linewidth=0.8, alpha=0.5)  # Zero reference line
+    ax.set_ylim(-1.05, 1.05)  # SECI ranges from -1 to +1, allow full range
 
     # Plot AECI Variance boxplots
     ax = axes[0, 1]
@@ -4777,10 +4802,11 @@ def plot_summary_echo_indices_vs_alignment(results_b, alignment_values, title_su
                               flierprops=dict(marker='o', markerfacecolor='magenta', markersize=3, alpha=0.7),
                               medianprops=dict(color='black'))
     ax.set_ylabel("AI Belief Variance Reduction")
-    ax.set_title("AI Echo Chamber (AECI-Var)")
+    ax.set_title("AI Echo Chamber (AECI-Var)\n(Negative = AI Echo Chamber, Positive = AI Diversifies)")
     ax.legend([bplot_aeci_var["boxes"][0]], ['AI Reliant Group'], loc='best')
     ax.grid(True, axis='y', linestyle='--', alpha=0.6)
-    ax.set_ylim(0, 1)
+    ax.axhline(0, color='black', linestyle='-', linewidth=0.8, alpha=0.5)  # Zero reference line
+    ax.set_ylim(-1.05, 1.05)  # AECI-Var ranges from -1 to +1, allow full range
 
     # Plot AI Call Ratio boxplots
     ax = axes[1, 0]
@@ -5352,7 +5378,7 @@ def _plot_mean_iqr(ax, ticks, data_array, data_index, label, color, linestyle='-
 # ---  PLOT 1: SIMULATION INDICES  ---
 def plot_simulation_overview(results_dict, title_suffix=""):
     """Plots key performance and belief metrics."""
-    fig, axes = plt.subplots(2, 2, figsize=(14, 10), sharex=True)
+    fig, axes = plt.subplots(2, 2, figsize=(14, 10))  # Removed sharex=True for better control
     fig.suptitle(f"Simulation Overview {title_suffix}", fontsize=16)
 
     # --- Data Extraction ---
@@ -5361,6 +5387,20 @@ def plot_simulation_overview(results_dict, title_suffix=""):
     unmet_needs_list = results_dict.get("unmet_needs_evol")
     assist_stats = results_dict.get("assist", {})
     raw_counts = results_dict.get("raw_assist_counts", {})
+
+    # Debug: Check data availability and structure
+    print(f"\n=== Simulation Overview Data Diagnostics ===")
+    print(f"belief_error: {belief_error.shape if belief_error is not None and isinstance(belief_error, np.ndarray) else 'None or invalid'}")
+    print(f"belief_variance: {belief_variance.shape if belief_variance is not None and isinstance(belief_variance, np.ndarray) else 'None or invalid'}")
+    print(f"unmet_needs_evol: {len(unmet_needs_list) if unmet_needs_list else 0} runs")
+
+    # Check for non-zero values
+    if belief_error is not None and isinstance(belief_error, np.ndarray) and belief_error.size > 0:
+        print(f"  belief_error non-zero: {np.count_nonzero(belief_error)} / {belief_error.size}")
+        print(f"  belief_error range: [{np.nanmin(belief_error):.4f}, {np.nanmax(belief_error):.4f}]")
+    if belief_variance is not None and isinstance(belief_variance, np.ndarray) and belief_variance.size > 0:
+        print(f"  belief_variance non-zero: {np.count_nonzero(belief_variance)} / {belief_variance.size}")
+        print(f"  belief_variance range: [{np.nanmin(belief_variance):.4f}, {np.nanmax(belief_variance):.4f}]")
 
     # Determine Ticks - Use a sequence of approaches to find the actual tick count
     num_ticks = None
@@ -5451,6 +5491,7 @@ def plot_simulation_overview(results_dict, title_suffix=""):
     _enhanced_plot_mean_iqr(ax, belief_error, 2, "MAE Explor", "blue")
     ax.set_title("Avg. Belief MAE")
     ax.set_ylabel("MAE")
+    ax.set_xlabel("Tick")
     ax.grid(True, linestyle='--', alpha=0.6)
     ax.legend(fontsize='small')
     ax.set_ylim(bottom=0)
@@ -5461,6 +5502,7 @@ def plot_simulation_overview(results_dict, title_suffix=""):
     _enhanced_plot_mean_iqr(ax, belief_variance, 2, "Var Explor", "blue")
     ax.set_title("Within-Type Belief Variance")
     ax.set_ylabel("Variance")
+    ax.set_xlabel("Tick")
     ax.grid(True, linestyle='--', alpha=0.6)
     ax.legend(fontsize='small')
     ax.set_ylim(bottom=0)
@@ -5488,6 +5530,7 @@ def plot_simulation_overview(results_dict, title_suffix=""):
 
                 ax.plot(plot_ticks_needs, mean, label="Unmet Need", color="purple")
                 ax.fill_between(plot_ticks_needs, lower, upper, color="purple", alpha=0.4)
+                ax.set_xlim(0, T_needs-1)  # Set xlim based on actual unmet needs data length
             else:
                 ax.text(0.5, 0.5, 'No unmet needs data', ha='center', va='center')
         except Exception as e:
@@ -5499,10 +5542,11 @@ def plot_simulation_overview(results_dict, title_suffix=""):
     ax.legend(fontsize='small')
     ax.set_ylim(bottom=0)
 
-    # Explicitly set x-axis limits to match the simulation length
-    for ax_row in axes:
-        for ax in ax_row:
-            ax.set_xlim(0, num_ticks-1)
+    # Set x-axis limits for belief plots based on their data
+    if belief_error is not None and isinstance(belief_error, np.ndarray) and belief_error.ndim >= 2:
+        axes[0, 0].set_xlim(0, belief_error.shape[1]-1)
+    if belief_variance is not None and isinstance(belief_variance, np.ndarray) and belief_variance.ndim >= 2:
+        axes[0, 1].set_xlim(0, belief_variance.shape[1]-1)
 
     # --- Subplot 4: token assistance summary pie chart ---
     ax = axes[1, 1]
@@ -5687,7 +5731,9 @@ def plot_echo_chamber_indices(results_dict, title_suffix=""):
     ax.set_ylabel("Index / Ratio")
     ax.grid(True, linestyle='--', alpha=0.6)
     ax.legend(fontsize='small')
-    ax.set_ylim(bottom=0, top=1.05)
+    ax.set_ylim(-1.05, 1.05)  # SECI ranges from -1 to +1 (negative = echo chamber)
+    ax.axhline(0, color='black', linestyle='-', linewidth=0.8, alpha=0.5)  # Zero reference line
+    ax.set_xlim(left=0)  # Start x-axis at 0
 
     # --- Subplot 2: Retainment ---
     ax = axes [0, 1]
@@ -5730,6 +5776,7 @@ def plot_echo_chamber_indices(results_dict, title_suffix=""):
     ax.grid(True, linestyle='--', alpha=0.6)
     ax.legend(fontsize='small')
     ax.set_ylim(bottom=0, top=1.05)
+    ax.set_xlim(left=0)  # Start x-axis at 0
 
     # --- Subplot 3: Component & AI Variance Indices ---
     ax = axes[1, 0]
@@ -5742,7 +5789,9 @@ def plot_echo_chamber_indices(results_dict, title_suffix=""):
     ax.set_xlabel("Tick")
     ax.grid(True, linestyle='--', alpha=0.6)
     ax.legend(fontsize='small')
-    ax.set_ylim(bottom=0, top=1.05)  # Set explicit limits for consistency
+    ax.set_ylim(-1.05, 1.05)  # Allow negative values (echo chambers)
+    ax.axhline(0, color='black', linestyle='-', linewidth=0.8, alpha=0.5)  # Zero reference
+    ax.set_xlim(left=0)  # Start x-axis at 0
 
     # --- Subplot 4: AI Trust Clustering ---
     ax = axes[1, 1]
@@ -5754,6 +5803,7 @@ def plot_echo_chamber_indices(results_dict, title_suffix=""):
     ax.grid(True, linestyle='--', alpha=0.6)
     ax.legend(fontsize='small')
     ax.set_ylim(bottom=0)  # Only set bottom for variance
+    ax.set_xlim(left=0)  # Start x-axis at 0
 
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])
     # Save or show
@@ -5779,8 +5829,8 @@ def plot_seci_aeci_evolution(seci_array, aeci_array, title_suffix=""):
             data_slice = data_array[:, :, index]
             data_slice = np.where(np.isinf(data_slice), np.nan, data_slice)
 
-            # For SECI/AECI, ensure values are bounded in [0,1]
-            data_slice = np.clip(data_slice, 0.0, 1.0)
+            # Don't clip SECI - it can range from -1 to +1 (negative = echo chamber)
+            # Only clip if it's a ratio metric (handled separately)
 
             # Calculate stats
             mean = np.nanmean(data_slice, axis=0)
@@ -6865,8 +6915,20 @@ def plot_phase_diagram_bubbles(results_dict, param_values, param_name="AI Alignm
         # Panel 1: Social Bubble Strength (SECI)
         ax = axes[0, 0]
         seci_combined = [(seci_exploit_final[i] + seci_explor_final[i]) / 2 for i in range(num_params)]
-        bars = ax.barh(range(num_params), seci_combined,
-                       color=['red' if v < -0.2 else 'yellow' if v < 0.1 else 'green' for v in seci_combined])
+
+        # Debug output
+        print(f"\nSocial Bubble Strength (SECI) values:")
+        for i, (param, val) in enumerate(zip(param_values, seci_combined)):
+            print(f"  {param_name}={param:.2f}: SECI={val:.4f}")
+
+        bars = ax.barh(range(num_params), seci_combined, height=0.6,
+                       color=['red' if v < -0.2 else 'yellow' if v < 0.1 else 'green' for v in seci_combined],
+                       edgecolor='black', linewidth=0.5)
+
+        # Add value labels on bars
+        for i, (bar, val) in enumerate(zip(bars, seci_combined)):
+            ax.text(val, i, f' {val:.3f}', va='center', fontsize=9)
+
         ax.set_yticks(range(num_params))
         ax.set_yticklabels([f"{v:.2f}" for v in param_values])
         ax.set_xlabel("SECI (Social Echo Chamber Index)", fontsize=11)
@@ -6877,8 +6939,20 @@ def plot_phase_diagram_bubbles(results_dict, param_values, param_name="AI Alignm
 
         # Panel 2: AI Bubble Strength (AECI-Var)
         ax = axes[0, 1]
-        bars = ax.barh(range(num_params), aeci_var_final,
-                      color=['blue' if v > 0.1 else 'white' if v > -0.1 else 'red' for v in aeci_var_final])
+
+        # Debug output
+        print(f"\nAI Bubble Strength (AECI-Var) values:")
+        for i, (param, val) in enumerate(zip(param_values, aeci_var_final)):
+            print(f"  {param_name}={param:.2f}: AECI-Var={val:.4f}")
+
+        bars = ax.barh(range(num_params), aeci_var_final, height=0.6,
+                      color=['blue' if v > 0.1 else 'white' if v > -0.1 else 'red' for v in aeci_var_final],
+                      edgecolor='black', linewidth=0.5)
+
+        # Add value labels on bars
+        for i, (bar, val) in enumerate(zip(bars, aeci_var_final)):
+            ax.text(val, i, f' {val:.3f}', va='center', fontsize=9)
+
         ax.set_yticks(range(num_params))
         ax.set_yticklabels([f"{v:.2f}" for v in param_values])
         ax.set_xlabel("AECI-Var (AI Echo Chamber Index)", fontsize=11)
@@ -6889,10 +6963,25 @@ def plot_phase_diagram_bubbles(results_dict, param_values, param_name="AI Alignm
 
         # Panel 3: Information Diversity
         ax = axes[1, 0]
+
+        # Debug output
+        print(f"\nInformation Diversity (Shannon Entropy) values:")
+        for i, (param, exploit, explor) in enumerate(zip(param_values, info_div_exploit_final, info_div_explor_final)):
+            print(f"  {param_name}={param:.2f}: Exploit={exploit:.4f}, Explor={explor:.4f}")
+
         x = np.arange(num_params)
         width = 0.35
-        ax.barh(x - width/2, info_div_exploit_final, width, label='Exploitative', alpha=0.8, color='coral')
-        ax.barh(x + width/2, info_div_explor_final, width, label='Exploratory', alpha=0.8, color='skyblue')
+        bars1 = ax.barh(x - width/2, info_div_exploit_final, width, label='Exploitative', alpha=0.8, color='coral', edgecolor='black', linewidth=0.5)
+        bars2 = ax.barh(x + width/2, info_div_explor_final, width, label='Exploratory', alpha=0.8, color='skyblue', edgecolor='black', linewidth=0.5)
+
+        # Add value labels on bars
+        for i, val in enumerate(info_div_exploit_final):
+            if val > 0.01:  # Only show label if value is significant
+                ax.text(val, i - width/2, f' {val:.2f}', va='center', fontsize=8)
+        for i, val in enumerate(info_div_explor_final):
+            if val > 0.01:  # Only show label if value is significant
+                ax.text(val, i + width/2, f' {val:.2f}', va='center', fontsize=8)
+
         ax.set_yticks(range(num_params))
         ax.set_yticklabels([f"{v:.2f}" for v in param_values])
         ax.set_xlabel("Shannon Entropy (bits)", fontsize=11)
@@ -6904,8 +6993,21 @@ def plot_phase_diagram_bubbles(results_dict, param_values, param_name="AI Alignm
         # Panel 4: Dominant Source (AI vs Friends)
         ax = axes[1, 1]
         trust_ratio = [ai_trust_final[i] - friend_trust_final[i] for i in range(num_params)]
-        bars = ax.barh(range(num_params), trust_ratio,
-                      color=['orange' if v > 0.1 else 'gray' if abs(v) <= 0.1 else 'purple' for v in trust_ratio])
+
+        # Debug output
+        print(f"\nDominant Information Source (Trust Difference) values:")
+        for i, (param, ai_tr, fr_tr, ratio) in enumerate(zip(param_values, ai_trust_final, friend_trust_final, trust_ratio)):
+            print(f"  {param_name}={param:.2f}: AI={ai_tr:.4f}, Friend={fr_tr:.4f}, Diff={ratio:.4f}")
+
+        bars = ax.barh(range(num_params), trust_ratio, height=0.6,
+                      color=['orange' if v > 0.1 else 'gray' if abs(v) <= 0.1 else 'purple' for v in trust_ratio],
+                      edgecolor='black', linewidth=0.5)
+
+        # Add value labels on bars
+        for i, (bar, val) in enumerate(zip(bars, trust_ratio)):
+            label_x = val if val > 0 else val  # Position label at end of bar
+            ax.text(label_x, i, f' {val:.3f}', va='center', fontsize=9)
+
         ax.set_yticks(range(num_params))
         ax.set_yticklabels([f"{v:.2f}" for v in param_values])
         ax.set_xlabel("Trust Difference (AI - Friends)", fontsize=11)
@@ -6963,6 +7065,10 @@ def plot_tipping_point_waterfall(results_dict, param_values, param_name="AI Alig
         prev_exploit_ai_pref = 0
         prev_info_div = 0
 
+        # Diagnostic output
+        print(f"\n=== Tipping Point Detection Diagnostics ===")
+        print(f"Looking for transitions across {len(param_values)} parameter values: {param_values}")
+
         for i, param_val in enumerate(sorted(param_values)):
             res = results_dict.get(param_val, {})
 
@@ -7009,8 +7115,21 @@ def plot_tipping_point_waterfall(results_dict, param_values, param_name="AI Alig
             else:
                 curr_info_div = prev_info_div
 
+            # Diagnostic output for each parameter value
+            print(f"\n{param_name}={param_val:.2f}:")
+            print(f"  AI trust: {curr_ai_trust:.4f}, Friend trust: {curr_friend_trust:.4f}, Diff: {curr_ai_trust - curr_friend_trust:.4f}")
+            print(f"  SECI: {curr_seci:.4f}, AECI-Var: {curr_aeci_var:.4f}")
+            print(f"  Exploit AI pref: {curr_exploit_ai_pref:.4f}, Info div: {curr_info_div:.4f}")
+
             # Detect tipping points (only if not already detected)
             if i > 0:
+                print(f"  Checking transitions from previous parameter value:")
+                print(f"    AI > Friend? prev: AI={prev_ai_trust:.4f} < Friend={prev_friend_trust:.4f} → curr: AI={curr_ai_trust:.4f} > Friend={curr_friend_trust:.4f}? {prev_ai_trust < prev_friend_trust and curr_ai_trust > curr_friend_trust}")
+                print(f"    SECI→0? prev: {prev_seci:.4f} < -0.05 → curr: {curr_seci:.4f} > -0.05? {prev_seci < -0.05 and curr_seci > -0.05}")
+                print(f"    AECI→0? prev: {prev_aeci_var:.4f} < -0.05 → curr: {curr_aeci_var:.4f} > -0.05? {prev_aeci_var < -0.05 and curr_aeci_var > -0.05}")
+                print(f"    Exploit prefer AI? prev: {prev_exploit_ai_pref:.4f} < 0.5 → curr: {curr_exploit_ai_pref:.4f} >= 0.5? {prev_exploit_ai_pref < 0.5 and curr_exploit_ai_pref >= 0.5}")
+                print(f"    Info surge? prev: {prev_info_div:.4f} → curr: {curr_info_div:.4f} (ratio: {curr_info_div/prev_info_div if prev_info_div > 0 else 0:.2f}x)? {prev_info_div > 0 and curr_info_div / prev_info_div > 1.5}")
+
                 # AI trust overtakes friend trust
                 if tipping_points['AI Trust > Friend Trust'] is None:
                     if prev_ai_trust < prev_friend_trust and curr_ai_trust > curr_friend_trust:
@@ -7035,6 +7154,8 @@ def plot_tipping_point_waterfall(results_dict, param_values, param_name="AI Alig
                 if tipping_points['Info Diversity Surge'] is None:
                     if prev_info_div > 0 and curr_info_div / prev_info_div > 1.5:
                         tipping_points['Info Diversity Surge'] = (param_values[i-1] + param_val) / 2
+            else:
+                print(f"  (First parameter value - establishing baseline)")
 
             # Update previous values
             prev_ai_trust = curr_ai_trust
@@ -7190,236 +7311,187 @@ if __name__ == "__main__":
     ##############################################
     # Experiment A: Vary share_exploitative
     ##############################################
-   # share_values = [0.3, 0.6]
-   # file_a_pkl = os.path.join(save_dir, "results_experiment_A.pkl")
-   # file_a_csv = os.path.join(save_dir, "results_experiment_A.csv")
+    share_values = [0.3, 0.6]
+    file_a_pkl = os.path.join(save_dir, "results_experiment_A.pkl")
+    file_a_csv = os.path.join(save_dir, "results_experiment_A.csv")
 
-   # param_name_a = "Share Exploitative"
-  #  print("Running Experiment A...")
-   # results_a = experiment_share_exploitative(base_params, share_values, num_runs)
-   # with open(file_a_pkl, "wb") as f:
-  #      pickle.dump(results_a, f)
-  #  export_results_to_csv(results_a, share_values, file_a_csv, "Experiment A")
+    param_name_a = "Share Exploitative"
+    print("Running Experiment A...")
+    results_a = experiment_share_exploitative(base_params, share_values, num_runs)
+    with open(file_a_pkl, "wb") as f:
+        pickle.dump(results_a, f)
+    export_results_to_csv(results_a, share_values, file_a_csv, "Experiment A")
 
- #   print("\n--- Plotting Aggregated Time Evolution for Experiment A ---")
-  #  for share in share_values:
-  #      print(f"{param_name_a} = {share}")
- #       # Load data for this parameter setting from the saved dictionary
-  #      results_dict = results_a.get(share, {})
- #       title_suffix = f"({param_name_a}={share})"
+    print("\n--- Plotting Aggregated Time Evolution for Experiment A ---")
+    for share in share_values:
+        print(f"{param_name_a} = {share}")
+        results_dict = results_a.get(share, {})
+        title_suffix = f"({param_name_a}={share})"
 
- #       if results_dict:
-            # Call  consolidated plot functions
-       #     plot_simulation_overview(results_dict, title_suffix)
-            # Ensure your aggregation collects component data for this one:
-      #      plot_echo_chamber_indices(results_dict, title_suffix)
-            # Call the original trust plot function (it's already well-structured)
-      #      plot_trust_evolution(results_dict["trust_stats"], title_suffix)
-
-            # Optional: Call final state bar plot for assistance
-            # if "assist" in results_dict and "raw_assist_counts" in results_dict:
-            #    plot_assistance_bars(results_dict["assist"], results_dict["raw_assist_counts"], title_suffix)
-
-      #  else:
-       #     print(f"  Skipping plots for {param_name_a}={share} (missing data)")
+        if results_dict:
+            # Call consolidated plot functions
+            plot_simulation_overview(results_dict, title_suffix)
+            plot_echo_chamber_indices(results_dict, title_suffix)
+            plot_trust_evolution(results_dict["trust_stats"], title_suffix)
+        else:
+            print(f"  Skipping plots for {param_name_a}={share} (missing data)")
 
     # --- Plot SUMMARY Comparisons Across Parameters (AFTER LOOP) ---
-   # print("\n--- Plotting Summary Comparisons for Experiment A ---")
-    # Plot how correct token share changes with the parameter
-   # if results_a: # Check if results exist before plotting summary
-    #    plot_correct_token_shares_bars(results_a, share_values)
+    print("\n--- Plotting Summary Comparisons for Experiment A ---")
+    if results_a:
+        plot_correct_token_shares_bars(results_a, share_values)
 
-    # Add these lines to Experiment A's plotting section:
-   # print("\n--- Plotting Boxplot Summaries for Experiment A ---")
-    # Create temporary versions of boxplot functions that work with share values instead of alignment values
-  #  plot_summary_echo_indices_by_share = lambda results, shares, suffix: plot_summary_echo_indices_vs_alignment(
-  #      results, shares, f"Share Exploitative {suffix}")
-  #  plot_summary_performance_by_share = lambda results, shares, suffix: plot_summary_performance_vs_alignment(
-    #    results, shares, f"Share Exploitative {suffix}")
-
-    # Call the adapted functions
- #   plot_summary_echo_indices_by_share(results_a, share_values, "")
-  #  plot_summary_performance_by_share(results_a, share_values, "")
+        # NEW: Advanced bubble mechanics visualizations
+        print("\n--- Plotting Advanced Bubble Mechanics for Experiment A ---")
+        plot_phase_diagram_bubbles(results_a, share_values, param_name="Share Exploitative")
+        plot_tipping_point_waterfall(results_a, share_values, param_name="Share Exploitative")
 
     ##############################################
     # Experiment B: Vary AI Alignment Level
     ##############################################
+    alignment_values = [0.0, 0.25, 0.5, 0.75, 0.95]  # Initial scan
+    param_name_b = "AI Alignment Tipping Point"
+    file_b_pkl = os.path.join(save_dir, f"results_{param_name_b.replace(' ','_')}.pkl")
 
-    #alignment_values = [0.0, 0.25, 0.5, 0.75, 0.95]  # Initial scan
-    #param_name_b = "AI Alignment Tipping Point"
-    #file_b_pkl = os.path.join(save_dir, f"results_{param_name_b.replace(' ','_')}.pkl")
-
-    #print(f"\nRunning {param_name_b} Experiment...")
-    #results_b = experiment_alignment_tipping_point(base_params, alignment_values, num_runs=10)
+    print(f"\nRunning {param_name_b} Experiment...")
+    results_b = experiment_alignment_tipping_point(base_params, alignment_values, num_runs=10)
 
     # Save results
-    #with open(file_b_pkl, "wb") as f:
-        #pickle.dump(results_b, f)
+    with open(file_b_pkl, "wb") as f:
+        pickle.dump(results_b, f)
 
     # Get all alignment values (including fine-grained ones added by tipping point detection)
-    #all_alignment_values = sorted(list(results_b.keys()))
+    all_alignment_values = sorted(list(results_b.keys()))
 
     # --- Plot SUMMARY Comparisons (only once, after getting all results) ---
-    #print(f"\n--- Plotting Summary Comparisons for {param_name_b} ---")
-    #if results_b:
+    print(f"\n--- Plotting Summary Comparisons for {param_name_b} ---")
+    if results_b:
         # Use all alignment values found in results
-        #plot_final_echo_indices_vs_alignment(results_b, all_alignment_values, title_suffix="Tipping Points")
-        #plot_average_performance_vs_alignment(results_b, all_alignment_values, title_suffix="Tipping Points")
+        plot_final_echo_indices_vs_alignment(results_b, all_alignment_values, title_suffix="Tipping Points")
+        plot_average_performance_vs_alignment(results_b, all_alignment_values, title_suffix="Tipping Points")
 
         # Boxplot summaries
-        #print(f"\n--- Plotting Boxplot Summaries for {param_name_b} ---")
-        #plot_summary_echo_indices_vs_alignment(results_b, all_alignment_values, title_suffix="Tipping Points")
-        #plot_summary_performance_vs_alignment(results_b, all_alignment_values, title_suffix="Tipping Points")
+        print(f"\n--- Plotting Boxplot Summaries for {param_name_b} ---")
+        plot_summary_echo_indices_vs_alignment(results_b, all_alignment_values, title_suffix="Tipping Points")
+        plot_summary_performance_vs_alignment(results_b, all_alignment_values, title_suffix="Tipping Points")
 
         # NEW: Advanced bubble mechanics visualizations
-        #print(f"\n--- Plotting Advanced Bubble Mechanics for {param_name_b} ---")
-        #plot_phase_diagram_bubbles(results_b, all_alignment_values, param_name="AI Alignment")
-        #plot_tipping_point_waterfall(results_b, all_alignment_values, param_name="AI Alignment")
-
-    # --- Plot Aggregated Time Evolution for EACH Alignment Level ---
-    #print(f"\n--- Plotting Aggregated Time Evolution for {param_name_b} ---")
-    #for align in all_alignment_values:  # Use all values, not just the initial ones
-       # print(f"{param_name_b} = {align}")
-        #results_dict = results_b.get(align, {})
-       # title_suffix = f"(AI Alignment={align})"
-
-       # if results_dict:
-            # Call the consolidated plotting functions
-           # plot_simulation_overview(results_dict, title_suffix)
-           # plot_trust_evolution(results_dict.get("trust_stats"), title_suffix)
-           # plot_echo_chamber_indices(results_dict, title_suffix)
-           # plot_component_seci_distribution(results_dict, title_suffix)
-
-            # Generate trust vs alignment plot
-         #   model_params = base_params.copy()
-         #   model_params["ai_alignment_level"] = align
-         #   temp_model = run_simulation(model_params)
-         #   plot_ai_trust_vs_alignment(temp_model, save_dir=f"{save_dir}/trust_plots")
-         #   del temp_model
-       # else:
-         #   print(f"  Skipping plots for {param_name_b}={align} (missing data)")
-
-    # Optional: Create a comparison plot of component SECI across all alignment values
-    #if results_b:
-     #   plot_component_seci_comparison(results_b, all_alignment_values, title_suffix="Tipping Points")
+        print(f"\n--- Plotting Advanced Bubble Mechanics for {param_name_b} ---")
+        plot_phase_diagram_bubbles(results_b, all_alignment_values, param_name="AI Alignment")
+        plot_tipping_point_waterfall(results_b, all_alignment_values, param_name="AI Alignment")
 
     ##############################################
     # Experiment C: Vary Disaster Dynamics and Shock Magnitude
     ##############################################
-    print("\n=== STARTING EXPERIMENT C ===")
-
-    try:
-        dynamics_values = [1, 2, 3]
-        shock_values = [1, 2, 3]
-        
-        print(f"Running experiment with {len(dynamics_values)}x{len(shock_values)} parameter combinations...")
-        results_c = experiment_disaster_dynamics(base_params, dynamics_values, shock_values, num_runs)
-        
-        print(f"Got results for {len(results_c)} parameter combinations")
-        
-        # Debug the structure of results_c
-        print("Parameter combinations in results_c:")
-        for key in sorted(results_c.keys()):
-            print(f"  {key}: {type(results_c[key])}")
-        
-        # Generate visualizations with robust error handling
-        print("\n--- Creating Visualizations ---")
-        
-        try:
-            print("Generating comprehensive analysis...")
-            plot_experiment_c_comprehensive(results_c, dynamics_values, shock_values)
-            print("Comprehensive analysis complete")
-        except Exception as e:
-            print(f"Error in comprehensive analysis: {e}")
-            import traceback
-            traceback.print_exc()
-        
-        try:
-            print("Generating evolution plots...")
-            plot_experiment_c_evolution(results_c, dynamics_values, shock_values)
-            print("Evolution plots complete")
-        except Exception as e:
-            print(f"Error in evolution plots: {e}")
-            import traceback
-            traceback.print_exc()
-        
-        # Debug one specific parameter combination
-        if (1, 1) in results_c:
-            print("\nExamining data for dynamics=1, shock=1:")
-            sample_result = results_c[(1, 1)]
-            for key in sorted(sample_result.keys()):
-                if isinstance(sample_result[key], np.ndarray):
-                    print(f"  {key}: ndarray with shape {sample_result[key].shape}")
-                elif isinstance(sample_result[key], list):
-                    print(f"  {key}: list with {len(sample_result[key])} items")
-                else:
-                    print(f"  {key}: {type(sample_result[key])}")
-
-    except Exception as e:
-        print(f"Experiment C failed: {e}")
-        import traceback
-        traceback.print_exc()
-
-    print("=== EXPERIMENT C COMPLETED ===")
+    # COMMENTED OUT - Focus on Experiments A and B
+    # print("\n=== STARTING EXPERIMENT C ===")
+    #
+    # try:
+    #     dynamics_values = [1, 2, 3]
+    #     shock_values = [1, 2, 3]
+    #
+    #     print(f"Running experiment with {len(dynamics_values)}x{len(shock_values)} parameter combinations...")
+    #     results_c = experiment_disaster_dynamics(base_params, dynamics_values, shock_values, num_runs)
+    #
+    #     print(f"Got results for {len(results_c)} parameter combinations")
+    #
+    #     # Debug the structure of results_c
+    #     print("Parameter combinations in results_c:")
+    #     for key in sorted(results_c.keys()):
+    #         print(f"  {key}: {type(results_c[key])}")
+    #
+    #     # Generate visualizations with robust error handling
+    #     print("\n--- Creating Visualizations ---")
+    #
+    #     try:
+    #         print("Generating comprehensive analysis...")
+    #         plot_experiment_c_comprehensive(results_c, dynamics_values, shock_values)
+    #         print("Comprehensive analysis complete")
+    #     except Exception as e:
+    #         print(f"Error in comprehensive analysis: {e}")
+    #         import traceback
+    #         traceback.print_exc()
+    #
+    #     try:
+    #         print("Generating evolution plots...")
+    #         plot_experiment_c_evolution(results_c, dynamics_values, shock_values)
+    #         print("Evolution plots complete")
+    #     except Exception as e:
+    #         print(f"Error in evolution plots: {e}")
+    #         import traceback
+    #         traceback.print_exc()
+    #
+    #     # Debug one specific parameter combination
+    #     if (1, 1) in results_c:
+    #         print("\nExamining data for dynamics=1, shock=1:")
+    #         sample_result = results_c[(1, 1)]
+    #         for key in sorted(sample_result.keys()):
+    #             if isinstance(sample_result[key], np.ndarray):
+    #                 print(f"  {key}: ndarray with shape {sample_result[key].shape}")
+    #             elif isinstance(sample_result[key], list):
+    #                 print(f"  {key}: list with {len(sample_result[key])} items")
+    #             else:
+    #                 print(f"  {key}: {type(sample_result[key])}")
+    #
+    # except Exception as e:
+    #     print(f"Experiment C failed: {e}")
+    #     import traceback
+    #     traceback.print_exc()
+    #
+    # print("=== EXPERIMENT C COMPLETED ===")
 
     ##############################################
     # Experiment D: Vary Learning Rate and Epsilon
     ##############################################
-    learning_rate_values = [0.03, 0.05, 0.07]
-    epsilon_values = [0.2, 0.3]
-    results_d = experiment_learning_trust(base_params, learning_rate_values, epsilon_values, num_runs)
+    # COMMENTED OUT - Focus on Experiments A and B
+    # learning_rate_values = [0.03, 0.05, 0.07]
+    # epsilon_values = [0.2, 0.3]
+    # results_d = experiment_learning_trust(base_params, learning_rate_values, epsilon_values, num_runs)
+    #
+    # # --- Plot 1: Final SECI vs LR/Epsilon (Bar Chart) ---
+    # fig_d_seci, ax_d_seci = plt.subplots(1, 2, figsize=(12, 5), sharey=True)
+    # fig_d_seci.suptitle("Experiment D: Final SECI vs Learning Rate / Epsilon (Mean & IQR)")
+    # bar_width = 0.35
+    #
+    # for idx, eps in enumerate(epsilon_values):
+    #     means_exploit = []; errors_exploit = [[],[]]
+    #     means_explor = []; errors_explor = [[],[]]
+    #
+    #     for lr in learning_rate_values:
+    #         res_key = (lr, eps)
+    #         if res_key not in results_d: continue
+    #         res = results_d[res_key]
+    #
+    #         if res["seci"].ndim >= 3 and res["seci"].shape[1] > 0:
+    #             seci_exploit_final = res["seci"][:, -1, 1]
+    #             seci_explor_final = res["seci"][:, -1, 2]
+    #
+    #             mean_exp = np.mean(seci_exploit_final); p25_exp = np.percentile(seci_exploit_final, 25); p75_exp = np.percentile(seci_exploit_final, 75)
+    #             mean_er = np.mean(seci_explor_final); p25_er = np.percentile(seci_explor_final, 25); p75_er = np.percentile(seci_explor_final, 75)
+    #
+    #             means_exploit.append(mean_exp); errors_exploit[0].append(mean_exp-p25_exp); errors_exploit[1].append(p75_exp-mean_exp)
+    #             means_explor.append(mean_er); errors_explor[0].append(mean_er-p25_er); errors_explor[1].append(p75_er-mean_er)
+    #         else:
+    #             means_exploit.append(0); errors_exploit[0].append(0); errors_exploit[1].append(0)
+    #             means_explor.append(0); errors_explor[0].append(0); errors_explor[1].append(0)
+    #
+    #     x_pos = np.arange(len(learning_rate_values))
+    #     ax = ax_d_seci[idx]
+    #     rects1 = ax.bar(x_pos - bar_width/2, means_exploit, bar_width, yerr=errors_exploit, capsize=4, label='Exploitative', color='tab:blue', error_kw=dict(alpha=0.5))
+    #     rects2 = ax.bar(x_pos + bar_width/2, means_explor, bar_width, yerr=errors_explor, capsize=4, label='Exploratory', color='tab:orange', error_kw=dict(alpha=0.5))
+    #
+    #     ax.set_xlabel("Learning Rate")
+    #     ax.set_ylabel("Mean Final SECI")
+    #     ax.set_title(f"Epsilon = {eps}")
+    #     ax.set_xticks(x_pos)
+    #     ax.set_xticklabels(learning_rate_values)
+    #     ax.legend()
+    #     ax.grid(True, axis='y', linestyle='--', alpha=0.6)
+    #     ax.set_ylim(bottom=0)
+    #
+    # plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+    # plt.savefig("agent_model_results/experiment_d_seci.png")
+    # plt.close(fig_d_seci)
+    # gc.collect()
 
-    # --- Plot 1: Final SECI vs LR/Epsilon (Bar Chart) ---
-    fig_d_seci, ax_d_seci = plt.subplots(1, 2, figsize=(12, 5), sharey=True)
-    fig_d_seci.suptitle("Experiment D: Final SECI vs Learning Rate / Epsilon (Mean & IQR)")
-    bar_width = 0.35
-
-    for idx, eps in enumerate(epsilon_values):
-        means_exploit = []; errors_exploit = [[],[]] # [lower_err, upper_err]
-        means_explor = []; errors_explor = [[],[]]
-
-        for lr in learning_rate_values:
-            res_key = (lr, eps)
-            # Fix the variable name here - from 'resubase_confidence_bumplts_d' to 'results_d'
-            if res_key not in results_d: continue
-            res = results_d[res_key]
-
-            # Extract Final SECI values per run
-            # Assumes seci array shape (runs, ticks_recorded, 3) -> [tick, exploit, explor]
-            if res["seci"].ndim >= 3 and res["seci"].shape[1] > 0:
-                seci_exploit_final = res["seci"][:, -1, 1] # Last tick's exploit SECI for all runs
-                seci_explor_final = res["seci"][:, -1, 2] # Last tick's explor SECI for all runs
-
-                # Calculate stats
-                mean_exp = np.mean(seci_exploit_final); p25_exp = np.percentile(seci_exploit_final, 25); p75_exp = np.percentile(seci_exploit_final, 75)
-                mean_er = np.mean(seci_explor_final); p25_er = np.percentile(seci_explor_final, 25); p75_er = np.percentile(seci_explor_final, 75)
-
-                means_exploit.append(mean_exp); errors_exploit[0].append(mean_exp-p25_exp); errors_exploit[1].append(p75_exp-mean_exp)
-                means_explor.append(mean_er); errors_explor[0].append(mean_er-p25_er); errors_explor[1].append(p75_er-mean_er)
-            else:
-                means_exploit.append(0); errors_exploit[0].append(0); errors_exploit[1].append(0)
-                means_explor.append(0); errors_explor[0].append(0); errors_explor[1].append(0)
-
-        x_pos = np.arange(len(learning_rate_values))
-        ax = ax_d_seci[idx] # Use subplot for each epsilon
-        rects1 = ax.bar(x_pos - bar_width/2, means_exploit, bar_width, yerr=errors_exploit, capsize=4, label='Exploitative', color='tab:blue', error_kw=dict(alpha=0.5))
-        rects2 = ax.bar(x_pos + bar_width/2, means_explor, bar_width, yerr=errors_explor, capsize=4, label='Exploratory', color='tab:orange', error_kw=dict(alpha=0.5))
-
-        ax.set_xlabel("Learning Rate")
-        ax.set_ylabel("Mean Final SECI")
-        ax.set_title(f"Epsilon = {eps}")
-        ax.set_xticks(x_pos)
-        ax.set_xticklabels(learning_rate_values)
-        ax.legend()
-        ax.grid(True, axis='y', linestyle='--', alpha=0.6)
-        ax.set_ylim(bottom=0)
-
-    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-    # Save the figure instead of just showing it
-    plt.savefig("agent_model_results/experiment_d_seci.png")
-    plt.close(fig_d_seci)
-
-    gc.collect()
-
-from google.colab import drive
-drive.mount('/content/drive')
+# Note: Google Drive is mounted at the top of the file for Colab compatibility
