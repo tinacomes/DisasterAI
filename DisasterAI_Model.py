@@ -5374,7 +5374,7 @@ def _plot_mean_iqr(ax, ticks, data_array, data_index, label, color, linestyle='-
 # ---  PLOT 1: SIMULATION INDICES  ---
 def plot_simulation_overview(results_dict, title_suffix=""):
     """Plots key performance and belief metrics."""
-    fig, axes = plt.subplots(2, 2, figsize=(14, 10), sharex=True)
+    fig, axes = plt.subplots(2, 2, figsize=(14, 10))  # Removed sharex=True for better control
     fig.suptitle(f"Simulation Overview {title_suffix}", fontsize=16)
 
     # --- Data Extraction ---
@@ -5383,6 +5383,20 @@ def plot_simulation_overview(results_dict, title_suffix=""):
     unmet_needs_list = results_dict.get("unmet_needs_evol")
     assist_stats = results_dict.get("assist", {})
     raw_counts = results_dict.get("raw_assist_counts", {})
+
+    # Debug: Check data availability and structure
+    print(f"\n=== Simulation Overview Data Diagnostics ===")
+    print(f"belief_error: {belief_error.shape if belief_error is not None and isinstance(belief_error, np.ndarray) else 'None or invalid'}")
+    print(f"belief_variance: {belief_variance.shape if belief_variance is not None and isinstance(belief_variance, np.ndarray) else 'None or invalid'}")
+    print(f"unmet_needs_evol: {len(unmet_needs_list) if unmet_needs_list else 0} runs")
+
+    # Check for non-zero values
+    if belief_error is not None and isinstance(belief_error, np.ndarray) and belief_error.size > 0:
+        print(f"  belief_error non-zero: {np.count_nonzero(belief_error)} / {belief_error.size}")
+        print(f"  belief_error range: [{np.nanmin(belief_error):.4f}, {np.nanmax(belief_error):.4f}]")
+    if belief_variance is not None and isinstance(belief_variance, np.ndarray) and belief_variance.size > 0:
+        print(f"  belief_variance non-zero: {np.count_nonzero(belief_variance)} / {belief_variance.size}")
+        print(f"  belief_variance range: [{np.nanmin(belief_variance):.4f}, {np.nanmax(belief_variance):.4f}]")
 
     # Determine Ticks - Use a sequence of approaches to find the actual tick count
     num_ticks = None
@@ -5473,6 +5487,7 @@ def plot_simulation_overview(results_dict, title_suffix=""):
     _enhanced_plot_mean_iqr(ax, belief_error, 2, "MAE Explor", "blue")
     ax.set_title("Avg. Belief MAE")
     ax.set_ylabel("MAE")
+    ax.set_xlabel("Tick")
     ax.grid(True, linestyle='--', alpha=0.6)
     ax.legend(fontsize='small')
     ax.set_ylim(bottom=0)
@@ -5483,6 +5498,7 @@ def plot_simulation_overview(results_dict, title_suffix=""):
     _enhanced_plot_mean_iqr(ax, belief_variance, 2, "Var Explor", "blue")
     ax.set_title("Within-Type Belief Variance")
     ax.set_ylabel("Variance")
+    ax.set_xlabel("Tick")
     ax.grid(True, linestyle='--', alpha=0.6)
     ax.legend(fontsize='small')
     ax.set_ylim(bottom=0)
@@ -5510,6 +5526,7 @@ def plot_simulation_overview(results_dict, title_suffix=""):
 
                 ax.plot(plot_ticks_needs, mean, label="Unmet Need", color="purple")
                 ax.fill_between(plot_ticks_needs, lower, upper, color="purple", alpha=0.4)
+                ax.set_xlim(0, T_needs-1)  # Set xlim based on actual unmet needs data length
             else:
                 ax.text(0.5, 0.5, 'No unmet needs data', ha='center', va='center')
         except Exception as e:
@@ -5521,10 +5538,11 @@ def plot_simulation_overview(results_dict, title_suffix=""):
     ax.legend(fontsize='small')
     ax.set_ylim(bottom=0)
 
-    # Explicitly set x-axis limits to match the simulation length
-    for ax_row in axes:
-        for ax in ax_row:
-            ax.set_xlim(0, num_ticks-1)
+    # Set x-axis limits for belief plots based on their data
+    if belief_error is not None and isinstance(belief_error, np.ndarray) and belief_error.ndim >= 2:
+        axes[0, 0].set_xlim(0, belief_error.shape[1]-1)
+    if belief_variance is not None and isinstance(belief_variance, np.ndarray) and belief_variance.ndim >= 2:
+        axes[0, 1].set_xlim(0, belief_variance.shape[1]-1)
 
     # --- Subplot 4: token assistance summary pie chart ---
     ax = axes[1, 1]
