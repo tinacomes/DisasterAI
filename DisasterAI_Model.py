@@ -732,7 +732,10 @@ class HumanAgent(Agent):
             }
 
             # Determine if this was a significant belief change
-            significant_change = abs(posterior_level - prior_level) >= 1
+            # FIXED: More nuanced threshold - count if level OR confidence changes significantly
+            level_change = abs(posterior_level - prior_level)
+            confidence_change = abs(posterior_confidence - prior_confidence)
+            significant_change = (level_change >= 1 or confidence_change >= 0.1)
 
             # Track AI source information for later trust updates
             is_ai_source = hasattr(self, 'ai_info_sources') and cell in self.ai_info_sources
@@ -740,21 +743,11 @@ class HumanAgent(Agent):
                 if not hasattr(self, 'ai_acceptances'):
                     self.ai_acceptances = {}
                 self.ai_acceptances[cell] = self.model.tick
-                
-            # Track acceptance statistics based on significant changes
-            if significant_change:
-                # Using the source_id parameter
-                if source_id is not None:
-                    if source_id.startswith("H_"):
-                        self.accepted_human += 1
-                        if source_id in self.friends:
-                            self.accepted_friend += 1
-                    elif source_id.startswith("A_"):
-                        self.accepted_ai += 1
-                        
-                    # Log acceptance for debugging
-                    # if self.model.debug_mode and self.model.tick % 10 == 0 and random.random() < 0.1:
-                        #print(f"DEBUG: Agent {self.unique_id} accepted info from {source_id} for cell {cell}")
+
+            # BUG FIX: Removed duplicate acceptance tracking from here
+            # Acceptance is now ONLY tracked in seek_information() (lines ~1070-1077)
+            # to avoid double-counting. Previously this incremented counters,
+            # then seek_information incremented them again = 2x inflation!
 
             # Return whether this update caused a significant belief change
             return significant_change
@@ -2649,7 +2642,9 @@ class DisasterModel(Model):
                 agent.accum_calls_ai = max(0, agent.accum_calls_ai)
                 agent.accum_calls_total = max(0, agent.accum_calls_total)
 
-                # Calculate AECI with robust error handling
+                # Calculate AECI (AI Query Ratio) with robust error handling
+                # NOTE: AECI measures proportion of QUERIES to AI, not acceptances
+                # High AECI = agent frequently queries AI (regardless of whether they accept the info)
                 if agent.accum_calls_total > 0:
                     # Ensure ratio is properly bounded between 0 and 1
                     ratio = max(0.0, min(1.0, agent.accum_calls_ai / agent.accum_calls_total))
@@ -2726,6 +2721,10 @@ class DisasterModel(Model):
             for agent in self.humans.values():
                 total_accepted = agent.accepted_human + agent.accepted_ai
                 total_accepted = total_accepted if total_accepted > 0 else 1
+
+                # CLARIFICATION: retain_aeci = AI ACCEPTANCE ratio (accepted from AI / total accepted)
+                # This is different from AECI which measures QUERY ratio (queries to AI / total queries)
+                # retain_aeci shows actual AI INFLUENCE on beliefs
                 retain_aeci_val = agent.accepted_ai / total_accepted if total_accepted > 0 else 0
                 retain_seci_val = agent.accepted_friend / total_accepted if total_accepted > 0 else 0
 
