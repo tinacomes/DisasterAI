@@ -4393,9 +4393,9 @@ def plot_summary_echo_indices_vs_alignment(results_b, alignment_values, title_su
             # Handle NaNs and infinities
             values = values[~np.isnan(values) & ~np.isinf(values)]
 
-            # Clip ratio metrics to [0,1]
-            if any(x in str(col_index) for x in ['aeci', 'seci']) or col_index in [1, 2]:
-                values = np.clip(values, 0.0, 1.0)
+            # IMPORTANT: Don't clip SECI or AECI-Var! They range from -1 to +1
+            # Negative values indicate echo chambers, which we need to see!
+            # Only AI call ratios are true [0,1] proportions
 
             return values
 
@@ -4421,10 +4421,11 @@ def plot_summary_echo_indices_vs_alignment(results_b, alignment_values, title_su
                              flierprops=dict(marker='o', markerfacecolor='salmon', markersize=3, alpha=0.7),
                              medianprops=dict(color='black'))
     ax.set_ylabel("SECI Value")
-    ax.set_title("Social Echo Chamber (SECI)")
+    ax.set_title("Social Echo Chamber (SECI)\n(Negative = Echo Chamber, Positive = Diversification)")
     ax.legend([bplot_exploit["boxes"][0], bplot_explor["boxes"][0]], ['Exploit', 'Explor'], loc='best')
     ax.grid(True, axis='y', linestyle='--', alpha=0.6)
-    ax.set_ylim(0, 1)
+    ax.axhline(0, color='black', linestyle='-', linewidth=0.8, alpha=0.5)  # Zero reference line
+    ax.set_ylim(-1.05, 1.05)  # SECI ranges from -1 to +1, allow full range
 
     # Plot AECI Variance boxplots
     ax = axes[0, 1]
@@ -4434,10 +4435,11 @@ def plot_summary_echo_indices_vs_alignment(results_b, alignment_values, title_su
                               flierprops=dict(marker='o', markerfacecolor='magenta', markersize=3, alpha=0.7),
                               medianprops=dict(color='black'))
     ax.set_ylabel("AI Belief Variance Reduction")
-    ax.set_title("AI Echo Chamber (AECI-Var)")
+    ax.set_title("AI Echo Chamber (AECI-Var)\n(Negative = AI Echo Chamber, Positive = AI Diversifies)")
     ax.legend([bplot_aeci_var["boxes"][0]], ['AI Reliant Group'], loc='best')
     ax.grid(True, axis='y', linestyle='--', alpha=0.6)
-    ax.set_ylim(0, 1)
+    ax.axhline(0, color='black', linestyle='-', linewidth=0.8, alpha=0.5)  # Zero reference line
+    ax.set_ylim(-1.05, 1.05)  # AECI-Var ranges from -1 to +1, allow full range
 
     # Plot AI Call Ratio boxplots
     ax = axes[1, 0]
@@ -4786,10 +4788,11 @@ def plot_summary_echo_indices_vs_alignment(results_b, alignment_values, title_su
                              flierprops=dict(marker='o', markerfacecolor='salmon', markersize=3, alpha=0.7),
                              medianprops=dict(color='black'))
     ax.set_ylabel("SECI Value")
-    ax.set_title("Social Echo Chamber (SECI)")
+    ax.set_title("Social Echo Chamber (SECI)\n(Negative = Echo Chamber, Positive = Diversification)")
     ax.legend([bplot_exploit["boxes"][0], bplot_explor["boxes"][0]], ['Exploit', 'Explor'], loc='best')
     ax.grid(True, axis='y', linestyle='--', alpha=0.6)
-    ax.set_ylim(0, 1)
+    ax.axhline(0, color='black', linestyle='-', linewidth=0.8, alpha=0.5)  # Zero reference line
+    ax.set_ylim(-1.05, 1.05)  # SECI ranges from -1 to +1, allow full range
 
     # Plot AECI Variance boxplots
     ax = axes[0, 1]
@@ -4799,10 +4802,11 @@ def plot_summary_echo_indices_vs_alignment(results_b, alignment_values, title_su
                               flierprops=dict(marker='o', markerfacecolor='magenta', markersize=3, alpha=0.7),
                               medianprops=dict(color='black'))
     ax.set_ylabel("AI Belief Variance Reduction")
-    ax.set_title("AI Echo Chamber (AECI-Var)")
+    ax.set_title("AI Echo Chamber (AECI-Var)\n(Negative = AI Echo Chamber, Positive = AI Diversifies)")
     ax.legend([bplot_aeci_var["boxes"][0]], ['AI Reliant Group'], loc='best')
     ax.grid(True, axis='y', linestyle='--', alpha=0.6)
-    ax.set_ylim(0, 1)
+    ax.axhline(0, color='black', linestyle='-', linewidth=0.8, alpha=0.5)  # Zero reference line
+    ax.set_ylim(-1.05, 1.05)  # AECI-Var ranges from -1 to +1, allow full range
 
     # Plot AI Call Ratio boxplots
     ax = axes[1, 0]
