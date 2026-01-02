@@ -83,27 +83,42 @@ else:
 os.makedirs(test_save_dir, exist_ok=True)
 print(f"Test results will be saved to: {test_save_dir}\n")
 
-# Define base parameters
+# Define base parameters (matching DisasterModel.__init__ signature)
 base_params = {
-    "num_humans": 100,
-    "num_ai": 3,
+    "share_exploitative": 0.5,
+    "share_of_disaster": 0.2,
+    "initial_trust": 0.5,
+    "initial_ai_trust": 0.5,
+    "number_of_humans": 100,  # Correct parameter name
+    "share_confirming": 0.3,
+    "disaster_dynamics": 2,
+    "shock_probability": 0.1,
+    "shock_magnitude": 2,
+    "trust_update_mode": "average",
+    "ai_alignment_level": 0.0,  # Will be varied
+    "exploitative_correction_factor": 1.0,
     "width": 20,
     "height": 20,
-    "max_ticks": 200,
-    "disaster_dynamics": "random_walk",
-    "shock_magnitude": 0.3,
-    "share_exploitative": 0.5,
-    "share_confirming": 0.3,
-    "base_ai_trust": 0.5,
-    "ai_alignment_level": 0.0,  # Will be varied
-    "debug_mode": False
+    "lambda_parameter": 0.5,
+    "learning_rate": 0.05,
+    "epsilon": 0.2,
+    "ticks": 200,  # max_ticks for test
+    "rumor_probability": 0.7,
+    "rumor_intensity": 2.0,
+    "rumor_confidence": 0.75,
+    "rumor_radius_factor": 0.9,
+    "min_rumor_separation_factor": 0.5,
+    "exploit_trust_lr": 0.03,
+    "explor_trust_lr": 0.08,
+    "exploit_friend_bias": 0.1,
+    "exploit_self_bias": 0.1
 }
 
 print("Base Parameters:")
-print(f"  Agents: {base_params['num_humans']}")
-print(f"  AI systems: {base_params['num_ai']}")
-print(f"  Ticks: {base_params['max_ticks']}")
+print(f"  Agents: {base_params['number_of_humans']}")
+print(f"  Ticks: {base_params['ticks']}")
 print(f"  Share exploitative: {base_params['share_exploitative']}")
+print(f"  Grid size: {base_params['width']}x{base_params['height']}")
 print()
 
 # Test configuration
