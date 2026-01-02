@@ -1,6 +1,14 @@
 
 # Install mesa if not already installed
-!pip install mesa
+import subprocess
+import sys
+try:
+    import mesa
+except ImportError:
+    print("Installing mesa...")
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "mesa", "-q"])
+    import mesa
+print("✓ Mesa library loaded")
 
 # Mount Google Drive FIRST (for Colab)
 try:
