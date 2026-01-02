@@ -1,82 +1,119 @@
-# Trial Version - Baseline Fix
+# Trial Version - Correct Fix: Remove Alignment Biases
 
-## Changes Made to DisasterAI_Model.py
+## Critical Error Identified
 
-### Problem Identified
-The `baseline_ai_factor = 0.1` prevented exploratory agents from switching away from AI at high alignment, distorting the experimental design.
+**Problem:** The code was hardcoding alignment effects as biases, which:
+- Tells agents a priori whether AI is truthful/biased
+- Completely undermines Q-learning mechanism
+- Prevents agents from discovering optimal strategies through experience
 
-### Solution Implemented
+## Correct Solution: Let Q-Learning Work
 
-**Lines 938-962: Exploratory Agent Source Selection Logic**
+### What Q-Learning Should Discover
 
-#### BEFORE (Distorted):
+**Exploratory Agents (80% accuracy rewards, 20% confirmation):**
+- Low alignment AI → accurate info → high rewards → **LEARN** to prefer AI
+- High alignment AI → biased info → low rewards → **LEARN** to avoid AI
+
+**Exploitative Agents (20% accuracy rewards, 80% confirmation):**
+- High alignment AI → confirms beliefs → high rewards → **LEARN** to prefer AI
+- Low alignment AI → may not confirm → lower rewards → **LEARN** relative preferences
+
+### What Was Wrong
+
+#### BEFORE (Hardcoded Alignment Effects):
+
+**Exploitative:**
 ```python
-inverse_alignment_factor = (1.0 - alignment) * 0.5
-baseline_ai_factor = 0.1  # DISTORTION!
-ai_bias = inverse_alignment_factor + baseline_ai_factor
+# Lines 929-936 - WRONG!
+ai_alignment_factor = alignment * 0.3
+scores[ai_id] += ai_alignment_factor
+# Telling exploitative agents: "High alignment AI is good for you!"
+```
+
+**Exploratory:**
+```python
+# Lines 943-962 - WRONG!
+inverse_alignment_factor = (1 - alignment) * 0.5 + 0.1  # baseline distortion
+scores[ai_id] += inverse_alignment_factor
 human_bias = alignment * 0.15
+# Telling exploratory agents: "Low alignment AI is good, high alignment AI is bad!"
 ```
 
-#### AFTER (Corrected):
+### AFTER (Let Q-Learning Discover):
+
+**Exploitative:**
 ```python
-inverse_alignment_factor = (1.0 - alignment) * 0.5
-ai_bias = inverse_alignment_factor  # Pure inverse alignment
-human_bias = alignment * 0.25  # Strengthened from 0.15
+# Intrinsic preferences only
+scores["human"] += self.exploit_friend_bias      # Prefer friends (confirmation)
+scores["self_action"] += self.exploit_self_bias  # Prefer self (confirmation)
+# NO AI bias - Q-learning discovers if AI confirms through rewards
 ```
 
-## Expected Behavioral Changes
+**Exploratory:**
+```python
+# Intrinsic preferences only
+scores["self_action"] -= 0.05  # Avoid self-confirmation
+# NO AI bias - Q-learning discovers accuracy through rewards
+# NO human bias - Q-learning discovers best sources
+```
 
-### Exploratory Agents - NEW Behavior
+## How This Should Work
 
-| Alignment | AI Bias | Human Bias | Net Preference |
-|-----------|---------|------------|----------------|
-| 0.0       | +0.50   | 0.00       | AI +0.50       |
-| 0.25      | +0.375  | +0.0625    | AI +0.3125     |
-| 0.50      | +0.25   | +0.125     | AI +0.125      |
-| 0.75      | +0.125  | +0.1875    | Human +0.0625  |
-| 1.0       | 0.00    | +0.25      | Human +0.25    |
+### Learning Process
 
-**Crossover point:** ~0.67 alignment (exploratory switch from AI to humans)
+**Tick 1-50:** Agents explore randomly (epsilon-greedy), get rewards, update Q-values
+- Exploratory at low alignment: AI accurate → positive rewards → Q(AI) increases
+- Exploitative at high alignment: AI confirms → positive rewards → Q(AI) increases
 
-### Comparison: Exploitative vs Exploratory
+**Tick 50-100:** Q-values stabilize, agents increasingly exploit learned preferences
+- Behavior emerges from LEARNING, not from hardcoded biases
 
-| Alignment | Exploitative → AI | Exploratory → AI | Differentiation |
-|-----------|-------------------|------------------|-----------------|
-| 0.0       | 0.0               | +0.50            | Explor prefer AI |
-| 0.5       | +0.15             | +0.25            | Explor prefer AI |
-| 0.75      | +0.225            | +0.125           | Exploit prefer AI |
-| 1.0       | +0.30             | 0.00             | Exploit prefer AI |
+**Tick 100+:** Stable behavior reflecting learned optimal strategies
 
-## Theoretical Alignment
+### Expected Emergent Behavior
 
-### Exploitative Agents (Confirmation-Seeking)
-- **Low alignment:** AI is truthful → not useful for confirmation → prefer friends/self
-- **High alignment:** AI confirms beliefs → very useful → PREFER AI ✓
+**At Low Alignment (truthful AI):**
+- Exploratory: High Q(AI) from accuracy rewards → prefer AI
+- Exploitative: Moderate Q(AI) - accurate but may not confirm → mixed behavior
 
-### Exploratory Agents (Correctness-Seeking)
-- **Low alignment:** AI is truthful → very useful for accurate info → PREFER AI ✓
-- **High alignment:** AI is biased → not useful for correctness → PREFER HUMANS ✓
+**At High Alignment (biased AI):**
+- Exploratory: Low Q(AI) from inaccuracy penalties → avoid AI
+- Exploitative: High Q(AI) from confirmation rewards → prefer AI
 
-## Impact on Metrics
+**Clear differentiation emerges from learning, not from a priori biases!**
 
-### SECI (Social Echo Chamber Index)
-**Before:** Similar patterns for both agent types (both using AI heavily)
-**After:** Should see clear divergence:
-- Exploitative: More negative SECI at high alignment (AI-driven echo chambers)
-- Exploratory: Less negative SECI at high alignment (human network diversity)
+## Why This Matters
 
-### AECI (AI Echo Chamber Index)
-**Before:** Both types show high AECI across alignments
-**After:** Should see clear divergence:
-- Exploitative: AECI increases with alignment
-- Exploratory: AECI decreases with alignment (crossover ~0.67)
+### Scientific Validity
+- Q-learning experiments must let agents LEARN from environment
+- Hardcoded biases = researcher imposing results, not discovering them
+- Emergent behavior from learning = valid scientific finding
 
-## Next Steps
+### Interpretability
+- "Agents learned to prefer X" >> "Agents were biased toward X"
+- Shows adaptation to environment
+- Demonstrates intelligence/learning capability
 
-1. **Re-run Experiment B** with corrected logic
-2. **Verify behavioral differentiation** in the results
-3. **Compare** trial results to original distorted results
-4. **If successful:** This becomes the publication version
+### Experimental Design
+- Manipulate alignment → observe learning → measure behavioral outcomes
+- NOT: Manipulate alignment → tell agents about it → observe hardcoded behavior
+
+## Impact on Results
+
+### Hypothesis Testing
+Now we can properly test: *"Do agents learn to adapt their information-seeking based on AI characteristics?"*
+
+**Testable predictions:**
+1. Q-values for AI should increase with experience (learning occurs)
+2. Q(AI) trajectories should differ by alignment level (environment matters)
+3. Q(AI) differences should vary by agent type (reward structures matter)
+
+### Metrics to Track
+- **Q-value evolution:** Does Q(AI) change over time?
+- **Behavioral crossover:** When do exploratory agents switch preferences?
+- **Learning speed:** How fast do Q-values stabilize?
 
 ## Files Modified
-- `DisasterAI_Model.py` (lines 938-962)
+- `DisasterAI_Model.py` (lines 921-941): Removed ALL alignment-based biases
+- Both exploitative AND exploratory agent types corrected

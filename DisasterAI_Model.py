@@ -919,47 +919,26 @@ class HumanAgent(Agent):
                 decision_factors['biases'] = {}
 
                 if self.agent_type == "exploitative":
-                    # Exploitative agents prefer friends and self-confirmation
+                    # Exploitative agents prefer confirmation sources
+                    # Friends (who likely share similar beliefs)
                     scores["human"] += self.exploit_friend_bias
-                    scores["self_action"] += self.exploit_self_bias
-
                     decision_factors['biases']["human"] = self.exploit_friend_bias
+
+                    # Self-confirmation (validate own beliefs)
+                    scores["self_action"] += self.exploit_self_bias
                     decision_factors['biases']["self_action"] = self.exploit_self_bias
 
-                    # AI alignment effect on exploitative agents
-                    # Higher alignment directly increases preference for AI
-                    ai_alignment_factor = self.model.ai_alignment_level * 0.3  # Increased effect
-                    for k in range(self.model.num_ai):
-                        ai_id = f"A_{k}"
-                        ai_bias = ai_alignment_factor  # Directly proportional to alignment
-                        scores[ai_id] += ai_bias
-                        decision_factors['biases'][ai_id] = ai_bias
+                    # NO alignment-based AI bias - let Q-learning discover if AI confirms!
+                    # Q-learning will learn: high alignment AI → confirms beliefs → high Q-value
 
                 else:  # exploratory
-                    # Exploratory agents have a slight bias against self-confirmation
+                    # Exploratory agents avoid confirmation bias
                     scores["self_action"] -= 0.05
                     decision_factors['biases']["self_action"] = -0.05
 
-                    # Exploratory agents seek CORRECT information
-                    # Low alignment AI = truthful → prefer AI
-                    # High alignment AI = biased → avoid AI, prefer humans
-                    inverse_alignment_factor = (1.0 - self.model.ai_alignment_level) * 0.5
-
-                    for k in range(self.model.num_ai):
-                        ai_id = f"A_{k}"
-                        # Pure inverse alignment - no baseline distortion
-                        # At alignment=0: bias=0.5 (strongly prefer truthful AI)
-                        # At alignment=1: bias=0.0 (neutral toward biased AI)
-                        ai_bias = inverse_alignment_factor
-                        scores[ai_id] += ai_bias
-                        decision_factors['biases'][ai_id] = ai_bias
-
-                    # Exploratory agents prefer humans when AI alignment is high
-                    # (high alignment = AI is biased, humans provide diverse info)
-                    # Strengthen this to create clear behavioral differentiation
-                    human_bias = self.model.ai_alignment_level * 0.25  # Increased from 0.15
-                    scores["human"] += human_bias
-                    decision_factors['biases']["human"] = human_bias
+                    # NO alignment-based biases - let Q-learning discover accuracy!
+                    # Q-learning will learn: low alignment AI → accurate → high Q-value
+                    # Q-learning will learn: high alignment AI → inaccurate → low Q-value
 
                 # Add small random noise to break ties
                 for mode in scores:
