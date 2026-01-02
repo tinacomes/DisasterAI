@@ -7313,22 +7313,40 @@ if __name__ == "__main__":
         "exploit_self_bias": 0.1
     }
     num_runs = 10
-    save_dir = "agent_model_results"
-    os.makedirs(save_dir, exist_ok=True)
+    # save_dir already set at top of file - DO NOT override!
+    # os.makedirs(save_dir, exist_ok=True)  # Already created above
+
+    print(f"\n{'='*70}")
+    print(f"STARTING EXPERIMENTS")
+    print(f"{'='*70}")
+    print(f"Save directory: {save_dir}")
+    print(f"Runs per parameter: {num_runs}")
+    print(f"{'='*70}\n")
 
     ##############################################
     # Experiment A: Vary share_exploitative
     ##############################################
+    print("▶ EXPERIMENT A: Share Exploitative [0.2, 0.5, 0.8]")
     share_values = [0.2, 0.5, 0.8]
     file_a_pkl = os.path.join(save_dir, "results_experiment_A.pkl")
     file_a_csv = os.path.join(save_dir, "results_experiment_A.csv")
 
-    param_name_a = "Share Exploitative"
-    print("Running Experiment A...")
-    results_a = experiment_share_exploitative(base_params, share_values, num_runs)
-    with open(file_a_pkl, "wb") as f:
-        pickle.dump(results_a, f)
-    export_results_to_csv(results_a, share_values, file_a_csv, "Experiment A")
+    try:
+        import time
+        start_a = time.time()
+        results_a = experiment_share_exploitative(base_params, share_values, num_runs)
+
+        # SAVE IMMEDIATELY
+        with open(file_a_pkl, "wb") as f:
+            pickle.dump(results_a, f)
+        export_results_to_csv(results_a, share_values, file_a_csv, "Experiment A")
+
+        elapsed_a = (time.time() - start_a) / 60
+        print(f"✓ EXPERIMENT A COMPLETE ({elapsed_a:.1f} min) - SAVED to {file_a_pkl}\n")
+    except Exception as e:
+        print(f"✗ EXPERIMENT A FAILED: {e}\n")
+        import traceback
+        traceback.print_exc()
 
     print("\n--- Plotting Aggregated Time Evolution for Experiment A ---")
     for share in share_values:
@@ -7357,16 +7375,24 @@ if __name__ == "__main__":
     ##############################################
     # Experiment B: Vary AI Alignment Level
     ##############################################
-    alignment_values = [0.0, 0.25, 0.5, 0.75, 1.0]  # Sweep
-    param_name_b = "AI Alignment Tipping Point"
-    file_b_pkl = os.path.join(save_dir, f"results_{param_name_b.replace(' ','_')}.pkl")
+    print("▶ EXPERIMENT B: AI Alignment [0.0, 0.25, 0.5, 0.75, 1.0]")
+    alignment_values = [0.0, 0.25, 0.5, 0.75, 1.0]
+    file_b_pkl = os.path.join(save_dir, "results_experiment_B.pkl")
 
-    print(f"\nRunning {param_name_b} Experiment...")
-    results_b = experiment_alignment_tipping_point(base_params, alignment_values, num_runs=10)
+    try:
+        start_b = time.time()
+        results_b = experiment_alignment_tipping_point(base_params, alignment_values, num_runs=10)
 
-    # Save results
-    with open(file_b_pkl, "wb") as f:
-        pickle.dump(results_b, f)
+        # SAVE IMMEDIATELY
+        with open(file_b_pkl, "wb") as f:
+            pickle.dump(results_b, f)
+
+        elapsed_b = (time.time() - start_b) / 60
+        print(f"✓ EXPERIMENT B COMPLETE ({elapsed_b:.1f} min) - SAVED to {file_b_pkl}\n")
+    except Exception as e:
+        print(f"✗ EXPERIMENT B FAILED: {e}\n")
+        import traceback
+        traceback.print_exc()
 
     # Get all alignment values (including fine-grained ones added by tipping point detection)
     all_alignment_values = sorted(list(results_b.keys()))
@@ -7451,19 +7477,25 @@ if __name__ == "__main__":
     ##############################################
     # Experiment D: Vary Learning Rate and Epsilon
     ##############################################
-    print("\n=== RUNNING EXPERIMENT D: Q-Learning Parameter Sensitivity ===")
+    print("▶ EXPERIMENT D: Q-Learning Sensitivity [LR: 0.05-0.15, ε: 0.2-0.4]")
     learning_rate_values = [0.05, 0.1, 0.15]
     epsilon_values = [0.2, 0.3, 0.4]
     file_d_pkl = os.path.join(save_dir, "results_experiment_D.pkl")
 
-    print(f"Testing {len(learning_rate_values)} learning rates × {len(epsilon_values)} epsilon values...")
-    results_d = experiment_learning_trust(base_params, learning_rate_values, epsilon_values, num_runs)
+    try:
+        start_d = time.time()
+        results_d = experiment_learning_trust(base_params, learning_rate_values, epsilon_values, num_runs)
 
-    # Save results
-    with open(file_d_pkl, "wb") as f:
-        pickle.dump(results_d, f)
-    print(f"✓ Experiment D saved to: {file_d_pkl}")
-    print("=== EXPERIMENT D COMPLETED ===")
+        # SAVE IMMEDIATELY
+        with open(file_d_pkl, "wb") as f:
+            pickle.dump(results_d, f)
+
+        elapsed_d = (time.time() - start_d) / 60
+        print(f"✓ EXPERIMENT D COMPLETE ({elapsed_d:.1f} min) - SAVED to {file_d_pkl}\n")
+    except Exception as e:
+        print(f"✗ EXPERIMENT D FAILED: {e}\n")
+        import traceback
+        traceback.print_exc()
     #
     # # --- Plot 1: Final SECI vs LR/Epsilon (Bar Chart) ---
     # fig_d_seci, ax_d_seci = plt.subplots(1, 2, figsize=(12, 5), sharey=True)
