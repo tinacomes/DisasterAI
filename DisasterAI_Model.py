@@ -34,6 +34,14 @@ import csv
 from mesa import Agent, Model
 from mesa.space import MultiGrid
 
+# Import information landscape tracking
+try:
+    from track_info_landscape import track_information_landscape, plot_information_landscape
+except ImportError:
+    print("⚠ track_info_landscape.py not found - info landscape tracking disabled")
+    track_information_landscape = None
+    plot_information_landscape = None
+
 # Set save directory (Drive if in Colab, local otherwise)
 if IN_COLAB:
     save_dir = "/content/drive/MyDrive/DisasterAI_results"
@@ -2393,6 +2401,14 @@ class DisasterModel(Model):
 
         # Every 5 ticks, compute additional metrics.
         if self.tick % 5 == 0:
+            # --- Track Information Landscape ---
+            if track_information_landscape is not None:
+                try:
+                    track_information_landscape(self)
+                except Exception as e:
+                    if self.debug_mode:
+                        print(f"Error in track_information_landscape: {e}")
+
             # --- SECI Calculation ---
             all_belief_levels = []
 
@@ -3504,6 +3520,14 @@ def simulation_generator(num_runs, base_params):
             # Run the simulation with the given parameters
             print(f"Starting simulation run {seed+1}/{num_runs}...")
             model = run_simulation(base_params)
+
+            # Generate information landscape plot if data was collected
+            if plot_information_landscape is not None:
+                try:
+                    if hasattr(model, 'info_landscape_data') and len(model.info_landscape_data.get('ticks', [])) > 0:
+                        plot_information_landscape(model, save_dir="analysis_plots")
+                except Exception as e:
+                    print(f"Warning: Could not generate info landscape plot: {e}")
 
             # Extract all relevant data from the model
             # Fix AECI variance data to ensure consistent format
