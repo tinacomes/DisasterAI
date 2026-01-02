@@ -18,10 +18,13 @@ from DisasterAI_Model import aggregate_simulation_results, DisasterModel
 # Configuration
 try:
     from google.colab import drive
-    drive.mount('/content/drive')
+    # Check if already mounted, if not mount it
+    if not os.path.exists('/content/drive/MyDrive'):
+        drive.mount('/content/drive')
     save_dir = "/content/drive/MyDrive/DisasterAI_results"
     IN_COLAB = True
-except:
+except ImportError:
+    # Not in Colab
     save_dir = "DisasterAI_results"
     IN_COLAB = False
 

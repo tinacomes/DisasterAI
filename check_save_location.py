@@ -13,7 +13,7 @@ try:
     from google.colab import drive
     print("✓ Running in Colab")
     IN_COLAB = True
-except:
+except ImportError:
     print("✗ NOT in Colab")
     IN_COLAB = False
 
