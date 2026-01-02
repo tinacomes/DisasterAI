@@ -1875,27 +1875,25 @@ class DisasterModel(Model):
 
         aeci_variance = 0.0  # Default neutral value
 
-        # Define AI-reliant agents based on ACCEPTED information, not just queries
-        # For echo chambers, what matters is what information agents BELIEVE, not what they query
-        # NOTE: Counters reset every 5 ticks, so threshold must be achievable in that window
-        min_acceptances_threshold = 2  # At least 2 acceptances in 5-tick window
-        min_ai_ratio = 0.5              # Majority (50%+) of acceptances from AI
+        # Define AI-reliant agents based on COMPARATIVE acceptance
+        # AI-reliant = accepts more from AI than from friends (social network)
+        # This captures the key dynamic: AI vs social network for belief formation
+        min_acceptances_threshold = 2  # Need some activity to be meaningful
 
         ai_reliant_agents = []
         for agent in self.humans.values():
             # Safety checks for valid counters
-            if not hasattr(agent, 'accepted_ai') or not hasattr(agent, 'accepted_human'):
+            if not hasattr(agent, 'accepted_ai') or not hasattr(agent, 'accepted_friend'):
                 continue
 
-            # Total acceptances = AI + human acceptances
-            total_acceptances = agent.accepted_ai + agent.accepted_human
+            # Total acceptances for comparison
+            total_acceptances = agent.accepted_ai + agent.accepted_friend
 
             if total_acceptances < min_acceptances_threshold:
                 continue
 
-            ai_ratio = agent.accepted_ai / total_acceptances
-
-            if ai_ratio >= min_ai_ratio:
+            # COMPARATIVE: AI-reliant if accepts more from AI than friends
+            if agent.accepted_ai > agent.accepted_friend:
                 ai_reliant_agents.append(agent)
 
         if self.debug_mode:
