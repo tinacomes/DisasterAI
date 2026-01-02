@@ -55,27 +55,32 @@ for align in alignment_values:
     # Extract data
     ticks = seci_data[0, :, 0]
 
-    # SECI (exploitative agents) - negative = echo chamber
-    # Take absolute value to get chamber STRENGTH
+    # SECI - separate exploitative and exploratory
     seci_exploit = seci_data[:, :, 1]
-    social_strength = np.abs(seci_exploit)  # 0 to 1, higher = stronger chamber
+    seci_explor = seci_data[:, :, 2]
+    social_strength_exploit = np.abs(seci_exploit)  # 0 to 1
+    social_strength_explor = np.abs(seci_explor)  # 0 to 1
 
-    # AECI (exploitative agents) - already 0 to 1
+    # AECI - separate exploitative and exploratory
     aeci_exploit = aeci_data[:, :, 1]
-    ai_strength = aeci_exploit  # 0 to 1
+    aeci_explor = aeci_data[:, :, 2]
+    ai_strength_exploit = aeci_exploit  # 0 to 1
+    ai_strength_explor = aeci_explor  # 0 to 1
 
-    # Calculate means
-    social_mean = np.mean(social_strength, axis=0)
-    social_std = np.std(social_strength, axis=0)
-    ai_mean = np.mean(ai_strength, axis=0)
-    ai_std = np.std(ai_strength, axis=0)
+    # Calculate means for both agent types
+    social_exploit_mean = np.mean(social_strength_exploit, axis=0)
+    social_exploit_std = np.std(social_strength_exploit, axis=0)
+    social_explor_mean = np.mean(social_strength_explor, axis=0)
+    social_explor_std = np.std(social_strength_explor, axis=0)
 
-    # Net chamber strength: How strong are echo chambers overall?
-    net_strength = social_mean + ai_mean
+    ai_exploit_mean = np.mean(ai_strength_exploit, axis=0)
+    ai_exploit_std = np.std(ai_strength_exploit, axis=0)
+    ai_explor_mean = np.mean(ai_strength_explor, axis=0)
+    ai_explor_std = np.std(ai_strength_explor, axis=0)
 
-    # Dominance: Which type of chamber dominates?
-    social_dominance = social_mean / (social_mean + ai_mean + 1e-10)  # 0 to 1
-    ai_dominance = ai_mean / (social_mean + ai_mean + 1e-10)  # 0 to 1
+    # Net chamber strength for each agent type
+    net_exploit = social_exploit_mean + ai_exploit_mean
+    net_explor = social_explor_mean + ai_explor_mean
 
     #########################################
     # Create comprehensive figure
@@ -87,109 +92,111 @@ for align in alignment_values:
     fig.suptitle(f'Chamber Dynamics: AI Alignment = {align}',
                  fontsize=16, fontweight='bold')
 
-    # Panel 1: Chamber Strength Over Time
+    # Panel 1: EXPLOITATIVE Agents - Chamber Strength Over Time
     ax1 = fig.add_subplot(gs[0, :])
-    ax1.plot(ticks, social_mean, 'o-', label='Social Chamber Strength',
+    ax1.plot(ticks, social_exploit_mean, 'o-', label='Social (Exploitative)',
              color='#E74C3C', linewidth=2.5, markersize=4, alpha=0.9)
-    ax1.fill_between(ticks, social_mean - social_std, social_mean + social_std,
+    ax1.fill_between(ticks, social_exploit_mean - social_exploit_std,
+                      social_exploit_mean + social_exploit_std,
                       color='#E74C3C', alpha=0.2)
 
-    ax1.plot(ticks, ai_mean, 's-', label='AI Chamber Strength',
+    ax1.plot(ticks, ai_exploit_mean, 's-', label='AI (Exploitative)',
              color='#3498DB', linewidth=2.5, markersize=4, alpha=0.9)
-    ax1.fill_between(ticks, ai_mean - ai_std, ai_mean + ai_std,
+    ax1.fill_between(ticks, ai_exploit_mean - ai_exploit_std,
+                      ai_exploit_mean + ai_exploit_std,
                       color='#3498DB', alpha=0.2)
 
-    ax1.plot(ticks, net_strength, '^-', label='NET Chamber Strength (Social + AI)',
+    ax1.plot(ticks, net_exploit, '^-', label='NET (Exploitative)',
              color='#9B59B6', linewidth=3, markersize=6, alpha=0.9)
 
     ax1.set_ylabel('Chamber Strength', fontsize=12, fontweight='bold')
     ax1.set_xlabel('Simulation Tick', fontsize=12, fontweight='bold')
-    ax1.set_title('Echo Chamber Strength Over Time', fontsize=13, fontweight='bold')
-    ax1.set_ylim(0, 2)  # Both can add up
+    ax1.set_title('EXPLOITATIVE Agents: Echo Chamber Strength Over Time', fontsize=13, fontweight='bold')
+    ax1.set_ylim(0, 2)
     ax1.legend(loc='best', fontsize=10)
     ax1.grid(True, alpha=0.3)
 
-    # Panel 2: Dominance Over Time (Stacked Area)
+    # Panel 2: EXPLORATORY Agents - Chamber Strength Over Time
     ax2 = fig.add_subplot(gs[1, :])
-    ax2.fill_between(ticks, 0, social_dominance,
-                      color='#E74C3C', alpha=0.6, label='Social Dominated')
-    ax2.fill_between(ticks, social_dominance, 1,
-                      color='#3498DB', alpha=0.6, label='AI Dominated')
-    ax2.axhline(0.5, color='black', linestyle='--', linewidth=2, alpha=0.7,
-                label='Equal Dominance')
+    ax2.plot(ticks, social_explor_mean, 'o-', label='Social (Exploratory)',
+             color='#E74C3C', linewidth=2.5, markersize=4, alpha=0.9, linestyle='--')
+    ax2.fill_between(ticks, social_explor_mean - social_explor_std,
+                      social_explor_mean + social_explor_std,
+                      color='#E74C3C', alpha=0.2)
 
-    ax2.set_ylabel('Dominance', fontsize=12, fontweight='bold')
+    ax2.plot(ticks, ai_explor_mean, 's-', label='AI (Exploratory)',
+             color='#3498DB', linewidth=2.5, markersize=4, alpha=0.9, linestyle='--')
+    ax2.fill_between(ticks, ai_explor_mean - ai_explor_std,
+                      ai_explor_mean + ai_explor_std,
+                      color='#3498DB', alpha=0.2)
+
+    ax2.plot(ticks, net_explor, '^-', label='NET (Exploratory)',
+             color='#9B59B6', linewidth=3, markersize=6, alpha=0.9, linestyle='--')
+
+    ax2.set_ylabel('Chamber Strength', fontsize=12, fontweight='bold')
     ax2.set_xlabel('Simulation Tick', fontsize=12, fontweight='bold')
-    ax2.set_title('Social vs AI Dominance Over Time', fontsize=13, fontweight='bold')
-    ax2.set_ylim(0, 1)
+    ax2.set_title('EXPLORATORY Agents: Echo Chamber Strength Over Time', fontsize=13, fontweight='bold')
+    ax2.set_ylim(0, 2)
     ax2.legend(loc='best', fontsize=10)
     ax2.grid(True, alpha=0.3)
 
-    # Panel 3: Amplification Analysis
+    # Panel 3: Amplification Analysis - EXPLOITATIVE
     ax3 = fig.add_subplot(gs[2, 0])
 
-    # Compare early vs late
-    early_social = np.mean(social_mean[:30])
-    late_social = np.mean(social_mean[-30:])
-    early_ai = np.mean(ai_mean[:30])
-    late_ai = np.mean(ai_mean[-30:])
-    early_net = early_social + early_ai
-    late_net = late_social + late_ai
+    # Compare early vs late for EXPLOITATIVE
+    early_social_ex = np.mean(social_exploit_mean[:30])
+    late_social_ex = np.mean(social_exploit_mean[-30:])
+    early_ai_ex = np.mean(ai_exploit_mean[:30])
+    late_ai_ex = np.mean(ai_exploit_mean[-30:])
+    early_net_ex = early_social_ex + early_ai_ex
+    late_net_ex = late_social_ex + late_ai_ex
 
     x = np.arange(3)
     width = 0.35
 
-    ax3.bar(x - width/2, [early_social, early_ai, early_net], width,
-            label='Early (ticks 1-30)', color='#95A5A6', alpha=0.8)
-    ax3.bar(x + width/2, [late_social, late_ai, late_net], width,
-            label='Late (ticks 120-150)', color='#34495E', alpha=0.8)
+    ax3.bar(x - width/2, [early_social_ex, early_ai_ex, early_net_ex], width,
+            label='Early (1-30)', color='#95A5A6', alpha=0.8)
+    ax3.bar(x + width/2, [late_social_ex, late_ai_ex, late_net_ex], width,
+            label='Late (120-150)', color='#34495E', alpha=0.8)
 
-    ax3.set_ylabel('Average Chamber Strength', fontsize=11, fontweight='bold')
-    ax3.set_title('Amplification Analysis', fontsize=12, fontweight='bold')
+    ax3.set_ylabel('Avg Strength', fontsize=10, fontweight='bold')
+    ax3.set_title('Exploitative: Amplification', fontsize=11, fontweight='bold')
     ax3.set_xticks(x)
-    ax3.set_xticklabels(['Social', 'AI', 'NET'])
-    ax3.legend(fontsize=9)
+    ax3.set_xticklabels(['Social', 'AI', 'NET'], fontsize=9)
+    ax3.legend(fontsize=8)
     ax3.grid(True, alpha=0.3, axis='y')
 
-    # Panel 4: Key Statistics
+    # Panel 4: Key Statistics - Both Agent Types
     ax4 = fig.add_subplot(gs[2, 1])
     ax4.axis('off')
 
-    # Find when AI overtakes social (if it does)
-    overtake_tick = None
-    for i, tick in enumerate(ticks):
-        if ai_mean[i] > social_mean[i]:
-            overtake_tick = int(tick)
-            break
+    # Calculate changes for both agent types
+    net_change_exploit = ((late_net_ex - early_net_ex) / early_net_ex * 100) if early_net_ex > 0 else 0
 
-    # Calculate effects
-    social_change = ((late_social - early_social) / early_social * 100) if early_social > 0 else 0
-    ai_emergence = late_ai
-    net_change = ((late_net - early_net) / early_net * 100) if early_net > 0 else 0
+    early_social_exp = np.mean(social_explor_mean[:30])
+    late_social_exp = np.mean(social_explor_mean[-30:])
+    early_ai_exp = np.mean(ai_explor_mean[:30])
+    late_ai_exp = np.mean(ai_explor_mean[-30:])
+    early_net_exp = early_social_exp + early_ai_exp
+    late_net_exp = late_social_exp + late_ai_exp
+    net_change_explor = ((late_net_exp - early_net_exp) / early_net_exp * 100) if early_net_exp > 0 else 0
 
     stats_text = f"""
-KEY FINDINGS (Alignment = {align}):
+FINDINGS (Align = {align}):
 
-Social Chamber Change:
-  Early: {early_social:.3f}
-  Late:  {late_social:.3f}
-  Change: {social_change:+.1f}%
+EXPLOITATIVE Agents:
+  Social: {early_social_ex:.2f} → {late_social_ex:.2f}
+  AI: {early_ai_ex:.2f} → {late_ai_ex:.2f}
+  NET: {early_net_ex:.2f} → {late_net_ex:.2f}
+  Change: {net_change_exploit:+.1f}%
+  → {'AMPLIFIES' if net_change_exploit > 10 else 'DISRUPTS' if net_change_exploit < -10 else 'MIXED'}
 
-AI Chamber Emergence:
-  Early: {early_ai:.3f}
-  Late:  {late_ai:.3f}
-  Strength: {ai_emergence:.3f}
-
-NET Effect:
-  Early: {early_net:.3f}
-  Late:  {late_net:.3f}
-  Change: {net_change:+.1f}%
-
-AI Overtakes Social:
-  {'Tick ' + str(overtake_tick) if overtake_tick else 'Never'}
-
-INTERPRETATION:
-  {'AI AMPLIFIES chambers' if net_change > 10 else 'AI DISRUPTS chambers' if net_change < -10 else 'AI has MIXED effect'}
+EXPLORATORY Agents:
+  Social: {early_social_exp:.2f} → {late_social_exp:.2f}
+  AI: {early_ai_exp:.2f} → {late_ai_exp:.2f}
+  NET: {early_net_exp:.2f} → {late_net_exp:.2f}
+  Change: {net_change_explor:+.1f}%
+  → {'AMPLIFIES' if net_change_explor > 10 else 'DISRUPTS' if net_change_explor < -10 else 'MIXED'}
 """
 
     ax4.text(0.05, 0.5, stats_text, fontsize=10, family='monospace',
