@@ -940,24 +940,25 @@ class HumanAgent(Agent):
                     scores["self_action"] -= 0.05
                     decision_factors['biases']["self_action"] = -0.05
 
-                    # Strengthen inverse alignment effect for exploratory agents
-                    # Exploratory agents prefer truth-telling AI (low alignment)
-                    inverse_alignment_factor = (1.0 - self.model.ai_alignment_level) * 0.5  # Stronger effect
-                    baseline_ai_factor = 0.1  # alignment more important than AI preference
-
+                    # Exploratory agents seek CORRECT information
+                    # Low alignment AI = truthful → prefer AI
+                    # High alignment AI = biased → avoid AI, prefer humans
+                    inverse_alignment_factor = (1.0 - self.model.ai_alignment_level) * 0.5
 
                     for k in range(self.model.num_ai):
                         ai_id = f"A_{k}"
-                        # Combine baseline with inverse alignment for more stable behavior
-                        ai_bias = inverse_alignment_factor +baseline_ai_factor
+                        # Pure inverse alignment - no baseline distortion
+                        # At alignment=0: bias=0.5 (strongly prefer truthful AI)
+                        # At alignment=1: bias=0.0 (neutral toward biased AI)
+                        ai_bias = inverse_alignment_factor
                         scores[ai_id] += ai_bias
                         decision_factors['biases'][ai_id] = ai_bias
 
-                    # Reduce bias for human consultation when alignment is low
-                    # Exploratory agents prefer humans more when AI alignment is high
-                    # (since high alignment means less valuable AI information)
-                    human_bias = self.model.ai_alignment_level * 0.15
-                    scores["human"] += human_bias  # Note: changed to positive bias now
+                    # Exploratory agents prefer humans when AI alignment is high
+                    # (high alignment = AI is biased, humans provide diverse info)
+                    # Strengthen this to create clear behavioral differentiation
+                    human_bias = self.model.ai_alignment_level * 0.25  # Increased from 0.15
+                    scores["human"] += human_bias
                     decision_factors['biases']["human"] = human_bias
 
                 # Add small random noise to break ties
