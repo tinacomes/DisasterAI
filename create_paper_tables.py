@@ -19,10 +19,11 @@ import pandas as pd
 # Configuration
 try:
     from google.colab import drive
-    drive.mount('/content/drive')
+    if not os.path.exists('/content/drive/MyDrive'):
+        drive.mount('/content/drive')
     RESULTS_DIR = "/content/drive/MyDrive/DisasterAI_results"
     IN_COLAB = True
-except:
+except ImportError:
     RESULTS_DIR = "DisasterAI_results"
     IN_COLAB = False
 

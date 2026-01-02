@@ -21,12 +21,13 @@ warnings.filterwarnings('ignore')
 # Configuration - CORRECTED PATHS
 try:
     from google.colab import drive
-    drive.mount('/content/drive')
-    RESULTS_DIR = "/content/drive/MyDrive/DisasterAI_results"  # FIXED: lowercase 'results'
+    if not os.path.exists('/content/drive/MyDrive'):
+        drive.mount('/content/drive')
+    RESULTS_DIR = "/content/drive/MyDrive/DisasterAI_results"
     IN_COLAB = True
     print("✓ Running in Google Colab")
-except:
-    RESULTS_DIR = "DisasterAI_results"  # FIXED: lowercase 'results'
+except ImportError:
+    RESULTS_DIR = "DisasterAI_results"
     IN_COLAB = False
     print("✓ Running locally")
 
