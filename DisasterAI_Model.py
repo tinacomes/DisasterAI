@@ -918,6 +918,16 @@ class HumanAgent(Agent):
                 # Add biases based on agent type
                 decision_factors['biases'] = {}
 
+                # Small baseline for AI to make it competitive with other sources
+                # This does NOT encode alignment - just makes AI a viable option
+                # Q-learning will then differentiate based on actual performance
+                baseline_ai_preference = 0.05
+                for k in range(self.model.num_ai):
+                    ai_id = f"A_{k}"
+                    scores[ai_id] += baseline_ai_preference
+                    if 'ai_baseline' not in decision_factors['biases']:
+                        decision_factors['biases']['ai_baseline'] = baseline_ai_preference
+
                 if self.agent_type == "exploitative":
                     # Exploitative agents prefer confirmation sources
                     # Friends (who likely share similar beliefs)
@@ -928,17 +938,16 @@ class HumanAgent(Agent):
                     scores["self_action"] += self.exploit_self_bias
                     decision_factors['biases']["self_action"] = self.exploit_self_bias
 
-                    # NO alignment-based AI bias - let Q-learning discover if AI confirms!
-                    # Q-learning will learn: high alignment AI → confirms beliefs → high Q-value
+                    # Q-learning will discover: high alignment AI → confirms beliefs → increase Q-value
 
                 else:  # exploratory
                     # Exploratory agents avoid confirmation bias
                     scores["self_action"] -= 0.05
                     decision_factors['biases']["self_action"] = -0.05
 
-                    # NO alignment-based biases - let Q-learning discover accuracy!
-                    # Q-learning will learn: low alignment AI → accurate → high Q-value
-                    # Q-learning will learn: high alignment AI → inaccurate → low Q-value
+                    # Q-learning will discover:
+                    # - Low alignment AI → accurate → increase Q-value
+                    # - High alignment AI → inaccurate → decrease Q-value
 
                 # Add small random noise to break ties
                 for mode in scores:
