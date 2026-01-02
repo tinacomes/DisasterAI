@@ -1,22 +1,19 @@
 """
-TRULY INCREMENTAL Experiment Runner
-====================================
+TRULY INCREMENTAL Experiment Runner - USING EXISTING WORKING FUNCTIONS
+=======================================================================
 
-This version saves after EVERY SINGLE PARAMETER VALUE.
-If it crashes, you only lose the current parameter, not everything.
-
-This is what should have been done from the start. I apologize.
+Uses the proven aggregate_simulation_results() function from the model,
+but saves after each parameter value completes.
 """
 
 import os
 import sys
 import pickle
-import copy
 import time
 
 # Import from main model
 sys.path.insert(0, '/content/DisasterAI')
-from DisasterAI_Model import *
+from DisasterAI_Model import aggregate_simulation_results, DisasterModel
 
 # Configuration
 try:
@@ -31,10 +28,11 @@ except:
 os.makedirs(save_dir, exist_ok=True)
 
 print(f"✓ Save directory: {save_dir}")
-print(f"✓ This version saves after EACH parameter value")
+print(f"✓ This version uses EXISTING WORKING FUNCTIONS")
+print(f"✓ Saves after EACH parameter value")
 print("="*70)
 
-# Base parameters
+# Base parameters (from original code)
 base_params = {
     "share_exploitative": 0.5,
     "share_of_disaster": 0.2,
@@ -50,13 +48,18 @@ base_params = {
     "exploitative_correction_factor": 1.0,
     "width": 30,
     "height": 30,
-    "ticks": 150
+    "lambda_parameter": 0.5,
+    "learning_rate": 0.05,
+    "epsilon": 0.2,
+    "ticks": 150,
+    "rumor_probability": 0.7,
+    "rumor_intensity": 2.0
 }
 
 num_runs = 10
 
 #########################################
-# Experiment B - WITH INCREMENTAL SAVES
+# Experiment B - AI Alignment
 #########################################
 
 print("\n▶ EXPERIMENT B: AI Alignment (INCREMENTAL SAVES)")
@@ -85,54 +88,13 @@ for i, align_val in enumerate(alignment_values):
     print(f"\n  [{i+1}/{len(alignment_values)}] Starting Alignment={align_val:.2f}...")
 
     try:
-        # Prepare params
-        params_copy = copy.deepcopy(base_params)
-        params_copy["ai_alignment_level"] = align_val
+        # Prepare params for this alignment value
+        params = base_params.copy()
+        params["ai_alignment_level"] = align_val
 
-        # Run multiple runs for this parameter
-        run_data = []
-        for run in range(num_runs):
-            print(f"    Run {run+1}/{num_runs}...", end=" ", flush=True)
-
-            model = DisasterModel(
-                width=params_copy["width"],
-                height=params_copy["height"],
-                number_of_humans=params_copy["number_of_humans"],
-                share_exploitative=params_copy["share_exploitative"],
-                share_of_disaster=params_copy["share_of_disaster"],
-                initial_trust=params_copy["initial_trust"],
-                initial_ai_trust=params_copy["initial_ai_trust"],
-                share_confirming=params_copy["share_confirming"],
-                disaster_dynamics=params_copy["disaster_dynamics"],
-                shock_probability=params_copy["shock_probability"],
-                shock_magnitude=params_copy["shock_magnitude"],
-                ai_alignment_level=params_copy["ai_alignment_level"],
-                trust_update_mode=params_copy["trust_update_mode"],
-                ticks=params_copy["ticks"]
-            )
-
-            for tick in range(params_copy["ticks"]):
-                model.step()
-
-            run_data.append({
-                'seci': np.array(model.seci_data),
-                'aeci': np.array(model.aeci_data) if hasattr(model, 'aeci_data') else np.array([]),
-                'aeci_variance': np.array(model.aeci_variance_data),
-                'trust_stats': np.array(model.trust_data),
-                'info_diversity': np.array(model.info_diversity_data),
-                'correct_tokens': model.correct_tokens,
-                'incorrect_tokens': model.incorrect_tokens
-            })
-
-            print("Done")
-            del model
-            import gc
-            gc.collect()
-
-        # Aggregate
-        print(f"    Aggregating {num_runs} runs...")
-        aggregated = aggregate_runs(run_data)
-        results_b[align_val] = aggregated
+        # Use the EXISTING working function
+        result = aggregate_simulation_results(num_runs, params)
+        results_b[align_val] = result
 
         # SAVE IMMEDIATELY (both progress and main)
         with open(file_b_progress, 'wb') as f:
@@ -160,117 +122,68 @@ if len(results_b) == len(alignment_values):
     print("✓ Fully complete - removed progress file")
 
 #########################################
-# Experiment D - WITH INCREMENTAL SAVES
+# Experiment D - Q-Learning Sensitivity
 #########################################
 
 print("\n▶ EXPERIMENT D: Q-Learning Sensitivity (INCREMENTAL SAVES)")
-learning_rate_values = [0.05, 0.1, 0.15]
-epsilon_values = [0.2, 0.3, 0.4]
+learning_rates = [0.05, 0.1, 0.15]
+epsilons = [0.2, 0.3, 0.4]
 file_d_pkl = os.path.join(save_dir, "results_experiment_D.pkl")
 file_d_progress = os.path.join(save_dir, "results_experiment_D_PROGRESS.pkl")
 
-# Try to resume
+# Try to resume from progress file
 if os.path.exists(file_d_progress):
     print(f"  Found progress file - resuming!")
     with open(file_d_progress, 'rb') as f:
         results_d = pickle.load(f)
     completed_d = list(results_d.keys())
-    print(f"  Already completed: {len(completed_d)} combinations")
+    print(f"  Already completed: {completed_d}")
 else:
     results_d = {}
     completed_d = []
 
 start_d = time.time()
-total_combos = len(learning_rate_values) * len(epsilon_values)
-current_combo = 0
+param_combos = [(lr, eps) for lr in learning_rates for eps in epsilons]
 
-for lr in learning_rate_values:
-    for eps in epsilon_values:
-        current_combo += 1
+for i, (lr, eps) in enumerate(param_combos):
+    key = (lr, eps)
+    if key in completed_d:
+        print(f"  [{i+1}/{len(param_combos)}] LR={lr}, ε={eps} - SKIPPING (already done)")
+        continue
 
-        if (lr, eps) in completed_d:
-            print(f"  [{current_combo}/{total_combos}] LR={lr:.2f}, ε={eps:.1f} - SKIPPING")
-            continue
+    print(f"\n  [{i+1}/{len(param_combos)}] Starting LR={lr}, ε={eps}...")
 
-        print(f"\n  [{current_combo}/{total_combos}] Starting LR={lr:.2f}, ε={eps:.1f}...")
+    try:
+        # Prepare params for this combination
+        params = base_params.copy()
+        params["learning_rate"] = lr
+        params["epsilon"] = eps
 
-        try:
-            params_copy = copy.deepcopy(base_params)
-            params_copy["learning_rate"] = lr
-            params_copy["epsilon"] = eps
+        # Use the EXISTING working function
+        result = aggregate_simulation_results(num_runs, params)
+        results_d[key] = result
 
-            run_data = []
-            for run in range(num_runs):
-                print(f"    Run {run+1}/{num_runs}...", end=" ", flush=True)
+        # SAVE IMMEDIATELY (both progress and main)
+        with open(file_d_progress, 'wb') as f:
+            pickle.dump(results_d, f)
+        with open(file_d_pkl, 'wb') as f:
+            pickle.dump(results_d, f)
 
-                model = DisasterModel(
-                    width=params_copy["width"],
-                    height=params_copy["height"],
-                    number_of_humans=params_copy["number_of_humans"],
-                    share_exploitative=params_copy["share_exploitative"],
-                    share_of_disaster=params_copy["share_of_disaster"],
-                    initial_trust=params_copy["initial_trust"],
-                    initial_ai_trust=params_copy["initial_ai_trust"],
-                    share_confirming=params_copy["share_confirming"],
-                    disaster_dynamics=params_copy["disaster_dynamics"],
-                    shock_probability=params_copy["shock_probability"],
-                    shock_magnitude=params_copy["shock_magnitude"],
-                    ai_alignment_level=params_copy["ai_alignment_level"],
-                    trust_update_mode=params_copy["trust_update_mode"],
-                    learning_rate=lr,
-                    epsilon=eps,
-                    ticks=params_copy["ticks"]
-                )
+        print(f"    ✓ SAVED (LR={lr}, ε={eps})")
 
-                # Set learning parameters on agents (they inherit from model init now)
-                # But also set explicitly to be sure
-                for agent in model.humans.values():
-                    agent.learning_rate = lr
-                    agent.epsilon = eps
-
-                for tick in range(params_copy["ticks"]):
-                    model.step()
-
-                run_data.append({
-                    'seci': np.array(model.seci_data),
-                    'aeci_variance': np.array(model.aeci_variance_data),
-                    'trust_stats': np.array(model.trust_data),
-                    'info_diversity': np.array(model.info_diversity_data),
-                    'correct_tokens': model.correct_tokens,
-                    'incorrect_tokens': model.incorrect_tokens
-                })
-
-                print("Done")
-                del model
-                import gc
-                gc.collect()
-
-            # Aggregate
-            print(f"    Aggregating {num_runs} runs...")
-            aggregated = aggregate_runs(run_data)
-            results_d[(lr, eps)] = aggregated
-
-            # SAVE IMMEDIATELY
-            with open(file_d_progress, 'wb') as f:
-                pickle.dump(results_d, f)
-            with open(file_d_pkl, 'wb') as f:
-                pickle.dump(results_d, f)
-
-            print(f"    ✓ SAVED (LR={lr:.2f}, ε={eps:.1f})")
-
-        except Exception as e:
-            print(f"\n    ✗ FAILED at LR={lr:.2f}, ε={eps:.1f}: {e}")
-            import traceback
-            traceback.print_exc()
-            print(f"    Partial results saved. You can resume from here.")
-            break
+    except Exception as e:
+        print(f"\n    ✗ FAILED at LR={lr}, ε={eps}: {e}")
+        import traceback
+        traceback.print_exc()
+        print(f"    Partial results saved. You can resume from here.")
+        break
 
 elapsed_d = (time.time() - start_d) / 60
-print(f"\n✓ EXPERIMENT D: {len(results_d)}/{total_combos} combinations complete ({elapsed_d:.1f} min)")
+print(f"\n✓ EXPERIMENT D: {len(results_d)}/{len(param_combos)} combinations complete ({elapsed_d:.1f} min)")
 print(f"✓ Saved to: {file_d_pkl}")
 
 # Clean up progress file if fully complete
-if len(results_d) == total_combos:
+if len(results_d) == len(param_combos):
     if os.path.exists(file_d_progress):
         os.remove(file_d_progress)
     print("✓ Fully complete - removed progress file")
