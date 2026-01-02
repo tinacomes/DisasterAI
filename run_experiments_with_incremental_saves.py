@@ -50,9 +50,7 @@ base_params = {
     "exploitative_correction_factor": 1.0,
     "width": 30,
     "height": 30,
-    "num_ai": 3,
-    "max_ticks": 150,
-    "debug_mode": False
+    "ticks": 150
 }
 
 num_runs = 10
@@ -109,12 +107,11 @@ for i, align_val in enumerate(alignment_values):
                 shock_probability=params_copy["shock_probability"],
                 shock_magnitude=params_copy["shock_magnitude"],
                 ai_alignment_level=params_copy["ai_alignment_level"],
-                num_ai=params_copy["num_ai"],
                 trust_update_mode=params_copy["trust_update_mode"],
-                debug_mode=params_copy.get("debug_mode", False)
+                ticks=params_copy["ticks"]
             )
 
-            for tick in range(params_copy["max_ticks"]):
+            for tick in range(params_copy["ticks"]):
                 model.step()
 
             run_data.append({
@@ -219,17 +216,19 @@ for lr in learning_rate_values:
                     shock_probability=params_copy["shock_probability"],
                     shock_magnitude=params_copy["shock_magnitude"],
                     ai_alignment_level=params_copy["ai_alignment_level"],
-                    num_ai=params_copy["num_ai"],
                     trust_update_mode=params_copy["trust_update_mode"],
-                    debug_mode=params_copy.get("debug_mode", False)
+                    learning_rate=lr,
+                    epsilon=eps,
+                    ticks=params_copy["ticks"]
                 )
 
-                # Set learning parameters on agents
+                # Set learning parameters on agents (they inherit from model init now)
+                # But also set explicitly to be sure
                 for agent in model.humans.values():
                     agent.learning_rate = lr
                     agent.epsilon = eps
 
-                for tick in range(params_copy["max_ticks"]):
+                for tick in range(params_copy["ticks"]):
                     model.step()
 
                 run_data.append({
