@@ -122,10 +122,14 @@ class HumanAgent(Agent):
         self.last_belief_update = {}  # Tracks when each cell was last updated
                      
         # --- Q-Table for Source Values ---
-        # All sources start at 0.0 - no artificial biases
-        # Learning will differentiate based on structural advantages and reward feedback
+        # Small friend preference initialization to encourage social exploration
+        # Combined with community-based rumors (shared beliefs), this creates natural homophily:
+        # - Friends have similar initial beliefs → provide confirming information
+        # - Small Q-value boost → agents try friends during epsilon-greedy exploration
+        # - Q-learning discovers actual value through experience (confirmation + accuracy rewards)
+        # This is NOT alignment-dependent - just natural social preference
         self.q_table = {f"A_{k}": 0.0 for k in range(model.num_ai)}
-        self.q_table["human"] = 0.0
+        self.q_table["human"] = 0.1  # Small social preference to bootstrap exploration
         self.q_table["self_action"] = 0.0
 
         # --- Belief Update Parameters ---
