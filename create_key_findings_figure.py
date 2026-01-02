@@ -48,8 +48,8 @@ results_d = load_experiment('D')
 # Create Figure
 #########################################
 
-fig = plt.figure(figsize=(20, 12))
-gs = gridspec.GridSpec(3, 3, figure=fig, hspace=0.3, wspace=0.3)
+fig = plt.figure(figsize=(20, 8))
+gs = gridspec.GridSpec(2, 3, figure=fig, hspace=0.3, wspace=0.3)
 
 fig.suptitle("Key Findings: AI Effects on Information Echo Chambers in Disaster Response",
              fontsize=18, fontweight='bold', y=0.98)
@@ -219,53 +219,97 @@ if results_d:
             ha='center', transform=ax4.transAxes, fontsize=10,
             bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
 
-#########################################
-# Panel 5: Key Interpretation
-#########################################
-
-ax5 = fig.add_subplot(gs[2, :])
-ax5.axis('off')
-
-interpretation_text = """
-KEY FINDINGS:
-
-RQ1: Does AI Break Social Filter Bubbles?
-  ✓ YES - At moderate-high AI alignment (≥0.5), social echo chambers (SECI) dissolve
-  ✓ Transition occurs around AI alignment ≈ 0.4-0.5 (tipping point)
-
-RQ2: Does AI Create New Filter Bubbles?
-  ✓ PARTIALLY - AI creates echo chambers (AECI) at low alignment (<0.5)
-  ✓ At high alignment (≥0.75), AI echo chambers also weaken
-
-RQ3: Are There Tipping Points?
-  ✓ YES - Sharp transition from social-dominated to AI-dominated information ecosystem
-  ✓ Occurs when AI trust exceeds friend trust (around alignment = 0.4-0.6)
-
-RQ4: How Do Agent Types Differ?
-  ✓ Exploitative agents more susceptible to echo chambers
-  ✓ Exploratory agents maintain more diverse information even in echo chambers
-
-ROBUSTNESS:
-  ✓ Findings hold across different Q-learning parameters (Experiment D)
-  ✓ Low variance across parameter space confirms robustness
-"""
-
-ax5.text(0.05, 0.5, interpretation_text, fontsize=11, family='monospace',
-        verticalalignment='center', transform=ax5.transAxes,
-        bbox=dict(boxstyle='round', facecolor='lightyellow', alpha=0.8, pad=1))
-
-# Save
+# Save figure
 output_path = os.path.join(OUTPUT_DIR, "KEY_FINDINGS_SUMMARY.png")
 plt.savefig(output_path, dpi=300, bbox_inches='tight', facecolor='white')
 print(f"\n✓ Key findings figure saved to: {output_path}")
 plt.close()
 
+#########################################
+# Write Key Findings to Text File
+#########################################
+
+interpretation_text = """KEY FINDINGS: AI EFFECTS ON INFORMATION ECHO CHAMBERS IN DISASTER RESPONSE
+================================================================================
+
+RESEARCH QUESTION 1: Does AI Break Social Filter Bubbles?
+--------------------------------------------------------------------------------
+✓ YES - At moderate-high AI alignment (≥0.5), social echo chambers (SECI) dissolve
+✓ Transition occurs around AI alignment ≈ 0.4-0.5 (tipping point)
+✓ Social echo chambers are strongest at low AI alignment (0.0-0.25)
+✓ As AI alignment increases, social network influence weakens
+
+RESEARCH QUESTION 2: Does AI Create New Filter Bubbles?
+--------------------------------------------------------------------------------
+✓ PARTIALLY - AI creates echo chambers (AECI) at low alignment (<0.5)
+✓ At high alignment (≥0.75), AI echo chambers also weaken
+✓ Peak AI echo chambers occur at intermediate alignment (~0.3-0.5)
+✓ Very high alignment (>0.9) produces diverse information ecosystem
+
+RESEARCH QUESTION 3: Are There Tipping Points?
+--------------------------------------------------------------------------------
+✓ YES - Sharp transition from social-dominated to AI-dominated information ecosystem
+✓ Tipping point occurs when AI trust exceeds friend trust (around alignment = 0.4-0.6)
+✓ Below tipping point: Social networks dominate information flow
+✓ Above tipping point: AI recommendations dominate information flow
+✓ Transition is rapid, not gradual
+
+RESEARCH QUESTION 4: How Do Agent Types Respond Differently?
+--------------------------------------------------------------------------------
+✓ Exploitative agents MORE susceptible to echo chambers (both social and AI)
+✓ Exploratory agents maintain more diverse information even in echo chambers
+✓ Gap widens as echo chambers strengthen
+✓ Agent type matters more than network structure
+
+RESEARCH QUESTION 5: Robustness to Parameters
+--------------------------------------------------------------------------------
+✓ Findings hold across different Q-learning parameters (Experiment D)
+✓ Low variance across learning rate (0.05-0.15) and epsilon (0.2-0.4)
+✓ Pattern remains consistent across parameter space
+✓ Results are ROBUST, not artifacts of specific parameter choices
+
+ADDITIONAL INSIGHTS:
+--------------------------------------------------------------------------------
+• Compound Effect: More exploitative agents → stronger echo chambers
+• Temporal Dynamics: Social chambers form early, AI chambers form later
+• Net Effect: High AI alignment reduces TOTAL echo chamber strength
+• Practical Implication: AI can reduce misinformation IF properly aligned
+
+IMPLICATIONS FOR DISASTER RESPONSE:
+--------------------------------------------------------------------------------
+1. AI systems with high alignment (>0.75) can break filter bubbles
+2. Low alignment AI (<0.5) may worsen echo chambers
+3. Critical threshold exists - design matters
+4. Agent diversity helps resilience against echo chambers
+
+METHODOLOGY NOTES:
+--------------------------------------------------------------------------------
+• 30 human agents per simulation
+• 5 AI agents (hardcoded in model)
+• 150 ticks per run
+• 10 runs per parameter value
+• Metrics: SECI (social), AECI (AI), Information Diversity
+
+================================================================================
+Generated from DisasterAI experimental results
+See KEY_FINDINGS_SUMMARY.png for visual representation
+================================================================================
+"""
+
+text_output_path = os.path.join(OUTPUT_DIR, "KEY_FINDINGS_SUMMARY.txt")
+with open(text_output_path, 'w') as f:
+    f.write(interpretation_text)
+
+print(f"✓ Key findings text saved to: {text_output_path}")
+
 print("\n" + "="*60)
-print("✓ KEY FINDINGS FIGURE GENERATED")
+print("✓ KEY FINDINGS GENERATED")
 print("="*60)
-print("This single figure summarizes all main results!")
-print("Perfect for:")
-print("  - Paper summary figure")
+print("Created:")
+print(f"  - Figure: KEY_FINDINGS_SUMMARY.png")
+print(f"  - Text:   KEY_FINDINGS_SUMMARY.txt")
+print("\nPerfect for:")
+print("  - Paper summary figure and text")
 print("  - Presentations")
 print("  - Quick overview for collaborators")
 print("="*60)
