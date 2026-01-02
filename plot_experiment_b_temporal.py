@@ -58,7 +58,8 @@ for align in alignment_values:
 
     res = results_b[align]
     seci_data = res.get('seci', np.array([]))
-    aeci_var_data = res.get('aeci_variance', np.array([]))
+    aeci_data = res.get('aeci', np.array([]))  # Use 'aeci' not 'aeci_variance'
+    component_aeci_data = res.get('component_aeci', np.array([]))
 
     if seci_data.size == 0 or seci_data.ndim < 3:
         print(f"  ✗ Skipping (missing SECI data)")
@@ -77,18 +78,24 @@ for align in alignment_values:
     seci_explor_mean = np.mean(seci_explor, axis=0)
     seci_explor_std = np.std(seci_explor, axis=0)
 
-    # AECI variance
-    if isinstance(aeci_var_data, np.ndarray) and aeci_var_data.size > 0:
-        if aeci_var_data.ndim == 3:
-            aeci_mean = np.mean(aeci_var_data[:, :, 1], axis=0)
-            aeci_std = np.std(aeci_var_data[:, :, 1], axis=0)
-            has_aeci = True
-        elif aeci_var_data.ndim == 2:
-            aeci_mean = np.mean(aeci_var_data, axis=0)
-            aeci_std = np.std(aeci_var_data, axis=0)
-            has_aeci = True
-        else:
-            has_aeci = False
+    # AECI - use 'aeci' data (columns 1=exploitative, 2=exploratory)
+    # or component_aeci (column 1=component-level)
+    if isinstance(aeci_data, np.ndarray) and aeci_data.size > 0 and aeci_data.ndim == 3:
+        # Use column 1 (exploitative) from aeci data
+        aeci_exploit = aeci_data[:, :, 1]
+        aeci_explor = aeci_data[:, :, 2]
+        aeci_exploit_mean = np.mean(aeci_exploit, axis=0)
+        aeci_exploit_std = np.std(aeci_exploit, axis=0)
+        aeci_explor_mean = np.mean(aeci_explor, axis=0)
+        aeci_explor_std = np.std(aeci_explor, axis=0)
+        has_aeci = True
+    elif isinstance(component_aeci_data, np.ndarray) and component_aeci_data.size > 0 and component_aeci_data.ndim == 3:
+        # Fallback to component_aeci
+        aeci_exploit_mean = np.mean(component_aeci_data[:, :, 1], axis=0)
+        aeci_exploit_std = np.std(component_aeci_data[:, :, 1], axis=0)
+        aeci_explor_mean = None
+        aeci_explor_std = None
+        has_aeci = True
     else:
         has_aeci = False
 
@@ -123,14 +130,26 @@ for align in alignment_values:
 
     # Panel 2: AECI (AI Echo Chambers)
     if has_aeci:
-        ax2.plot(ticks, aeci_mean, 'o-', label='AECI-Var (AI Echo Chambers)',
+        # Plot exploitative AECI
+        ax2.plot(ticks, aeci_exploit_mean, 'o-', label='AECI Exploitative',
                  color='#9B59B6', linewidth=2.5, markersize=4, alpha=0.9)
         ax2.fill_between(ticks,
-                          aeci_mean - aeci_std,
-                          aeci_mean + aeci_std,
+                          aeci_exploit_mean - aeci_exploit_std,
+                          aeci_exploit_mean + aeci_exploit_std,
                           color='#9B59B6', alpha=0.2)
+
+        # Plot exploratory AECI if available
+        if aeci_explor_mean is not None:
+            ax2.plot(ticks, aeci_explor_mean, 's-', label='AECI Exploratory',
+                     color='#E67E22', linewidth=2.5, markersize=4, alpha=0.9)
+            ax2.fill_between(ticks,
+                              aeci_explor_mean - aeci_explor_std,
+                              aeci_explor_mean + aeci_explor_std,
+                              color='#E67E22', alpha=0.2)
+
         ax2.axhline(0, color='black', linestyle='--', linewidth=1.5, alpha=0.7)
-        ax2.set_ylabel('AECI-Var (AI Echo Chamber Index)', fontsize=13, fontweight='bold')
+        ax2.set_ylabel('AECI (AI Echo Chamber Index)', fontsize=13, fontweight='bold')
+        ax2.set_ylim(0, 1)  # AECI is 0 to 1
         ax2.legend(loc='best', fontsize=11, framealpha=0.9)
         ax2.grid(True, alpha=0.3, linestyle=':')
     else:
@@ -165,7 +184,7 @@ colors = plt.cm.viridis(np.linspace(0, 1, len(alignment_values)))
 for i, align in enumerate(alignment_values):
     res = results_b[align]
     seci_data = res.get('seci', np.array([]))
-    aeci_var_data = res.get('aeci_variance', np.array([]))
+    aeci_data = res.get('aeci', np.array([]))
 
     if seci_data.size == 0 or seci_data.ndim < 3:
         continue
@@ -176,14 +195,10 @@ for i, align in enumerate(alignment_values):
     ax1.plot(ticks, seci_exploit_mean, '-',
              label=f'Align={align}', color=colors[i], linewidth=2, alpha=0.8)
 
-    if isinstance(aeci_var_data, np.ndarray) and aeci_var_data.size > 0:
-        if aeci_var_data.ndim == 3:
-            aeci_mean = np.mean(aeci_var_data[:, :, 1], axis=0)
-        elif aeci_var_data.ndim == 2:
-            aeci_mean = np.mean(aeci_var_data, axis=0)
-        else:
-            continue
-        ax2.plot(ticks, aeci_mean, '-',
+    if isinstance(aeci_data, np.ndarray) and aeci_data.size > 0 and aeci_data.ndim == 3:
+        # Use column 1 (exploitative) from aeci data
+        aeci_exploit_mean = np.mean(aeci_data[:, :, 1], axis=0)
+        ax2.plot(ticks, aeci_exploit_mean, '-',
                  label=f'Align={align}', color=colors[i], linewidth=2, alpha=0.8)
 
 # SECI panel
@@ -198,8 +213,9 @@ ax1.grid(True, alpha=0.3)
 # AECI panel
 ax2.axhline(0, color='black', linestyle='--', linewidth=1.5, alpha=0.7)
 ax2.set_xlabel('Simulation Tick', fontsize=12, fontweight='bold')
-ax2.set_ylabel('AECI-Var', fontsize=12, fontweight='bold')
+ax2.set_ylabel('AECI (Exploitative)', fontsize=12, fontweight='bold')
 ax2.set_title('AI Echo Chambers', fontsize=14, fontweight='bold')
+ax2.set_ylim(0, 1)  # AECI is 0 to 1
 ax2.legend(loc='best', fontsize=10)
 ax2.grid(True, alpha=0.3)
 
