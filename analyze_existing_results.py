@@ -18,16 +18,17 @@ from matplotlib.patches import Rectangle
 import warnings
 warnings.filterwarnings('ignore')
 
-# Configuration
-# CHANGE THIS to your results directory
+# Configuration - CORRECTED PATHS
 try:
     from google.colab import drive
     drive.mount('/content/drive')
-    RESULTS_DIR = "/content/drive/MyDrive/DisasterAI_Results"
+    RESULTS_DIR = "/content/drive/MyDrive/DisasterAI_results"  # FIXED: lowercase 'results'
     IN_COLAB = True
+    print("✓ Running in Google Colab")
 except:
-    RESULTS_DIR = "agent_model_results"
+    RESULTS_DIR = "DisasterAI_results"  # FIXED: lowercase 'results'
     IN_COLAB = False
+    print("✓ Running locally")
 
 OUTPUT_DIR = os.path.join(RESULTS_DIR, "enhanced_analysis")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
