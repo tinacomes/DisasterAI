@@ -30,15 +30,38 @@ try:
         sys.path.insert(0, '/content/DisasterAI')
 except ImportError:
     IN_COLAB = False
-
-# Import the model
-if IN_COLAB:
-    exec(open('/content/DisasterAI/DisasterAI_Model.py').read())
-else:
     print("ERROR: This test script is designed to run in Google Colab")
     print("Please run this in Colab after pulling the latest code:")
     print("  !cd /content/DisasterAI && git pull origin claude/plan-paper-experiments-0ESGp")
     print("  !cd /content/DisasterAI && python test_q_learning_fix.py")
+    sys.exit(1)
+
+# Import necessary functions from the model
+# We need to import carefully to avoid executing the main experiment code
+print("Loading DisasterAI model...")
+try:
+    # Import the model module - this will execute everything not in if __name__ == "__main__"
+    # Since the main code isn't wrapped, we need to be careful
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("disaster_model", "/content/DisasterAI/DisasterAI_Model.py")
+    disaster_model = importlib.util.module_from_spec(spec)
+
+    # Redirect stdout temporarily to suppress the main execution output
+    import io
+    from contextlib import redirect_stdout
+
+    f = io.StringIO()
+    with redirect_stdout(f):
+        spec.loader.exec_module(disaster_model)
+
+    # Now we have access to the functions
+    aggregate_simulation_results = disaster_model.aggregate_simulation_results
+
+    print("✓ Model loaded successfully")
+except Exception as e:
+    print(f"✗ Failed to load model: {e}")
+    import traceback
+    traceback.print_exc()
     sys.exit(1)
 
 import time

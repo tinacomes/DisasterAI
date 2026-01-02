@@ -7308,6 +7308,7 @@ if __name__ == "__main__":
     ##############################################
     print("▶ EXPERIMENT A: Share Exploitative [0.2, 0.5, 0.8]")
     share_values = [0.2, 0.5, 0.8]
+    param_name_a = "Share Exploitative"  # Parameter name for plotting
     file_a_pkl = os.path.join(save_dir, "results_experiment_A.pkl")
     file_a_csv = os.path.join(save_dir, "results_experiment_A.csv")
 
