@@ -1875,22 +1875,27 @@ class DisasterModel(Model):
 
         aeci_variance = 0.0  # Default neutral value
 
-        # Define AI-reliant agents with threshold matched to 5-tick window
+        # Define AI-reliant agents based on ACCEPTED information, not just queries
+        # For echo chambers, what matters is what information agents BELIEVE, not what they query
         # NOTE: Counters reset every 5 ticks, so threshold must be achievable in that window
-        # Agent must have made enough queries (3+) AND majority to AI (50%+)
-        min_calls_threshold = 3    # Achievable in 5-tick window (was 10, impossible!)
-        min_ai_ratio = 0.5         # Majority (50%+) queries to AI
+        min_acceptances_threshold = 2  # At least 2 acceptances in 5-tick window
+        min_ai_ratio = 0.5              # Majority (50%+) of acceptances from AI
 
         ai_reliant_agents = []
         for agent in self.humans.values():
             # Safety checks for valid counters
-            if not hasattr(agent, 'accum_calls_total') or not hasattr(agent, 'accum_calls_ai'):
+            if not hasattr(agent, 'accepted_ai') or not hasattr(agent, 'accepted_human'):
                 continue
 
-            total_calls = max(1, agent.accum_calls_total)  # Prevent division by zero
-            ai_ratio = agent.accum_calls_ai / total_calls
+            # Total acceptances = AI + human acceptances
+            total_acceptances = agent.accepted_ai + agent.accepted_human
 
-            if total_calls >= min_calls_threshold and ai_ratio >= min_ai_ratio:
+            if total_acceptances < min_acceptances_threshold:
+                continue
+
+            ai_ratio = agent.accepted_ai / total_acceptances
+
+            if ai_ratio >= min_ai_ratio:
                 ai_reliant_agents.append(agent)
 
         if self.debug_mode:
