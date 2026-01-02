@@ -420,7 +420,7 @@ if __name__ == "__main__":
     analyze_experiment(
         experiment_name="Experiment_B",
         param_name="AI Alignment",
-        result_key="AI_Alignment_Tipping_Point"
+        result_key="experiment_B"
     )
 
     print("\n" + "="*60)
