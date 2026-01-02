@@ -114,8 +114,10 @@ class HumanAgent(Agent):
         self.last_belief_update = {}  # Tracks when each cell was last updated
                      
         # --- Q-Table for Source Values ---
+        # All sources start at 0.0 - no artificial biases
+        # Learning will differentiate based on structural advantages and reward feedback
         self.q_table = {f"A_{k}": 0.0 for k in range(model.num_ai)}
-        self.q_table["human"] = 0.05 # Represents generic value of querying humans
+        self.q_table["human"] = 0.0
         self.q_table["self_action"] = 0.0
 
         # --- Belief Update Parameters ---
@@ -918,36 +920,16 @@ class HumanAgent(Agent):
                 # Add biases based on agent type
                 decision_factors['biases'] = {}
 
-                # Small baseline for AI to make it competitive with other sources
-                # This does NOT encode alignment - just makes AI a viable option
-                # Q-learning will then differentiate based on actual performance
-                baseline_ai_preference = 0.05
-                for k in range(self.model.num_ai):
-                    ai_id = f"A_{k}"
-                    scores[ai_id] += baseline_ai_preference
-                    if 'ai_baseline' not in decision_factors['biases']:
-                        decision_factors['biases']['ai_baseline'] = baseline_ai_preference
+                # NO BIASES - let Q-learning discover structural advantages
+                # AI has 3-5x broader coverage than humans (60 vs 12-24 cells)
+                # This structural advantage should drive learning:
+                #   - AI provides info about high-priority cells humans can't see
+                #   - Better targeting → higher rewards → Q(AI) increases
+                #   - Agents learn to use AI through experience, not hardcoded biases
 
-                if self.agent_type == "exploitative":
-                    # Exploitative agents prefer confirmation sources
-                    # Friends (who likely share similar beliefs)
-                    scores["human"] += self.exploit_friend_bias
-                    decision_factors['biases']["human"] = self.exploit_friend_bias
-
-                    # Self-confirmation (validate own beliefs)
-                    scores["self_action"] += self.exploit_self_bias
-                    decision_factors['biases']["self_action"] = self.exploit_self_bias
-
-                    # Q-learning will discover: high alignment AI → confirms beliefs → increase Q-value
-
-                else:  # exploratory
-                    # Exploratory agents avoid confirmation bias
-                    scores["self_action"] -= 0.05
-                    decision_factors['biases']["self_action"] = -0.05
-
-                    # Q-learning will discover:
-                    # - Low alignment AI → accurate → increase Q-value
-                    # - High alignment AI → inaccurate → decrease Q-value
+                # Agent type differences come from REWARD structure, not biases:
+                #   - Exploitative: 80% confirmation rewards → learn to prefer confirming sources
+                #   - Exploratory: 80% accuracy rewards → learn to prefer accurate sources
 
                 # Add small random noise to break ties
                 for mode in scores:
