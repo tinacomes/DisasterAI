@@ -28,9 +28,9 @@ from mesa.space import MultiGrid
 
 # Set save directory (Drive if in Colab, local otherwise)
 if IN_COLAB:
-    save_dir = "/content/drive/MyDrive/DisasterAI_Results"
+    save_dir = "/content/drive/MyDrive/DisasterAI_results"
 else:
-    save_dir = "agent_model_results"
+    save_dir = "DisasterAI_results"
 os.makedirs(save_dir, exist_ok=True)
 print(f"✓ Results will be saved to: {save_dir}")
 
@@ -7311,7 +7311,7 @@ if __name__ == "__main__":
     ##############################################
     # Experiment A: Vary share_exploitative
     ##############################################
-    share_values = [0.2, 0,5, 0.8]
+    share_values = [0.2, 0.5, 0.8]
     file_a_pkl = os.path.join(save_dir, "results_experiment_A.pkl")
     file_a_csv = os.path.join(save_dir, "results_experiment_A.csv")
 
@@ -7443,10 +7443,19 @@ if __name__ == "__main__":
     ##############################################
     # Experiment D: Vary Learning Rate and Epsilon
     ##############################################
-    # COMMENTED OUT - Focus on Experiments A and B
-    # learning_rate_values = [0.03, 0.05, 0.07]
-    # epsilon_values = [0.2, 0.3]
-    # results_d = experiment_learning_trust(base_params, learning_rate_values, epsilon_values, num_runs)
+    print("\n=== RUNNING EXPERIMENT D: Q-Learning Parameter Sensitivity ===")
+    learning_rate_values = [0.05, 0.1, 0.15]
+    epsilon_values = [0.2, 0.3, 0.4]
+    file_d_pkl = os.path.join(save_dir, "results_experiment_D.pkl")
+
+    print(f"Testing {len(learning_rate_values)} learning rates × {len(epsilon_values)} epsilon values...")
+    results_d = experiment_learning_trust(base_params, learning_rate_values, epsilon_values, num_runs)
+
+    # Save results
+    with open(file_d_pkl, "wb") as f:
+        pickle.dump(results_d, f)
+    print(f"✓ Experiment D saved to: {file_d_pkl}")
+    print("=== EXPERIMENT D COMPLETED ===")
     #
     # # --- Plot 1: Final SECI vs LR/Epsilon (Bar Chart) ---
     # fig_d_seci, ax_d_seci = plt.subplots(1, 2, figsize=(12, 5), sharey=True)
