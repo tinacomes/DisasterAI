@@ -1875,9 +1875,10 @@ class DisasterModel(Model):
 
         aeci_variance = 0.0  # Default neutral value
 
-        # Define AI-reliant agents with moderate threshold
-        # Agent must have made enough queries (10+) AND majority to AI (50%+)
-        min_calls_threshold = 10   # Need stable sample size
+        # Define AI-reliant agents with threshold matched to 5-tick window
+        # NOTE: Counters reset every 5 ticks, so threshold must be achievable in that window
+        # Agent must have made enough queries (3+) AND majority to AI (50%+)
+        min_calls_threshold = 3    # Achievable in 5-tick window (was 10, impossible!)
         min_ai_ratio = 0.5         # Majority (50%+) queries to AI
 
         ai_reliant_agents = []
