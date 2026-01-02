@@ -205,7 +205,13 @@ for exp_name, data in loaded_results.items():
             seci_expl = metrics.get('seci_explor', float('nan'))
             aeci = metrics.get('aeci_var', float('nan'))
 
-            print(f"{param:<10.2f} {seci_exp:<15.3f} {seci_expl:<15.3f} {aeci:<10.3f}")
+            # Handle both float and tuple params (Exp D uses tuples)
+            if isinstance(param, tuple):
+                param_str = f"LR={param[0]:.2f},ε={param[1]:.1f}"
+            else:
+                param_str = f"{param:.2f}"
+
+            print(f"{param_str:<20} {seci_exp:<15.3f} {seci_expl:<15.3f} {aeci:<10.3f}")
     else:
         print("  ⚠ Could not extract summary statistics")
 
@@ -226,7 +232,14 @@ for exp_name, data in loaded_results.items():
             if isinstance(seci_data, np.ndarray) and seci_data.ndim >= 3:
                 num_runs = seci_data.shape[0]
                 num_ticks = seci_data.shape[1]
-                print(f"  Param {param_val:.2f}: {num_runs} runs × {num_ticks} ticks")
+
+                # Handle both float and tuple params
+                if isinstance(param_val, tuple):
+                    param_str = f"LR={param_val[0]:.2f},ε={param_val[1]:.1f}"
+                else:
+                    param_str = f"{param_val:.2f}"
+
+                print(f"  Param {param_str}: {num_runs} runs × {num_ticks} ticks")
 
 #########################################
 # Final Summary
