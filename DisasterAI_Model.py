@@ -1879,29 +1879,30 @@ class DisasterModel(Model):
 
     def calculate_aeci_variance(self):
         """Calculate AI Echo Chamber Index variance on a [-1, +1] scale."""
-        print(f"\nDEBUG: Starting AECI variance calculation at tick {self.tick}")
-        
+        if self.debug_mode:
+            print(f"\nDEBUG: Starting AECI variance calculation at tick {self.tick}")
+
         aeci_variance = 0.0  # Default neutral value
-        
+
         # Define AI-reliant agents with moderate threshold
         # Agent must have made enough queries (10+) AND majority to AI (50%+)
         min_calls_threshold = 10   # Need stable sample size
         min_ai_ratio = 0.5         # Majority (50%+) queries to AI
-        
+
         ai_reliant_agents = []
         for agent in self.humans.values():
             # Safety checks for valid counters
             if not hasattr(agent, 'accum_calls_total') or not hasattr(agent, 'accum_calls_ai'):
                 continue
-                
+
             total_calls = max(1, agent.accum_calls_total)  # Prevent division by zero
             ai_ratio = agent.accum_calls_ai / total_calls
-            
+
             if total_calls >= min_calls_threshold and ai_ratio >= min_ai_ratio:
                 ai_reliant_agents.append(agent)
-        
-        # Debug print
-        print(f"  Found {len(ai_reliant_agents)}/{len(self.humans)} AI-reliant agents")
+
+        if self.debug_mode:
+            print(f"  Found {len(ai_reliant_agents)}/{len(self.humans)} AI-reliant agents")
         
         # Get global belief variance
         all_beliefs = []
@@ -1915,11 +1916,13 @@ class DisasterModel(Model):
         # Calculate global variance with safety check
         if len(all_beliefs) > 1:
             global_var = np.var(all_beliefs)
-            print(f"  Global belief variance: {global_var:.4f}")
+            if self.debug_mode:
+                print(f"  Global belief variance: {global_var:.4f}")
         else:
             global_var = 0.0
-            print("  WARNING: Not enough global beliefs to calculate variance")
-            
+            if self.debug_mode:
+                print("  WARNING: Not enough global beliefs to calculate variance")
+
         # Only proceed if we have a valid global variance and AI-reliant agents
         if global_var > 0 and ai_reliant_agents:
             # Get AI-reliant agents' beliefs
@@ -1930,17 +1933,18 @@ class DisasterModel(Model):
                         level = belief_info.get('level', 0)
                         if not np.isnan(level):  # Filter out NaN values
                             ai_reliant_beliefs.append(level)
-            
+
             # Calculate AI-reliant variance with safety check
             if len(ai_reliant_beliefs) > 1:
                 ai_reliant_var = np.var(ai_reliant_beliefs)
-                print(f"  AI-reliant beliefs variance: {ai_reliant_var:.4f}")
-                
+                if self.debug_mode:
+                    print(f"  AI-reliant beliefs variance: {ai_reliant_var:.4f}")
+
                 # Calculate variance effect
                 # Negative means AI reduces variance (echo chamber)
                 # Positive means AI increases variance (diversification)
                 var_diff = ai_reliant_var - global_var
-                
+
                 # Normalize to [-1, +1] range
                 if var_diff < 0:  # Variance reduction (echo chamber)
                     aeci_variance = max(-1, var_diff / global_var)  # Normalize by global variance
@@ -1948,29 +1952,34 @@ class DisasterModel(Model):
                     # Find a reasonable upper bound for normalization
                     max_possible_var = 5.0  # Given belief levels are 0-5, max variance is around 5
                     aeci_variance = min(1, var_diff / (max_possible_var - global_var))
-                
-                print(f"  AECI variance effect: {aeci_variance:.4f}")
+
+                if self.debug_mode:
+                    print(f"  AECI variance effect: {aeci_variance:.4f}")
             else:
-                print("  WARNING: Not enough AI-reliant beliefs to calculate variance")
+                if self.debug_mode:
+                    print("  WARNING: Not enough AI-reliant beliefs to calculate variance")
         else:
-            print(f"  WARNING: Invalid global variance ({global_var}) or no AI-reliant agents")
-        
+            if self.debug_mode:
+                print(f"  WARNING: Invalid global variance ({global_var}) or no AI-reliant agents")
+
         # Create a CORRECTLY formatted tuple
         aeci_variance_tuple = (self.tick, aeci_variance)
-        print(f"  Returning AECI variance tuple: {aeci_variance_tuple}")
-        
+        if self.debug_mode:
+            print(f"  Returning AECI variance tuple: {aeci_variance_tuple}")
+
         # Update metrics dictionary with consistent format
         self._last_metrics['aeci_variance'] = {
             'tick': self.tick,
             'value': aeci_variance
         }
-        
+
         # Store in the array with consistent format
         self.aeci_variance_data.append(aeci_variance_tuple)
-        
-        # Debug: print all values in the array
-        print(f"  Current aeci_variance_data length: {len(self.aeci_variance_data)}")
-        print(f"  Last 3 entries: {self.aeci_variance_data[-3:] if len(self.aeci_variance_data) >= 3 else self.aeci_variance_data}")
+
+        if self.debug_mode:
+            # Debug: print all values in the array
+            print(f"  Current aeci_variance_data length: {len(self.aeci_variance_data)}")
+            print(f"  Last 3 entries: {self.aeci_variance_data[-3:] if len(self.aeci_variance_data) >= 3 else self.aeci_variance_data}")
         
         return aeci_variance_tuple
 
