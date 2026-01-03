@@ -104,12 +104,6 @@ class HumanAgent(Agent):
         self.pending_info_evaluations = [] # [(tick_received, source_id, cell, reported_level), ...] for information quality feedback
         self.tokens_this_tick = {} # Tracks mode choice leading to send_relief THIS tick
         self.last_queried_source_ids = [] # Temp store for source IDs
-
-        # CONFIRMATION BIAS FIX: Track prior beliefs before receiving information from each source
-        # This allows us to measure whether sources CONFIRMED beliefs (for exploitative)
-        # vs whether sources provided ACCURATE info (for exploratory)
-        self.prior_beliefs_by_source = {}  # {source_id: {cell: prior_belief_level}}
-        self.received_info_by_source = {}  # {source_id: {cell: received_level}}
         self.last_belief_update = {}  # Tracks when each cell was last updated
                      
         # --- Q-Table for Source Values ---
@@ -1105,24 +1099,12 @@ class HumanAgent(Agent):
             belief_updates = 0
             source_trust = self.trust.get(source_id, 0.1) if source_id else 0.1
 
-            # CONFIRMATION BIAS FIX: Initialize tracking for this source
-            if source_id and source_id not in self.prior_beliefs_by_source:
-                self.prior_beliefs_by_source[source_id] = {}
-            if source_id and source_id not in self.received_info_by_source:
-                self.received_info_by_source[source_id] = {}
-
             for cell, reported_value in reports.items():
                 if cell not in self.beliefs:
                     continue
 
                 # Convert to integer level if it's not already
                 reported_level = int(round(reported_value))
-
-                # CONFIRMATION BIAS FIX: Store prior belief BEFORE updating
-                if source_id:
-                    prior_belief = self.beliefs.get(cell, {}).get('level', None)
-                    self.prior_beliefs_by_source[source_id][cell] = prior_belief
-                    self.received_info_by_source[source_id][cell] = reported_level
 
                 # Use the Bayesian update function
                 significant_update = self.update_belief_bayesian(cell, reported_level, source_trust, source_id)
@@ -1302,39 +1284,20 @@ class HumanAgent(Agent):
                         # Update the belief
                         self.beliefs[cell] = {'level': blended_level, 'confidence': new_conf}
 
-                # CONFIRMATION BIAS FIX: Calculate confirmation ratio for exploitative agents
-                # Calculate how many cells the source CONFIRMED (received info matched prior belief)
-                confirmation_count = 0
-                confirmation_total = 0
-
-                for source_id in source_ids:
-                    if source_id in self.prior_beliefs_by_source and source_id in self.received_info_by_source:
-                        for cell in cells_and_beliefs:
-                            cell_pos = cell[0]  # Extract cell position
-                            prior_belief = self.prior_beliefs_by_source[source_id].get(cell_pos)
-                            received_level = self.received_info_by_source[source_id].get(cell_pos)
-
-                            if prior_belief is not None and received_level is not None:
-                                # Did source confirm prior belief? (within 1 level tolerance)
-                                if abs(received_level - prior_belief) <= 1:
-                                    confirmation_count += 1
-                                confirmation_total += 1
-
-                confirmation_ratio = confirmation_count / confirmation_total if confirmation_total > 0 else 0
-
-                # Calculate batch reward based on agent type
+                # Calculate batch reward based on correctness ratio and actual reward
                 if cell_rewards:
-                    avg_actual_reward = sum(cell_rewards) / len(cell_rewards)
-                    correct_ratio = correct_in_batch / len(cell_rewards) if cell_rewards else 0
-
+                    # Blend components for final reward - KEY CHANGE: Make this agent-type dependent
                     if self.agent_type == "exploratory":
-                        # EXPLORATORY: Care about ACCURACY (did relief go to high-need cells?)
-                        # 80% actual value, 20% correctness
-                        batch_reward = 0.8 * avg_actual_reward + 0.2 * (correct_ratio * 5.0)
+                        # Explorers care more about actual levels (accuracy)
+                        # Explorers care almost exclusively about actual accuracy
+                        avg_actual_reward = sum(cell_rewards) / len(cell_rewards)
+                        correct_ratio = correct_in_batch / len(cell_rewards) if cell_rewards else 0
+                        batch_reward = 0.8 * avg_actual_reward + 0.2 * (correct_ratio * 5.0)  # 80% actual value, 10% correctness
                     else:
-                        # EXPLOITATIVE: Care about CONFIRMATION (did source validate beliefs?)
-                        # 20% actual value, 80% confirmation
-                        batch_reward = 0.2 * avg_actual_reward + 0.8 * (confirmation_ratio * 5.0)
+                        # Exploiters care much more about validation of beliefs than actual accuracy
+                        correct_ratio = correct_in_batch / len(cell_rewards) if cell_rewards else 0
+                        avg_actual_reward = sum(cell_rewards) / len(cell_rewards)
+                        batch_reward = 0.2 * avg_actual_reward + 0.8 * (correct_ratio * 5.0)  # 20% actual value, 70% correctness
 
                     # Cap the reward range
                     batch_reward = max(-3.0, min(5.0, batch_reward))
