@@ -384,7 +384,8 @@ class HumanAgent(Agent):
     def evaluate_information_quality(self, cell, actual_level):
         """
         Evaluate pending information about a cell when directly observed.
-        Provides fast feedback (5-10 tick window) on information accuracy.
+        Provides fast feedback (3-15 tick window) on information accuracy.
+        Wider window to accommodate different agent movement patterns.
         """
         current_tick = self.model.tick
         evaluated = []
@@ -393,15 +394,15 @@ class HumanAgent(Agent):
             if eval_cell != cell:
                 continue
 
-            # Check if within evaluation window (5-10 ticks)
+            # Check if within evaluation window (3-15 ticks) - wider for better coverage
             ticks_elapsed = current_tick - tick_received
-            if ticks_elapsed > 10:
+            if ticks_elapsed > 15:
                 # Too old, remove from pending
                 evaluated.append((tick_received, source_id, eval_cell, reported_level))
                 continue
 
-            if ticks_elapsed < 5:
-                # Too soon, wait more ticks for potential disaster evolution
+            if ticks_elapsed < 3:
+                # Too soon, wait a bit for potential disaster evolution
                 continue
 
             # Within window: evaluate information quality
@@ -418,10 +419,25 @@ class HumanAgent(Agent):
             else:
                 accuracy_reward = -0.03  # Large error
 
-            # Update Q-value with small learning rate (information quality signal)
+            # Determine mode from source_id (fixes mode vs source ID mismatch)
+            if source_id.startswith("H_"):
+                mode = "human"
+            elif source_id.startswith("A_"):
+                mode = source_id  # AI modes use their ID directly
+            else:
+                mode = None
+
+            # Update mode Q-value (what's used in action selection)
+            if mode and mode in self.q_table:
+                old_mode_q = self.q_table[mode]
+                info_learning_rate = 0.03  # Smaller than relief outcome learning rate (0.1)
+                new_mode_q = old_mode_q + info_learning_rate * accuracy_reward
+                self.q_table[mode] = new_mode_q
+
+            # Also update specific source Q-value (for tracking individuals)
             if source_id in self.q_table:
                 old_q = self.q_table[source_id]
-                info_learning_rate = 0.03  # Smaller than relief outcome learning rate (0.1)
+                info_learning_rate = 0.03
                 new_q = old_q + info_learning_rate * accuracy_reward
                 self.q_table[source_id] = new_q
 
@@ -1304,6 +1320,18 @@ class HumanAgent(Agent):
                     self.q_table["self_action"] = new_q
 
                 elif source_ids:
+                    # Update generic mode Q-value (fixes mode vs source ID mismatch)
+                    # mode is what's used in action selection (e.g., "human", "A_0")
+                    if mode in self.q_table:
+                        old_mode_q = self.q_table[mode]
+                        if self.agent_type == "exploratory":
+                            effective_learning_rate = self.learning_rate * 1.5
+                        else:
+                            effective_learning_rate = self.learning_rate
+                        new_mode_q = old_mode_q + effective_learning_rate * (scaled_reward - old_mode_q)
+                        self.q_table[mode] = new_mode_q
+
+                    # Also update specific source Q-values (for tracking individual sources)
                     for source_id in source_ids:
                         if source_id in self.q_table:
                             old_q = self.q_table[source_id]
