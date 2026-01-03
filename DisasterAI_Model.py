@@ -1,6 +1,6 @@
 
 # Install mesa if not already installed
-!pip install mesa
+# !pip install mesa  # Commented for non-Colab usage
 
 # Mount Google Drive FIRST (for Colab)
 try:
