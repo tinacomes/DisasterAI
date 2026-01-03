@@ -1,6 +1,6 @@
 
 # Install mesa if not already installed
-!pip install mesa
+# !pip install mesa  # Commented for non-Colab usage
 
 # Mount Google Drive FIRST (for Colab)
 try:
@@ -101,6 +101,7 @@ class HumanAgent(Agent):
         # Human trust initialized later in model setup
         self.friends = set() # Use set for efficient checking ('H_j' format)
         self.pending_rewards = [] # [(tick_due, mode, [(cell, belief_level), ...]), ...]
+        self.pending_info_evaluations = [] # [(tick_received, source_id, cell, reported_level), ...] for information quality feedback
         self.tokens_this_tick = {} # Tracks mode choice leading to send_relief THIS tick
         self.last_queried_source_ids = [] # Temp store for source IDs
         self.last_belief_update = {}  # Tracks when each cell was last updated
@@ -376,6 +377,70 @@ class HumanAgent(Agent):
                 else:
                     # No existing belief, create new one
                     self.beliefs[cell] = {'level': belief_level, 'confidence': belief_conf}
+
+                # Evaluate information quality feedback for this sensed cell
+                self.evaluate_information_quality(cell, actual)
+
+    def evaluate_information_quality(self, cell, actual_level):
+        """
+        Evaluate pending information about a cell when directly observed.
+        Provides fast feedback (5-10 tick window) on information accuracy.
+        """
+        current_tick = self.model.tick
+        evaluated = []
+
+        for tick_received, source_id, eval_cell, reported_level in self.pending_info_evaluations:
+            if eval_cell != cell:
+                continue
+
+            # Check if within evaluation window (5-10 ticks)
+            ticks_elapsed = current_tick - tick_received
+            if ticks_elapsed > 10:
+                # Too old, remove from pending
+                evaluated.append((tick_received, source_id, eval_cell, reported_level))
+                continue
+
+            if ticks_elapsed < 5:
+                # Too soon, wait more ticks for potential disaster evolution
+                continue
+
+            # Within window: evaluate information quality
+            # Calculate accuracy based on how close reported level was to actual
+            level_error = abs(reported_level - actual_level)
+
+            # Accuracy-based reward (scaled to [-0.03, +0.03] range - small but meaningful)
+            if level_error == 0:
+                accuracy_reward = 0.03  # Perfect accuracy
+            elif level_error == 1:
+                accuracy_reward = 0.01  # Close
+            elif level_error == 2:
+                accuracy_reward = -0.01  # Moderate error
+            else:
+                accuracy_reward = -0.03  # Large error
+
+            # Update Q-value with small learning rate (information quality signal)
+            if source_id in self.q_table:
+                old_q = self.q_table[source_id]
+                info_learning_rate = 0.03  # Smaller than relief outcome learning rate (0.1)
+                new_q = old_q + info_learning_rate * accuracy_reward
+                self.q_table[source_id] = new_q
+
+            # Update trust similarly (small adjustment)
+            if source_id in self.trust:
+                old_trust = self.trust[source_id]
+                # Map accuracy reward to trust change
+                trust_adjustment = info_learning_rate * accuracy_reward
+                new_trust = max(0.0, min(1.0, old_trust + trust_adjustment))
+                self.trust[source_id] = new_trust
+
+            # Mark as evaluated
+            evaluated.append((tick_received, source_id, eval_cell, reported_level))
+
+        # Remove evaluated items from pending list
+        self.pending_info_evaluations = [
+            item for item in self.pending_info_evaluations
+            if item not in evaluated
+        ]
 
     def report_beliefs(self, interest_point, query_radius):
         """Reports human agent's beliefs about cells within query_radius of the interest_point."""
@@ -736,6 +801,16 @@ class HumanAgent(Agent):
             level_change = abs(posterior_level - prior_level)
             confidence_change = abs(posterior_confidence - prior_confidence)
             significant_change = (level_change >= 1 or confidence_change >= 0.1)
+
+            # Track information for quality feedback (all sources, not just AI)
+            # This enables fast feedback (5-10 ticks) when agent observes the cell
+            if source_id and significant_change:
+                self.pending_info_evaluations.append((
+                    self.model.tick,
+                    source_id,
+                    cell,
+                    int(posterior_level)  # The level we now believe based on this source
+                ))
 
             # Track AI source information for later trust updates
             is_ai_source = hasattr(self, 'ai_info_sources') and cell in self.ai_info_sources
@@ -1125,8 +1200,11 @@ class HumanAgent(Agent):
                             self.model.tokens_this_tick[cell] = {'exploit': 0, 'explor': 0}
                         self.model.tokens_this_tick[cell][agent_type_key] += 1
 
+                # Relief outcome delay: 15-25 ticks (realistic logistics delay)
+                # Random variation models variable communication/logistics times
+                relief_delay = random.randint(15, 25)
                 self.pending_rewards.append((
-                    self.model.tick + 2,
+                    self.model.tick + relief_delay,
                     responsible_mode,
                     reward_cells,
                     self.last_queried_source_ids
@@ -2289,17 +2367,46 @@ class DisasterModel(Model):
             plt.close()
 
     def update_disaster(self):
+        """
+        Update disaster grid based on disaster_dynamics parameter.
+
+        disaster_dynamics:
+        0 = Static (no updates)
+        1 = Slow evolution (5% chance per tick, smaller magnitude)
+        2 = Medium evolution (10% chance per tick, medium magnitude)
+        3 = Rapid evolution (20% chance per tick, larger magnitude)
+        """
         # Store a copy of the current grid before updating
         if self.disaster_grid is not None:
             self.previous_grid = self.disaster_grid.copy()
         else:
             self.previous_grid = None
 
-        # Replace this with your actual update_disaster logic
-        # Example placeholder: Create a hotspot with some probability
-        if random.random() < 0.1:  # 10% chance each tick
-            x, y = np.random.randint(0, self.disaster_grid.shape[0]), np.random.randint(0, self.disaster_grid.shape[1])
-            self.disaster_grid[x, y] = min(5, self.disaster_grid[x, y] + 3)
+        # Apply disaster dynamics based on parameter
+        if self.disaster_dynamics == 0:
+            # Static disaster - no updates
+            pass
+
+        elif self.disaster_dynamics == 1:
+            # Slow evolution: 5% chance, +1-2 magnitude
+            if random.random() < 0.05:
+                x, y = np.random.randint(0, self.disaster_grid.shape[0]), np.random.randint(0, self.disaster_grid.shape[1])
+                magnitude = random.randint(1, 2)
+                self.disaster_grid[x, y] = min(5, self.disaster_grid[x, y] + magnitude)
+
+        elif self.disaster_dynamics == 2:
+            # Medium evolution: 10% chance, +2-3 magnitude
+            if random.random() < 0.1:
+                x, y = np.random.randint(0, self.disaster_grid.shape[0]), np.random.randint(0, self.disaster_grid.shape[1])
+                magnitude = random.randint(2, 3)
+                self.disaster_grid[x, y] = min(5, self.disaster_grid[x, y] + magnitude)
+
+        elif self.disaster_dynamics == 3:
+            # Rapid evolution: 20% chance, +3-4 magnitude
+            if random.random() < 0.2:
+                x, y = np.random.randint(0, self.disaster_grid.shape[0]), np.random.randint(0, self.disaster_grid.shape[1])
+                magnitude = random.randint(3, 4)
+                self.disaster_grid[x, y] = min(5, self.disaster_grid[x, y] + magnitude)
 
         # Detect significant changes
         if self.previous_grid is not None:
