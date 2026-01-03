@@ -111,6 +111,12 @@ class HumanAgent(Agent):
         self.prior_beliefs_by_source = {}  # {source_id: {cell: prior_belief_level}}
         self.received_info_by_source = {}  # {source_id: {cell: received_level}}
         self.last_belief_update = {}  # Tracks when each cell was last updated
+
+        # INFO QUALITY FEEDBACK FIX: Track cells we queried about to prioritize verifying them
+        # Exploratory agents query about distant cells but sense around position, causing
+        # zero info quality feedback. By prioritizing verification of queried cells, agents
+        # can actually observe what they asked about and learn from information quality.
+        self.cells_to_verify = set()  # Cells we've queried about and should prioritize observing
                      
         # --- Q-Table for Source Values ---
         self.q_table = {f"A_{k}": 0.0 for k in range(model.num_ai)}
@@ -329,7 +335,29 @@ class HumanAgent(Agent):
     def sense_environment(self):
         pos = self.pos
         radius = 2  # Same for both agent types - behavioral differences should be in information-seeking, not perception
-        cells = self.model.grid.get_neighborhood(pos, moore=True, radius=radius, include_center=True)
+
+        # INFO QUALITY FEEDBACK FIX: Prioritize verifying cells we queried about
+        # This enables exploratory agents to get info quality feedback even when they
+        # query about distant cells. We sense some priority cells plus normal radius.
+        cells_to_sense = set()
+
+        # 1. Add priority cells (cells we queried about) - up to 5 cells
+        # Agents make effort to verify information they received
+        if self.cells_to_verify:
+            priority_cells = list(self.cells_to_verify)[:5]  # Limit to prevent overwhelming
+            for cell in priority_cells:
+                if 0 <= cell[0] < self.model.width and 0 <= cell[1] < self.model.height:
+                    cells_to_sense.add(cell)
+                    # Remove from priority list once sensed (or after some time)
+                    if random.random() < 0.3:  # 30% chance to remove each tick
+                        self.cells_to_verify.discard(cell)
+
+        # 2. Add normal neighborhood sensing
+        neighborhood = self.model.grid.get_neighborhood(pos, moore=True, radius=radius, include_center=True)
+        cells_to_sense.update(neighborhood)
+
+        # Process all cells
+        cells = list(cells_to_sense)
         for cell in cells:
             if 0 <= cell[0] < self.model.width and 0 <= cell[1] < self.model.height:
                 actual = self.model.disaster_grid[cell[0], cell[1]]
@@ -1117,6 +1145,11 @@ class HumanAgent(Agent):
 
                 # Convert to integer level if it's not already
                 reported_level = int(round(reported_value))
+
+                # INFO QUALITY FEEDBACK FIX: Add queried cells to verification priority list
+                # This ensures agents will try to observe cells they asked about, enabling
+                # information quality feedback even for exploratory agents who query distant cells
+                self.cells_to_verify.add(cell)
 
                 # CONFIRMATION BIAS FIX: Store prior belief BEFORE updating
                 if source_id:
