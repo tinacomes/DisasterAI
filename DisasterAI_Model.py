@@ -160,7 +160,7 @@ class HumanAgent(Agent):
 
                 # Calculate distance from agent for sensing
                 distance_from_agent = math.sqrt((x - self.pos[0])**2 + (y - self.pos[1])**2)
-                sense_radius = 3 if self.agent_type == "exploratory" else 2
+                sense_radius = 2  # Same for both agent types
 
                 # If cell is within sensing range, initialize with noisy perception of actual disaster
                 if distance_from_agent <= sense_radius:
@@ -293,8 +293,8 @@ class HumanAgent(Agent):
                 # Cells further from agent decay faster
                 if self.pos and cell:
                     distance = math.sqrt((cell[0] - self.pos[0])**2 + (cell[1] - self.pos[1])**2)
-                    # Scale by sensing radius (2 or 3 based on agent type)
-                    radius = 2 if self.agent_type == "exploitative" else 3
+                    # Scale by sensing radius (same for both agent types)
+                    radius = 2
                     distance_factor = min(1.5, 1.0 + (distance / (2 * radius)))
                 else:
                     distance_factor = 1.0
@@ -322,8 +322,7 @@ class HumanAgent(Agent):
 
     def sense_environment(self):
         pos = self.pos
-        radius = 2 if self.agent_type == "exploitative" else 3
-        cells = self.model.grid.get_neighborhood(pos, moore=True, radius=radius, include_center=True)
+        radius = 2  # Same for both agent types - behavioral differences should be in information-seeking, not perception
         cells = self.model.grid.get_neighborhood(pos, moore=True, radius=radius, include_center=True)
         for cell in cells:
             if 0 <= cell[0] < self.model.width and 0 <= cell[1] < self.model.height:
@@ -384,7 +383,8 @@ class HumanAgent(Agent):
     def evaluate_information_quality(self, cell, actual_level):
         """
         Evaluate pending information about a cell when directly observed.
-        Provides fast feedback (5-10 tick window) on information accuracy.
+        Provides fast feedback (3-15 tick window) on information accuracy.
+        Wider window to accommodate different agent movement patterns.
         """
         current_tick = self.model.tick
         evaluated = []
@@ -393,15 +393,15 @@ class HumanAgent(Agent):
             if eval_cell != cell:
                 continue
 
-            # Check if within evaluation window (5-10 ticks)
+            # Check if within evaluation window (3-15 ticks) - wider for better coverage
             ticks_elapsed = current_tick - tick_received
-            if ticks_elapsed > 10:
+            if ticks_elapsed > 15:
                 # Too old, remove from pending
                 evaluated.append((tick_received, source_id, eval_cell, reported_level))
                 continue
 
-            if ticks_elapsed < 5:
-                # Too soon, wait more ticks for potential disaster evolution
+            if ticks_elapsed < 3:
+                # Too soon, wait a bit for potential disaster evolution
                 continue
 
             # Within window: evaluate information quality
@@ -418,10 +418,25 @@ class HumanAgent(Agent):
             else:
                 accuracy_reward = -0.03  # Large error
 
-            # Update Q-value with small learning rate (information quality signal)
+            # Determine mode from source_id (fixes mode vs source ID mismatch)
+            if source_id.startswith("H_"):
+                mode = "human"
+            elif source_id.startswith("A_"):
+                mode = source_id  # AI modes use their ID directly
+            else:
+                mode = None
+
+            # Update mode Q-value (what's used in action selection)
+            if mode and mode in self.q_table:
+                old_mode_q = self.q_table[mode]
+                info_learning_rate = 0.03  # Smaller than relief outcome learning rate (0.1)
+                new_mode_q = old_mode_q + info_learning_rate * accuracy_reward
+                self.q_table[mode] = new_mode_q
+
+            # Also update specific source Q-value (for tracking individuals)
             if source_id in self.q_table:
                 old_q = self.q_table[source_id]
-                info_learning_rate = 0.03  # Smaller than relief outcome learning rate (0.1)
+                info_learning_rate = 0.03
                 new_q = old_q + info_learning_rate * accuracy_reward
                 self.q_table[source_id] = new_q
 
@@ -665,24 +680,12 @@ class HumanAgent(Agent):
             base_decay_rate = 0.003     # Slightly faster standard decay - more critical
             friend_decay_rate = 0.0015  # Faster friend decay - less friend bias
 
-        # For AI sources, modify decay based on alignment level and agent type
+        # Apply uniform decay rates (no alignment peeking)
         for source_id in list(self.trust.keys()):
-            decay_rate = None
-
-            # Special handling for AI sources
-            if source_id.startswith("A_"):
-                if self.agent_type == "exploratory":
-                    # Exploratory agents should decay trust in AI slower when alignment is low
-                    inverse_alignment = 1.0 - self.model.ai_alignment_level
-                    decay_rate = base_decay_rate * (1.0 - (inverse_alignment * 0.5))
-                else:  # exploitative
-                    # Exploitative agents should decay trust in AI slower when alignment is high
-                    alignment = self.model.ai_alignment_level
-                    decay_rate = base_decay_rate * (1.0 - (alignment * 0.5))
             # Friend decay rate
-            elif source_id in self.friends:
+            if source_id in self.friends:
                 decay_rate = friend_decay_rate
-            # Standard decay for other sources
+            # Standard decay for all other sources (AI and non-friends)
             else:
                 decay_rate = base_decay_rate
 
@@ -737,12 +740,8 @@ class HumanAgent(Agent):
 
             if is_ai_source and source_trust > 0.3:
                 # Give extra weight to AI information from somewhat trusted sources
+                # No alignment peeking - trust should capture source quality
                 source_precision = source_precision * 1.5
-
-                # For exploratory agents at low alignment, boost even more
-                if self.agent_type == "exploratory" and hasattr(self.model, 'ai_alignment_level'):
-                    if self.model.ai_alignment_level < 0.3:  # Low alignment means AI is truthful
-                        source_precision = source_precision * 2.0  # Much stronger effect for truthful AI
 
             # Apply a maximum to source precision to prevent overwhelming prior
             # Different maximums by agent type
@@ -982,7 +981,7 @@ class HumanAgent(Agent):
                 scores = {mode: self.q_table.get(mode, 0.0) for mode in possible_modes}
                 decision_factors['base_scores'] = scores.copy()
 
-                # Add biases based on agent type
+                # Agent-type specific biases (preferences, not alignment-based)
                 decision_factors['biases'] = {}
 
                 if self.agent_type == "exploitative":
@@ -993,39 +992,15 @@ class HumanAgent(Agent):
                     decision_factors['biases']["human"] = self.exploit_friend_bias
                     decision_factors['biases']["self_action"] = self.exploit_self_bias
 
-                    # AI alignment effect on exploitative agents
-                    # Higher alignment directly increases preference for AI
-                    ai_alignment_factor = self.model.ai_alignment_level * 0.3  # Increased effect
-                    for k in range(self.model.num_ai):
-                        ai_id = f"A_{k}"
-                        ai_bias = ai_alignment_factor  # Directly proportional to alignment
-                        scores[ai_id] += ai_bias
-                        decision_factors['biases'][ai_id] = ai_bias
+                    # NO AI bias - let Q-learning determine AI value through experience
 
                 else:  # exploratory
                     # Exploratory agents have a slight bias against self-confirmation
                     scores["self_action"] -= 0.05
                     decision_factors['biases']["self_action"] = -0.05
 
-                    # Strengthen inverse alignment effect for exploratory agents
-                    # Exploratory agents prefer truth-telling AI (low alignment)
-                    inverse_alignment_factor = (1.0 - self.model.ai_alignment_level) * 0.5  # Stronger effect
-                    baseline_ai_factor = 0.1  # alignment more important than AI preference
-
-
-                    for k in range(self.model.num_ai):
-                        ai_id = f"A_{k}"
-                        # Combine baseline with inverse alignment for more stable behavior
-                        ai_bias = inverse_alignment_factor +baseline_ai_factor
-                        scores[ai_id] += ai_bias
-                        decision_factors['biases'][ai_id] = ai_bias
-
-                    # Reduce bias for human consultation when alignment is low
-                    # Exploratory agents prefer humans more when AI alignment is high
-                    # (since high alignment means less valuable AI information)
-                    human_bias = self.model.ai_alignment_level * 0.15
-                    scores["human"] += human_bias  # Note: changed to positive bias now
-                    decision_factors['biases']["human"] = human_bias
+                    # NO alignment-based biases - let Q-learning determine source values
+                    # Exploratory agents will naturally prefer accurate sources through feedback
 
                 # Add small random noise to break ties
                 for mode in scores:
@@ -1344,19 +1319,26 @@ class HumanAgent(Agent):
                     self.q_table["self_action"] = new_q
 
                 elif source_ids:
+                    # Update generic mode Q-value (fixes mode vs source ID mismatch)
+                    # mode is what's used in action selection (e.g., "human", "A_0")
+                    if mode in self.q_table:
+                        old_mode_q = self.q_table[mode]
+                        if self.agent_type == "exploratory":
+                            effective_learning_rate = self.learning_rate * 1.5
+                        else:
+                            effective_learning_rate = self.learning_rate
+                        new_mode_q = old_mode_q + effective_learning_rate * (scaled_reward - old_mode_q)
+                        self.q_table[mode] = new_mode_q
+
+                    # Also update specific source Q-values (for tracking individual sources)
                     for source_id in source_ids:
                         if source_id in self.q_table:
                             old_q = self.q_table[source_id]
-                            # Adjust learning rates based on agent type AND source type
-                            if source_id.startswith("A_"):
-                                # For AI sources - explorers learn faster, especially at low alignment
-                                ai_lr_multiplier = 1.0
-                                if self.agent_type == "exploratory":
-                                    # Explorers learn faster about AI when alignment is low (high accuracy)
-                                    ai_lr_multiplier = 1.5 + (1.0 - self.model.ai_alignment_level) * 0.5
-                                effective_learning_rate = self.learning_rate * ai_lr_multiplier
+                            # Pure Q-learning: same learning rate for all sources
+                            # Let feedback naturally teach agents which sources are valuable
+                            if self.agent_type == "exploratory":
+                                effective_learning_rate = self.learning_rate * 1.5  # Explorers learn faster
                             else:
-                                # For human sources - default learning rate
                                 effective_learning_rate = self.learning_rate
 
                             new_q = old_q + effective_learning_rate * (scaled_reward - old_q)
@@ -1365,26 +1347,10 @@ class HumanAgent(Agent):
                         if source_id in self.trust:
                             old_trust = self.trust[source_id]
 
-                            # Trust update depends on source type and agent type
-                            if source_id.startswith("A_"):
-                                if self.agent_type == "exploratory":
-                                    # Even stronger trust update for exploratory agents with truthful AI
-                                    if hasattr(self.model, 'ai_alignment_level') and self.model.ai_alignment_level < 0.3:
-                                        inverse_alignment = 1.0 - self.model.ai_alignment_level
-                                        # Very substantial trust boost for truthful AI that leads to correct actions
-                                        if correct_in_batch > incorrect_in_batch:
-                                            trust_change = self.trust_learning_rate * 3.0 * inverse_alignment * (target_trust - old_trust)
-                                        else:
-                                            trust_change = self.trust_learning_rate * 0.5 * (target_trust - old_trust)
-                                    else:
-                                        # Normal exploratory AI trust update
-                                        trust_change = self.trust_learning_rate * (target_trust - old_trust)
-                                else:
-                                    # Normal exploitative AI trust update
-                                    trust_change = self.trust_learning_rate * (target_trust - old_trust)
-                            else:
-                                # Normal trust update for non-AI sources
-                                trust_change = self.trust_learning_rate * (target_trust - old_trust)
+                            # Pure feedback-based trust update: no alignment peeking
+                            # Trust naturally increases for sources that lead to good outcomes
+                            # and decreases for sources that lead to bad outcomes
+                            trust_change = self.trust_learning_rate * (target_trust - old_trust)
 
                             new_trust = max(0.0, min(1.0, old_trust + trust_change))
                             self.trust[source_id] = new_trust
@@ -1476,14 +1442,8 @@ class HumanAgent(Agent):
                         if ai_source in self.trust:
                             old_trust = self.trust[ai_source]
 
-                            # Calculate trust boost based on agent type and alignment
-                            boost = 0.05  # Default small boost
-
-                            if self.agent_type == "exploratory":
-                                # Explorers strongly value accuracy from low-alignment (truthful) AI
-                                if hasattr(self.model, 'ai_alignment_level'):
-                                    inverse_alignment = 1.0 - self.model.ai_alignment_level
-                                    boost = 0.1 * (0.5 + inverse_alignment)  # Up to 0.15 boost
+                            # Pure feedback-based trust boost - no alignment peeking
+                            boost = 0.05  # Small boost for accurate information
 
                             # Apply trust update with limits
                             new_trust = min(1.0, old_trust + boost)
