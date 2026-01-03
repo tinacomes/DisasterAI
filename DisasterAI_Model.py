@@ -408,15 +408,18 @@ class HumanAgent(Agent):
             # Calculate accuracy based on how close reported level was to actual
             level_error = abs(reported_level - actual_level)
 
-            # Accuracy-based reward (scaled to [-0.03, +0.03] range - small but meaningful)
+            # Accuracy-based reward (scaled to [-0.3, +0.3] range - 10x increase to match relief magnitude)
+            # CRITICAL FIX: Previous rewards were too weak (-0.03 to +0.03), causing Q-learning to ignore
+            # information quality. One lucky relief event (+0.15) was canceling 167 bad info evaluations!
+            # New scale makes info quality feedback meaningful for learning.
             if level_error == 0:
-                accuracy_reward = 0.03  # Perfect accuracy
+                accuracy_reward = 0.3  # Perfect accuracy
             elif level_error == 1:
-                accuracy_reward = 0.01  # Close
+                accuracy_reward = 0.1  # Close
             elif level_error == 2:
-                accuracy_reward = -0.01  # Moderate error
+                accuracy_reward = -0.1  # Moderate error
             else:
-                accuracy_reward = -0.03  # Large error
+                accuracy_reward = -0.3  # Large error (3+)
 
             # Determine mode from source_id (fixes mode vs source ID mismatch)
             if source_id.startswith("H_"):

@@ -295,21 +295,31 @@ def visualize_filter_bubble_results(results_dict):
     ax7.legend(fontsize=7, loc='best')
     ax7.grid(True, alpha=0.3)
 
-    # 8. SECI Change Over Time (Delta from initial)
+    # 8. SECI Change Over Time - Both Agent Types
     ax8 = plt.subplot(3, 3, 8)
     for cond in conditions:
+        # Exploitative (solid lines)
         seci_exploit = results_dict[cond]['seci']['exploit']
         if len(seci_exploit) > 10:
-            initial_seci = np.mean(seci_exploit[0:10])  # Average first 10 ticks
+            initial_seci = np.mean(seci_exploit[0:10])
             delta_seci = [val - initial_seci for val in seci_exploit]
-            ax8.plot(delta_seci, label=f'{cond} (Exploit)',
+            ax8.plot(delta_seci, label=f'{cond} (Exploit)', linestyle='-',
                     color=colors.get(cond, 'blue'), linewidth=2, alpha=0.8)
+
+        # Exploratory (dashed lines)
+        seci_explor = results_dict[cond]['seci']['explor']
+        if len(seci_explor) > 10:
+            initial_seci_explor = np.mean(seci_explor[0:10])
+            delta_seci_explor = [val - initial_seci_explor for val in seci_explor]
+            ax8.plot(delta_seci_explor, label=f'{cond} (Explor)', linestyle='--',
+                    color=colors.get(cond, 'blue'), linewidth=1.5, alpha=0.6)
+
     ax8.axhline(y=0, color='k', linestyle=':', alpha=0.5, label='No change')
-    ax8.set_title('SECI Change: Exploitative\n(Negative = Increasing echo chamber)',
+    ax8.set_title('SECI Change: Both Types\n(Negative = Increasing echo chamber)',
                   fontsize=10, fontweight='bold')
     ax8.set_xlabel('Tick')
     ax8.set_ylabel('Δ SECI from baseline')
-    ax8.legend(fontsize=8, loc='best')
+    ax8.legend(fontsize=7, loc='best', ncol=2)
     ax8.grid(True, alpha=0.3)
 
     # 9. Summary Statistics Table
