@@ -101,6 +101,7 @@ class HumanAgent(Agent):
         # Human trust initialized later in model setup
         self.friends = set() # Use set for efficient checking ('H_j' format)
         self.pending_rewards = [] # [(tick_due, mode, [(cell, belief_level), ...]), ...]
+        self.pending_info_evaluations = [] # [(tick_received, source_id, cell, reported_level), ...] for information quality feedback
         self.tokens_this_tick = {} # Tracks mode choice leading to send_relief THIS tick
         self.last_queried_source_ids = [] # Temp store for source IDs
         self.last_belief_update = {}  # Tracks when each cell was last updated
@@ -376,6 +377,70 @@ class HumanAgent(Agent):
                 else:
                     # No existing belief, create new one
                     self.beliefs[cell] = {'level': belief_level, 'confidence': belief_conf}
+
+                # Evaluate information quality feedback for this sensed cell
+                self.evaluate_information_quality(cell, actual)
+
+    def evaluate_information_quality(self, cell, actual_level):
+        """
+        Evaluate pending information about a cell when directly observed.
+        Provides fast feedback (5-10 tick window) on information accuracy.
+        """
+        current_tick = self.model.tick
+        evaluated = []
+
+        for tick_received, source_id, eval_cell, reported_level in self.pending_info_evaluations:
+            if eval_cell != cell:
+                continue
+
+            # Check if within evaluation window (5-10 ticks)
+            ticks_elapsed = current_tick - tick_received
+            if ticks_elapsed > 10:
+                # Too old, remove from pending
+                evaluated.append((tick_received, source_id, eval_cell, reported_level))
+                continue
+
+            if ticks_elapsed < 5:
+                # Too soon, wait more ticks for potential disaster evolution
+                continue
+
+            # Within window: evaluate information quality
+            # Calculate accuracy based on how close reported level was to actual
+            level_error = abs(reported_level - actual_level)
+
+            # Accuracy-based reward (scaled to [-0.03, +0.03] range - small but meaningful)
+            if level_error == 0:
+                accuracy_reward = 0.03  # Perfect accuracy
+            elif level_error == 1:
+                accuracy_reward = 0.01  # Close
+            elif level_error == 2:
+                accuracy_reward = -0.01  # Moderate error
+            else:
+                accuracy_reward = -0.03  # Large error
+
+            # Update Q-value with small learning rate (information quality signal)
+            if source_id in self.q_table:
+                old_q = self.q_table[source_id]
+                info_learning_rate = 0.03  # Smaller than relief outcome learning rate (0.1)
+                new_q = old_q + info_learning_rate * accuracy_reward
+                self.q_table[source_id] = new_q
+
+            # Update trust similarly (small adjustment)
+            if source_id in self.trust:
+                old_trust = self.trust[source_id]
+                # Map accuracy reward to trust change
+                trust_adjustment = info_learning_rate * accuracy_reward
+                new_trust = max(0.0, min(1.0, old_trust + trust_adjustment))
+                self.trust[source_id] = new_trust
+
+            # Mark as evaluated
+            evaluated.append((tick_received, source_id, eval_cell, reported_level))
+
+        # Remove evaluated items from pending list
+        self.pending_info_evaluations = [
+            item for item in self.pending_info_evaluations
+            if item not in evaluated
+        ]
 
     def report_beliefs(self, interest_point, query_radius):
         """Reports human agent's beliefs about cells within query_radius of the interest_point."""
@@ -736,6 +801,16 @@ class HumanAgent(Agent):
             level_change = abs(posterior_level - prior_level)
             confidence_change = abs(posterior_confidence - prior_confidence)
             significant_change = (level_change >= 1 or confidence_change >= 0.1)
+
+            # Track information for quality feedback (all sources, not just AI)
+            # This enables fast feedback (5-10 ticks) when agent observes the cell
+            if source_id and significant_change:
+                self.pending_info_evaluations.append((
+                    self.model.tick,
+                    source_id,
+                    cell,
+                    int(posterior_level)  # The level we now believe based on this source
+                ))
 
             # Track AI source information for later trust updates
             is_ai_source = hasattr(self, 'ai_info_sources') and cell in self.ai_info_sources
@@ -1125,8 +1200,11 @@ class HumanAgent(Agent):
                             self.model.tokens_this_tick[cell] = {'exploit': 0, 'explor': 0}
                         self.model.tokens_this_tick[cell][agent_type_key] += 1
 
+                # Relief outcome delay: 15-25 ticks (realistic logistics delay)
+                # Random variation models variable communication/logistics times
+                relief_delay = random.randint(15, 25)
                 self.pending_rewards.append((
-                    self.model.tick + 2,
+                    self.model.tick + relief_delay,
                     responsible_mode,
                     reward_cells,
                     self.last_queried_source_ids
