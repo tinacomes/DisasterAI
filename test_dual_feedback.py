@@ -21,8 +21,8 @@ import os
 base_params = {
     'share_exploitative': 0.5,
     'share_of_disaster': 0.15,
-    'initial_trust': 0.5,
-    'initial_ai_trust': 0.5,
+    'initial_trust': 0.3,  # Fix 1: Lower from 0.5 to prevent blind faith
+    'initial_ai_trust': 0.25,  # Fix 1: Lower from 0.5 (skeptical starting point)
     'number_of_humans': 100,
     'share_confirming': 0.7,
     'disaster_dynamics': 2,  # Medium evolution
@@ -31,6 +31,8 @@ base_params = {
     'ticks': 150,
     'learning_rate': 0.1,
     'epsilon': 0.3,
+    'exploit_trust_lr': 0.015,  # Fix 2: Lower from 0.03 (slower trust building)
+    'explor_trust_lr': 0.03,  # Fix 2: Lower from 0.06 (slower trust building)
 }
 
 def track_agent_feedback_events(model):
