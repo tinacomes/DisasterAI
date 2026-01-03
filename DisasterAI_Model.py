@@ -105,6 +105,7 @@ class HumanAgent(Agent):
         self.tokens_this_tick = {} # Tracks mode choice leading to send_relief THIS tick
         self.last_queried_source_ids = [] # Temp store for source IDs
         self.last_belief_update = {}  # Tracks when each cell was last updated
+        self.last_query_confirmations = {}  # Track confirmation vs correction: {cell: {ai_report, my_belief, is_confirmation, source_id}}
                      
         # --- Q-Table for Source Values ---
         self.q_table = {f"A_{k}": 0.0 for k in range(model.num_ai)}
@@ -133,6 +134,10 @@ class HumanAgent(Agent):
         # Performance Counters
         self.correct_targets = 0
         self.incorrect_targets = 0
+
+        # Confirmation/Correction tracking counters
+        self.total_confirmations = 0
+        self.total_corrections = 0
 
 
     def initialize_beliefs(self, assigned_rumor=None):
@@ -1092,6 +1097,25 @@ class HumanAgent(Agent):
                     source_id = None
 
 
+            # Track confirmation vs correction for each reported cell
+            self.last_query_confirmations = {}
+            if reports and source_id:
+                for cell, reported_value in reports.items():
+                    if cell in self.beliefs and isinstance(self.beliefs[cell], dict):
+                        my_belief = self.beliefs[cell]['level']
+                        ai_report = int(round(reported_value))
+                        belief_diff = abs(ai_report - my_belief)
+
+                        # Confirmation: AI agrees within ±1 level
+                        is_confirmation = belief_diff <= 1
+
+                        self.last_query_confirmations[cell] = {
+                            'ai_report': ai_report,
+                            'my_belief': my_belief,
+                            'is_confirmation': is_confirmation,
+                            'source_id': source_id
+                        }
+
             # Process reports and update beliefs
             belief_updates = 0
             source_trust = self.trust.get(source_id, 0.1) if source_id else 0.1
@@ -1211,10 +1235,34 @@ class HumanAgent(Agent):
                 correct_in_batch = 0
                 incorrect_in_batch = 0
                 cell_rewards = []
+                cells_to_relieve = [cell for cell, level in cells_and_beliefs]
 
                 # possible diagnostic for reward processing
                 #if self.model.debug_mode and random.random() < 0.1:
                     #print(f"Agent {self.unique_id} processing rewards for {len(cells_and_beliefs)} cells")
+
+                # NEW: Calculate confirmation/correction metrics for this batch
+                confirmation_count = 0
+                correction_count = 0
+                confirmation_accurate_count = 0
+                correction_accurate_count = 0
+
+                for cell in cells_to_relieve:
+                    if cell in self.last_query_confirmations:
+                        conf_info = self.last_query_confirmations[cell]
+                        actual_level = self.model.disaster_grid[cell[0], cell[1]]
+                        ai_was_accurate = abs(conf_info['ai_report'] - actual_level) <= 1
+
+                        if conf_info['is_confirmation']:
+                            confirmation_count += 1
+                            self.total_confirmations += 1
+                            if ai_was_accurate:
+                                confirmation_accurate_count += 1
+                        else:
+                            correction_count += 1
+                            self.total_corrections += 1
+                            if ai_was_accurate:
+                                correction_accurate_count += 1
 
                 for cell, belief_level in cells_and_beliefs:
                     if not (0 <= cell[0] < self.model.width and 0 <= cell[1] < self.model.height):
@@ -1283,18 +1331,47 @@ class HumanAgent(Agent):
 
                 # Calculate batch reward based on correctness ratio and actual reward
                 if cell_rewards:
-                    # Blend components for final reward - KEY CHANGE: Make this agent-type dependent
-                    if self.agent_type == "exploratory":
-                        # Explorers care more about actual levels (accuracy)
-                        # Explorers care almost exclusively about actual accuracy
-                        avg_actual_reward = sum(cell_rewards) / len(cell_rewards)
-                        correct_ratio = correct_in_batch / len(cell_rewards) if cell_rewards else 0
-                        batch_reward = 0.8 * avg_actual_reward + 0.2 * (correct_ratio * 5.0)  # 80% actual value, 10% correctness
+                    avg_actual_reward = sum(cell_rewards) / len(cell_rewards)
+                    correct_ratio = correct_in_batch / len(cell_rewards) if cell_rewards else 0
+
+                    # Confirmation/correction metrics already calculated above
+                    total_info = confirmation_count + correction_count
+
+                    if total_info > 0:
+                        confirmation_ratio = confirmation_count / total_info
+                        confirmation_accuracy = (confirmation_accurate_count / confirmation_count
+                                                if confirmation_count > 0 else 0.5)
+                        correction_accuracy = (correction_accurate_count / correction_count
+                                              if correction_count > 0 else 0.5)
                     else:
-                        # Exploiters care much more about validation of beliefs than actual accuracy
-                        correct_ratio = correct_in_batch / len(cell_rewards) if cell_rewards else 0
-                        avg_actual_reward = sum(cell_rewards) / len(cell_rewards)
-                        batch_reward = 0.2 * avg_actual_reward + 0.8 * (correct_ratio * 5.0)  # 20% actual value, 70% correctness
+                        confirmation_ratio = 0.5
+                        confirmation_accuracy = 0.5
+                        correction_accuracy = 0.5
+
+                    # Agent-specific reward calculation
+                    if self.agent_type == "exploratory":
+                        # Exploratory: Value accurate corrections, neutral on confirmations
+                        correction_reward = correction_accuracy * 5.0
+                        confirmation_reward = confirmation_accuracy * 2.0
+                        info_reward = (1 - confirmation_ratio) * correction_reward + confirmation_ratio * confirmation_reward
+
+                        # 60% actual outcome, 40% information quality
+                        batch_reward = 0.6 * avg_actual_reward + 0.4 * info_reward
+
+                    else:  # exploitative
+                        # Exploitative: Value confirmations, penalize corrections
+                        confirmation_reward = confirmation_ratio * 5.0
+
+                        # Bonus if confirmations accurate (lucky validation)
+                        if confirmation_count > 0:
+                            confirmation_reward *= (0.5 + 0.5 * confirmation_accuracy)
+
+                        # Penalty for corrections
+                        correction_penalty = (1 - confirmation_ratio) * 2.0
+                        validation_reward = confirmation_reward - correction_penalty
+
+                        # 20% actual outcome, 80% validation
+                        batch_reward = 0.2 * avg_actual_reward + 0.8 * validation_reward
 
                     # Cap the reward range
                     batch_reward = max(-3.0, min(5.0, batch_reward))
@@ -1347,11 +1424,67 @@ class HumanAgent(Agent):
                         if source_id in self.trust:
                             old_trust = self.trust[source_id]
 
-                            # Pure feedback-based trust update: no alignment peeking
-                            # Trust naturally increases for sources that lead to good outcomes
-                            # and decreases for sources that lead to bad outcomes
-                            trust_change = self.trust_learning_rate * (target_trust - old_trust)
+                            # Calculate base trust target from relief outcome
+                            outcome_based_trust = (scaled_reward + 1.0) / 2.0
 
+                            # NEW: Adjust based on confirmation/correction for this source
+                            source_confirmations = 0
+                            source_corrections = 0
+                            source_conf_accurate = 0
+                            source_corr_accurate = 0
+
+                            for cell in cells_to_relieve:
+                                if (cell in self.last_query_confirmations and
+                                    self.last_query_confirmations[cell]['source_id'] == source_id):
+
+                                    conf_info = self.last_query_confirmations[cell]
+                                    actual_level = self.model.disaster_grid[cell[0], cell[1]]
+                                    ai_accurate = abs(conf_info['ai_report'] - actual_level) <= 1
+
+                                    if conf_info['is_confirmation']:
+                                        source_confirmations += 1
+                                        if ai_accurate:
+                                            source_conf_accurate += 1
+                                    else:
+                                        source_corrections += 1
+                                        if ai_accurate:
+                                            source_corr_accurate += 1
+
+                            # Agent-specific trust adjustment
+                            if self.agent_type == "exploratory":
+                                # Exploratory: Trust based on ACCURACY of information
+                                if source_corrections > 0:
+                                    # Corrections provided - reward if accurate
+                                    corr_acc_rate = source_corr_accurate / source_corrections
+                                    target_trust = 0.3 + 0.7 * corr_acc_rate
+                                elif source_confirmations > 0:
+                                    # Only confirmations - moderate trust
+                                    conf_acc_rate = source_conf_accurate / source_confirmations
+                                    target_trust = 0.4 + 0.3 * conf_acc_rate
+                                else:
+                                    target_trust = outcome_based_trust
+
+                                # Bonus for providing corrections (information gain)
+                                if source_corrections > source_confirmations:
+                                    target_trust = min(1.0, target_trust + 0.1)
+
+                            else:  # exploitative
+                                # Exploitative: Trust based on CONFIRMATION of beliefs
+                                if source_confirmations > 0:
+                                    # Confirmations provided - good!
+                                    conf_rate = source_confirmations / (source_confirmations + source_corrections)
+                                    target_trust = 0.5 + 0.5 * conf_rate
+
+                                    # Bonus if confirmations accurate (lucky validation)
+                                    if source_conf_accurate > 0:
+                                        accuracy_bonus = (source_conf_accurate / source_confirmations) * 0.2
+                                        target_trust = min(1.0, target_trust + accuracy_bonus)
+                                else:
+                                    # Only corrections - penalty for contradicting
+                                    target_trust = max(0.1, outcome_based_trust - 0.3)
+
+                            # Apply trust update
+                            trust_change = self.trust_learning_rate * (target_trust - old_trust)
                             new_trust = max(0.0, min(1.0, old_trust + trust_change))
                             self.trust[source_id] = new_trust
 
@@ -1359,6 +1492,9 @@ class HumanAgent(Agent):
             print(f"ERROR in Agent {self.unique_id} process_reward at tick {current_tick}: {e}")
             import traceback
             traceback.print_exc()
+
+        # Clear confirmation tracking after processing rewards
+        self.last_query_confirmations = {}
 
         return total_reward
 
