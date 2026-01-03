@@ -2289,17 +2289,46 @@ class DisasterModel(Model):
             plt.close()
 
     def update_disaster(self):
+        """
+        Update disaster grid based on disaster_dynamics parameter.
+
+        disaster_dynamics:
+        0 = Static (no updates)
+        1 = Slow evolution (5% chance per tick, smaller magnitude)
+        2 = Medium evolution (10% chance per tick, medium magnitude)
+        3 = Rapid evolution (20% chance per tick, larger magnitude)
+        """
         # Store a copy of the current grid before updating
         if self.disaster_grid is not None:
             self.previous_grid = self.disaster_grid.copy()
         else:
             self.previous_grid = None
 
-        # Replace this with your actual update_disaster logic
-        # Example placeholder: Create a hotspot with some probability
-        if random.random() < 0.1:  # 10% chance each tick
-            x, y = np.random.randint(0, self.disaster_grid.shape[0]), np.random.randint(0, self.disaster_grid.shape[1])
-            self.disaster_grid[x, y] = min(5, self.disaster_grid[x, y] + 3)
+        # Apply disaster dynamics based on parameter
+        if self.disaster_dynamics == 0:
+            # Static disaster - no updates
+            pass
+
+        elif self.disaster_dynamics == 1:
+            # Slow evolution: 5% chance, +1-2 magnitude
+            if random.random() < 0.05:
+                x, y = np.random.randint(0, self.disaster_grid.shape[0]), np.random.randint(0, self.disaster_grid.shape[1])
+                magnitude = random.randint(1, 2)
+                self.disaster_grid[x, y] = min(5, self.disaster_grid[x, y] + magnitude)
+
+        elif self.disaster_dynamics == 2:
+            # Medium evolution: 10% chance, +2-3 magnitude
+            if random.random() < 0.1:
+                x, y = np.random.randint(0, self.disaster_grid.shape[0]), np.random.randint(0, self.disaster_grid.shape[1])
+                magnitude = random.randint(2, 3)
+                self.disaster_grid[x, y] = min(5, self.disaster_grid[x, y] + magnitude)
+
+        elif self.disaster_dynamics == 3:
+            # Rapid evolution: 20% chance, +3-4 magnitude
+            if random.random() < 0.2:
+                x, y = np.random.randint(0, self.disaster_grid.shape[0]), np.random.randint(0, self.disaster_grid.shape[1])
+                magnitude = random.randint(3, 4)
+                self.disaster_grid[x, y] = min(5, self.disaster_grid[x, y] + magnitude)
 
         # Detect significant changes
         if self.previous_grid is not None:
