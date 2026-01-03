@@ -160,7 +160,7 @@ class HumanAgent(Agent):
 
                 # Calculate distance from agent for sensing
                 distance_from_agent = math.sqrt((x - self.pos[0])**2 + (y - self.pos[1])**2)
-                sense_radius = 3 if self.agent_type == "exploratory" else 2
+                sense_radius = 2  # Same for both agent types
 
                 # If cell is within sensing range, initialize with noisy perception of actual disaster
                 if distance_from_agent <= sense_radius:
@@ -293,8 +293,8 @@ class HumanAgent(Agent):
                 # Cells further from agent decay faster
                 if self.pos and cell:
                     distance = math.sqrt((cell[0] - self.pos[0])**2 + (cell[1] - self.pos[1])**2)
-                    # Scale by sensing radius (2 or 3 based on agent type)
-                    radius = 2 if self.agent_type == "exploitative" else 3
+                    # Scale by sensing radius (same for both agent types)
+                    radius = 2
                     distance_factor = min(1.5, 1.0 + (distance / (2 * radius)))
                 else:
                     distance_factor = 1.0
@@ -322,8 +322,7 @@ class HumanAgent(Agent):
 
     def sense_environment(self):
         pos = self.pos
-        radius = 2 if self.agent_type == "exploitative" else 3
-        cells = self.model.grid.get_neighborhood(pos, moore=True, radius=radius, include_center=True)
+        radius = 2  # Same for both agent types - behavioral differences should be in information-seeking, not perception
         cells = self.model.grid.get_neighborhood(pos, moore=True, radius=radius, include_center=True)
         for cell in cells:
             if 0 <= cell[0] < self.model.width and 0 <= cell[1] < self.model.height:
