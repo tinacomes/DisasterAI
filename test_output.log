@@ -1,0 +1,888 @@
+✓ Running locally - results will be saved to local directory
+✓ Results will be saved to: agent_model_results
+============================================================
+DUAL-TIMELINE FEEDBACK MECHANISM TEST PROTOCOL
+============================================================
+
+============================================================
+Running Test: High Alignment (Confirming AI)
+AI Alignment: 0.9
+============================================================
+
+Initializing social network with 50 exploitative and 50 exploratory agents
+Creating 3 substantial communities
+Created 3 communities:
+  Community 0: 67 agents (32 exploit, 35 explor)
+  Community 1: 17 agents (8 exploit, 9 explor)
+  Community 2: 16 agents (10 exploit, 6 explor)
+  Adding within-community edges for community 0 (size 67)
+  Adding within-community edges for community 1 (size 17)
+  Adding within-community edges for community 2 (size 16)
+Final network: 3 connected components
+  Component 0: 16 agents (10 exploit, 6 explor)
+  Component 1: 67 agents (32 exploit, 35 explor)
+  Component 2: 17 agents (8 exploit, 9 explor)
+Final network after fixes: 3 connected components
+  Component 0: 16 agents (10 exploit, 6 explor)
+  Component 1: 67 agents (32 exploit, 35 explor)
+  Component 2: 17 agents (8 exploit, 9 explor)
+Successfully created social network with 3 components
+Found 3 network components.
+
+DEBUG: Starting AECI variance calculation at tick 5
+  Found 0/100 AI-reliant agents
+  Global belief variance: 0.1187
+  WARNING: Invalid global variance (0.11867377580246918) or no AI-reliant agents
+  Returning AECI variance tuple: (5, 0.0)
+  Current aeci_variance_data length: 5
+  Last 3 entries: [(3, 0), (4, 0), (5, 0.0)]
+
+DEBUG: Starting AECI variance calculation at tick 10
+  Found 0/100 AI-reliant agents
+  Global belief variance: 0.1204
+  WARNING: Invalid global variance (0.12041044333333333) or no AI-reliant agents
+  Returning AECI variance tuple: (10, 0.0)
+  Current aeci_variance_data length: 10
+  Last 3 entries: [(8, 0.0), (9, 0.0), (10, 0.0)]
+
+--- Retainment Diagnostics at Tick 10 ---
+Agent H_0 (exploitative) retainment stats:
+  accepted_human: 11, accepted_friend: 11, accepted_ai: 30
+  retain_aeci: 0.73, retain_seci: 0.27
+Agent H_1 (exploitative) retainment stats:
+  accepted_human: 24, accepted_friend: 24, accepted_ai: 0
+  retain_aeci: 0.00, retain_seci: 1.00
+Agent H_2 (exploitative) retainment stats:
+  accepted_human: 0, accepted_friend: 0, accepted_ai: 0
+  No acceptances recorded
+
+DEBUG: Starting AECI variance calculation at tick 15
+  Found 0/100 AI-reliant agents
+  Global belief variance: 0.1217
+  WARNING: Invalid global variance (0.12169511000000001) or no AI-reliant agents
+  Returning AECI variance tuple: (15, 0.0)
+  Current aeci_variance_data length: 15
+  Last 3 entries: [(13, 0.0), (14, 0.0), (15, 0.0)]
+
+DEBUG: Starting AECI variance calculation at tick 20
+  Found 0/100 AI-reliant agents
+  Global belief variance: 0.1054
+  WARNING: Invalid global variance (0.10539150172839509) or no AI-reliant agents
+  Returning AECI variance tuple: (20, 0.0)
+  Current aeci_variance_data length: 20
+  Last 3 entries: [(18, 0.0), (19, 0.0), (20, 0.0)]
+
+--- Retainment Diagnostics at Tick 20 ---
+Agent H_0 (exploitative) retainment stats:
+  accepted_human: 0, accepted_friend: 0, accepted_ai: 0
+  No acceptances recorded
+Agent H_1 (exploitative) retainment stats:
+  accepted_human: 57, accepted_friend: 57, accepted_ai: 3
+  retain_aeci: 0.05, retain_seci: 0.95
+Agent H_2 (exploitative) retainment stats:
+  accepted_human: 6, accepted_friend: 6, accepted_ai: 19
+  retain_aeci: 0.76, retain_seci: 0.24
+
+DEBUG: Starting AECI variance calculation at tick 25
+  Found 0/100 AI-reliant agents
+  Global belief variance: 0.0971
+  WARNING: Invalid global variance (0.09709134209876544) or no AI-reliant agents
+  Returning AECI variance tuple: (25, 0.0)
+  Current aeci_variance_data length: 25
+  Last 3 entries: [(23, 0.0), (24, 0.0), (25, 0.0)]
+
+DEBUG: Starting AECI variance calculation at tick 30
+  Found 0/100 AI-reliant agents
+  Global belief variance: 0.1023
+  WARNING: Invalid global variance (0.10227021777777777) or no AI-reliant agents
+  Returning AECI variance tuple: (30, 0.0)
+  Current aeci_variance_data length: 30
+  Last 3 entries: [(28, 0.0), (29, 0.0), (30, 0.0)]
+
+--- Retainment Diagnostics at Tick 30 ---
+Agent H_0 (exploitative) retainment stats:
+  accepted_human: 38, accepted_friend: 38, accepted_ai: 0
+  retain_aeci: 0.00, retain_seci: 1.00
+Agent H_1 (exploitative) retainment stats:
+  accepted_human: 24, accepted_friend: 24, accepted_ai: 0
+  retain_aeci: 0.00, retain_seci: 1.00
+Agent H_2 (exploitative) retainment stats:
+  accepted_human: 0, accepted_friend: 0, accepted_ai: 0
+  No acceptances recorded
+
+DEBUG: Starting AECI variance calculation at tick 35
+  Found 0/100 AI-reliant agents
+  Global belief variance: 0.1063
+  WARNING: Invalid global variance (0.10633127395061727) or no AI-reliant agents
+  Returning AECI variance tuple: (35, 0.0)
+  Current aeci_variance_data length: 35
+  Last 3 entries: [(33, 0.0), (34, 0.0), (35, 0.0)]
+
+DEBUG: Starting AECI variance calculation at tick 40
+  Found 0/100 AI-reliant agents
+  Global belief variance: 0.0968
+  WARNING: Invalid global variance (0.09683092333333335) or no AI-reliant agents
+  Returning AECI variance tuple: (40, 0.0)
+  Current aeci_variance_data length: 40
+  Last 3 entries: [(38, 0.0), (39, 0.0), (40, 0.0)]
+
+--- Retainment Diagnostics at Tick 40 ---
+Agent H_0 (exploitative) retainment stats:
+  accepted_human: 0, accepted_friend: 0, accepted_ai: 0
+  No acceptances recorded
+Agent H_1 (exploitative) retainment stats:
+  accepted_human: 0, accepted_friend: 0, accepted_ai: 0
+  No acceptances recorded
+Agent H_2 (exploitative) retainment stats:
+  accepted_human: 1, accepted_friend: 1, accepted_ai: 0
+  retain_aeci: 0.00, retain_seci: 1.00
+
+DEBUG: Starting AECI variance calculation at tick 45
+  Found 0/100 AI-reliant agents
+  Global belief variance: 0.0833
+  WARNING: Invalid global variance (0.08331146222222222) or no AI-reliant agents
+  Returning AECI variance tuple: (45, 0.0)
+  Current aeci_variance_data length: 45
+  Last 3 entries: [(43, 0.0), (44, 0.0), (45, 0.0)]
+
+DEBUG: Starting AECI variance calculation at tick 50
+  Found 0/100 AI-reliant agents
+  Global belief variance: 0.0786
+  WARNING: Invalid global variance (0.07858851543209876) or no AI-reliant agents
+  Returning AECI variance tuple: (50, 0.0)
+  Current aeci_variance_data length: 50
+  Last 3 entries: [(48, 0.0), (49, 0.0), (50, 0.0)]
+
+--- Retainment Diagnostics at Tick 50 ---
+Agent H_0 (exploitative) retainment stats:
+  accepted_human: 0, accepted_friend: 0, accepted_ai: 0
+  No acceptances recorded
+Agent H_1 (exploitative) retainment stats:
+  accepted_human: 15, accepted_friend: 15, accepted_ai: 1
+  retain_aeci: 0.06, retain_seci: 0.94
+Agent H_2 (exploitative) retainment stats:
+  accepted_human: 15, accepted_friend: 15, accepted_ai: 0
+  retain_aeci: 0.00, retain_seci: 1.00
+
+DEBUG: Starting AECI variance calculation at tick 55
+  Found 0/100 AI-reliant agents
+  Global belief variance: 0.0764
+  WARNING: Invalid global variance (0.07639311802469137) or no AI-reliant agents
+  Returning AECI variance tuple: (55, 0.0)
+  Current aeci_variance_data length: 55
+  Last 3 entries: [(53, 0.0), (54, 0.0), (55, 0.0)]
+
+DEBUG: Starting AECI variance calculation at tick 60
+  Found 0/100 AI-reliant agents
+  Global belief variance: 0.0703
+  WARNING: Invalid global variance (0.07025065172839506) or no AI-reliant agents
+  Returning AECI variance tuple: (60, 0.0)
+  Current aeci_variance_data length: 60
+  Last 3 entries: [(58, 0.0), (59, 0.0), (60, 0.0)]
+
+--- Retainment Diagnostics at Tick 60 ---
+Agent H_0 (exploitative) retainment stats:
+  accepted_human: 0, accepted_friend: 0, accepted_ai: 8
+  retain_aeci: 1.00, retain_seci: 0.00
+Agent H_1 (exploitative) retainment stats:
+  accepted_human: 0, accepted_friend: 0, accepted_ai: 0
+  No acceptances recorded
+Agent H_2 (exploitative) retainment stats:
+  accepted_human: 0, accepted_friend: 0, accepted_ai: 0
+  No acceptances recorded
+
+DEBUG: Starting AECI variance calculation at tick 65
+  Found 0/100 AI-reliant agents
+  Global belief variance: 0.0680
+  WARNING: Invalid global variance (0.0679710961728395) or no AI-reliant agents
+  Returning AECI variance tuple: (65, 0.0)
+  Current aeci_variance_data length: 65
+  Last 3 entries: [(63, 0.0), (64, 0.0), (65, 0.0)]
+
+DEBUG: Starting AECI variance calculation at tick 70
+  Found 0/100 AI-reliant agents
+  Global belief variance: 0.0663
+  WARNING: Invalid global variance (0.06631155358024692) or no AI-reliant agents
+  Returning AECI variance tuple: (70, 0.0)
+  Current aeci_variance_data length: 70
+  Last 3 entries: [(68, 0.0), (69, 0.0), (70, 0.0)]
+
+--- Retainment Diagnostics at Tick 70 ---
+Agent H_0 (exploitative) retainment stats:
+  accepted_human: 25, accepted_friend: 25, accepted_ai: 7
+  retain_aeci: 0.22, retain_seci: 0.78
+Agent H_1 (exploitative) retainment stats:
+  accepted_human: 1, accepted_friend: 1, accepted_ai: 0
+  retain_aeci: 0.00, retain_seci: 1.00
+Agent H_2 (exploitative) retainment stats:
+  accepted_human: 0, accepted_friend: 0, accepted_ai: 0
+  No acceptances recorded
+
+DEBUG: Starting AECI variance calculation at tick 75
+  Found 0/100 AI-reliant agents
+  Global belief variance: 0.0619
+  WARNING: Invalid global variance (0.06189308333333334) or no AI-reliant agents
+  Returning AECI variance tuple: (75, 0.0)
+  Current aeci_variance_data length: 75
+  Last 3 entries: [(73, 0.0), (74, 0.0), (75, 0.0)]
+
+DEBUG: Starting AECI variance calculation at tick 80
+  Found 0/100 AI-reliant agents
+  Global belief variance: 0.0568
+  WARNING: Invalid global variance (0.0568248087654321) or no AI-reliant agents
+  Returning AECI variance tuple: (80, 0.0)
+  Current aeci_variance_data length: 80
+  Last 3 entries: [(78, 0.0), (79, 0.0), (80, 0.0)]
+
+--- Retainment Diagnostics at Tick 80 ---
+Agent H_0 (exploitative) retainment stats:
+  accepted_human: 0, accepted_friend: 0, accepted_ai: 19
+  retain_aeci: 1.00, retain_seci: 0.00
+Agent H_1 (exploitative) retainment stats:
+  accepted_human: 0, accepted_friend: 0, accepted_ai: 0
+  No acceptances recorded
+Agent H_2 (exploitative) retainment stats:
+  accepted_human: 6, accepted_friend: 6, accepted_ai: 0
+  retain_aeci: 0.00, retain_seci: 1.00
+
+DEBUG: Starting AECI variance calculation at tick 85
+  Found 0/100 AI-reliant agents
+  Global belief variance: 0.0503
+  WARNING: Invalid global variance (0.050296221111111115) or no AI-reliant agents
+  Returning AECI variance tuple: (85, 0.0)
+  Current aeci_variance_data length: 85
+  Last 3 entries: [(83, 0.0), (84, 0.0), (85, 0.0)]
+
+DEBUG: Starting AECI variance calculation at tick 90
+  Found 0/100 AI-reliant agents
+  Global belief variance: 0.0467
+  WARNING: Invalid global variance (0.046670097654320994) or no AI-reliant agents
+  Returning AECI variance tuple: (90, 0.0)
+  Current aeci_variance_data length: 90
+  Last 3 entries: [(88, 0.0), (89, 0.0), (90, 0.0)]
+
+--- Retainment Diagnostics at Tick 90 ---
+Agent H_0 (exploitative) retainment stats:
+  accepted_human: 0, accepted_friend: 0, accepted_ai: 21
+  retain_aeci: 1.00, retain_seci: 0.00
+Agent H_1 (exploitative) retainment stats:
+  accepted_human: 8, accepted_friend: 8, accepted_ai: 0
+  retain_aeci: 0.00, retain_seci: 1.00
+Agent H_2 (exploitative) retainment stats:
+  accepted_human: 17, accepted_friend: 17, accepted_ai: 1
+  retain_aeci: 0.06, retain_seci: 0.94
+
+DEBUG: Starting AECI variance calculation at tick 95
+  Found 0/100 AI-reliant agents
+  Global belief variance: 0.0414
+  WARNING: Invalid global variance (0.04140704) or no AI-reliant agents
+  Returning AECI variance tuple: (95, 0.0)
+  Current aeci_variance_data length: 95
+  Last 3 entries: [(93, 0.0), (94, 0.0), (95, 0.0)]
+
+DEBUG: Starting AECI variance calculation at tick 100
+  Found 0/100 AI-reliant agents
+  Global belief variance: 0.0401
+  WARNING: Invalid global variance (0.04013347111111111) or no AI-reliant agents
+  Returning AECI variance tuple: (100, 0.0)
+  Current aeci_variance_data length: 100
+  Last 3 entries: [(98, 0.0), (99, 0.0), (100, 0.0)]
+
+--- Retainment Diagnostics at Tick 100 ---
+Agent H_0 (exploitative) retainment stats:
+  accepted_human: 0, accepted_friend: 0, accepted_ai: 18
+  retain_aeci: 1.00, retain_seci: 0.00
+Agent H_1 (exploitative) retainment stats:
+  accepted_human: 7, accepted_friend: 7, accepted_ai: 0
+  retain_aeci: 0.00, retain_seci: 1.00
+Agent H_2 (exploitative) retainment stats:
+  accepted_human: 0, accepted_friend: 0, accepted_ai: 0
+  No acceptances recorded
+
+DEBUG: Starting AECI variance calculation at tick 105
+  Found 0/100 AI-reliant agents
+  Global belief variance: 0.0348
+  WARNING: Invalid global variance (0.03478997222222223) or no AI-reliant agents
+  Returning AECI variance tuple: (105, 0.0)
+  Current aeci_variance_data length: 105
+  Last 3 entries: [(103, 0.0), (104, 0.0), (105, 0.0)]
+
+DEBUG: Starting AECI variance calculation at tick 110
+  Found 0/100 AI-reliant agents
+  Global belief variance: 0.0318
+  WARNING: Invalid global variance (0.031763762839506174) or no AI-reliant agents
+  Returning AECI variance tuple: (110, 0.0)
+  Current aeci_variance_data length: 110
+  Last 3 entries: [(108, 0.0), (109, 0.0), (110, 0.0)]
+
+--- Retainment Diagnostics at Tick 110 ---
+Agent H_0 (exploitative) retainment stats:
+  accepted_human: 8, accepted_friend: 8, accepted_ai: 21
+  retain_aeci: 0.72, retain_seci: 0.28
+Agent H_1 (exploitative) retainment stats:
+  accepted_human: 2, accepted_friend: 2, accepted_ai: 23
+  retain_aeci: 0.92, retain_seci: 0.08
+Agent H_2 (exploitative) retainment stats:
+  accepted_human: 13, accepted_friend: 13, accepted_ai: 0
+  retain_aeci: 0.00, retain_seci: 1.00
+
+DEBUG: Starting AECI variance calculation at tick 115
+  Found 0/100 AI-reliant agents
+  Global belief variance: 0.0269
+  WARNING: Invalid global variance (0.0269367624691358) or no AI-reliant agents
+  Returning AECI variance tuple: (115, 0.0)
+  Current aeci_variance_data length: 115
+  Last 3 entries: [(113, 0.0), (114, 0.0), (115, 0.0)]
+
+DEBUG: Starting AECI variance calculation at tick 120
+  Found 0/100 AI-reliant agents
+  Global belief variance: 0.0244
+  WARNING: Invalid global variance (0.02442353469135802) or no AI-reliant agents
+  Returning AECI variance tuple: (120, 0.0)
+  Current aeci_variance_data length: 120
+  Last 3 entries: [(118, 0.0), (119, 0.0), (120, 0.0)]
+
+--- Retainment Diagnostics at Tick 120 ---
+Agent H_0 (exploitative) retainment stats:
+  accepted_human: 0, accepted_friend: 0, accepted_ai: 26
+  retain_aeci: 1.00, retain_seci: 0.00
+Agent H_1 (exploitative) retainment stats:
+  accepted_human: 0, accepted_friend: 0, accepted_ai: 0
+  No acceptances recorded
+Agent H_2 (exploitative) retainment stats:
+  accepted_human: 1, accepted_friend: 1, accepted_ai: 0
+  retain_aeci: 0.00, retain_seci: 1.00
+
+DEBUG: Starting AECI variance calculation at tick 125
+  Found 0/100 AI-reliant agents
+  Global belief variance: 0.0225
+  WARNING: Invalid global variance (0.022465728395061727) or no AI-reliant agents
+  Returning AECI variance tuple: (125, 0.0)
+  Current aeci_variance_data length: 125
+  Last 3 entries: [(123, 0.0), (124, 0.0), (125, 0.0)]
+
+DEBUG: Starting AECI variance calculation at tick 130
+  Found 0/100 AI-reliant agents
+  Global belief variance: 0.0196
+  WARNING: Invalid global variance (0.019611246913580252) or no AI-reliant agents
+  Returning AECI variance tuple: (130, 0.0)
+  Current aeci_variance_data length: 130
+  Last 3 entries: [(128, 0.0), (129, 0.0), (130, 0.0)]
+
+--- Retainment Diagnostics at Tick 130 ---
+Agent H_0 (exploitative) retainment stats:
+  accepted_human: 0, accepted_friend: 0, accepted_ai: 25
+  retain_aeci: 1.00, retain_seci: 0.00
+Agent H_1 (exploitative) retainment stats:
+  accepted_human: 0, accepted_friend: 0, accepted_ai: 0
+  No acceptances recorded
+Agent H_2 (exploitative) retainment stats:
+  accepted_human: 0, accepted_friend: 0, accepted_ai: 0
+  No acceptances recorded
+
+DEBUG: Starting AECI variance calculation at tick 135
+  Found 0/100 AI-reliant agents
+  Global belief variance: 0.0195
+  WARNING: Invalid global variance (0.019458306666666664) or no AI-reliant agents
+  Returning AECI variance tuple: (135, 0.0)
+  Current aeci_variance_data length: 135
+  Last 3 entries: [(133, 0.0), (134, 0.0), (135, 0.0)]
+
+DEBUG: Starting AECI variance calculation at tick 140
+  Found 0/100 AI-reliant agents
+  Global belief variance: 0.0197
+  WARNING: Invalid global variance (0.019725617283950614) or no AI-reliant agents
+  Returning AECI variance tuple: (140, 0.0)
+  Current aeci_variance_data length: 140
+  Last 3 entries: [(138, 0.0), (139, 0.0), (140, 0.0)]
+
+--- Retainment Diagnostics at Tick 140 ---
+Agent H_0 (exploitative) retainment stats:
+  accepted_human: 0, accepted_friend: 0, accepted_ai: 30
+  retain_aeci: 1.00, retain_seci: 0.00
+Agent H_1 (exploitative) retainment stats:
+  accepted_human: 0, accepted_friend: 0, accepted_ai: 0
+  No acceptances recorded
+Agent H_2 (exploitative) retainment stats:
+  accepted_human: 0, accepted_friend: 0, accepted_ai: 0
+  No acceptances recorded
+
+DEBUG: Starting AECI variance calculation at tick 145
+  Found 0/100 AI-reliant agents
+  Global belief variance: 0.0196
+  WARNING: Invalid global variance (0.01962673469135802) or no AI-reliant agents
+  Returning AECI variance tuple: (145, 0.0)
+  Current aeci_variance_data length: 145
+  Last 3 entries: [(143, 0.0), (144, 0.0), (145, 0.0)]
+
+DEBUG: Starting AECI variance calculation at tick 150
+  Found 0/100 AI-reliant agents
+  Global belief variance: 0.0190
+  WARNING: Invalid global variance (0.01897353283950617) or no AI-reliant agents
+  Returning AECI variance tuple: (150, 0.0)
+  Current aeci_variance_data length: 150
+  Last 3 entries: [(148, 0.0), (149, 0.0), (150, 0.0)]
+
+--- Retainment Diagnostics at Tick 150 ---
+Agent H_0 (exploitative) retainment stats:
+  accepted_human: 9, accepted_friend: 9, accepted_ai: 18
+  retain_aeci: 0.67, retain_seci: 0.33
+Agent H_1 (exploitative) retainment stats:
+  accepted_human: 0, accepted_friend: 0, accepted_ai: 0
+  No acceptances recorded
+Agent H_2 (exploitative) retainment stats:
+  accepted_human: 0, accepted_friend: 0, accepted_ai: 0
+  No acceptances recorded
+
+Feedback Event Summary:
+  Exploratory - Info Quality: 0, Relief Outcome: 148
+  Exploitative - Info Quality: 141, Relief Outcome: 43
+
+============================================================
+Running Test: Low Alignment (Truthful AI)
+AI Alignment: 0.1
+============================================================
+
+Initializing social network with 50 exploitative and 50 exploratory agents
+Creating 3 substantial communities
+Created 3 communities:
+  Community 0: 44 agents (25 exploit, 19 explor)
+  Community 1: 34 agents (15 exploit, 19 explor)
+  Community 2: 22 agents (10 exploit, 12 explor)
+  Adding within-community edges for community 0 (size 44)
+  Adding within-community edges for community 1 (size 34)
+  Adding within-community edges for community 2 (size 22)
+Final network: 3 connected components
+  Component 0: 22 agents (10 exploit, 12 explor)
+  Component 1: 44 agents (25 exploit, 19 explor)
+  Component 2: 34 agents (15 exploit, 19 explor)
+Final network after fixes: 3 connected components
+  Component 0: 22 agents (10 exploit, 12 explor)
+  Component 1: 44 agents (25 exploit, 19 explor)
+  Component 2: 34 agents (15 exploit, 19 explor)
+Successfully created social network with 3 components
+Found 3 network components.
+
+DEBUG: Starting AECI variance calculation at tick 5
+  Found 0/100 AI-reliant agents
+  Global belief variance: 0.0051
+  WARNING: Invalid global variance (0.0050630833333333335) or no AI-reliant agents
+  Returning AECI variance tuple: (5, 0.0)
+  Current aeci_variance_data length: 5
+  Last 3 entries: [(3, 0), (4, 0), (5, 0.0)]
+
+DEBUG: Starting AECI variance calculation at tick 10
+  Found 0/100 AI-reliant agents
+  Global belief variance: 0.0083
+  WARNING: Invalid global variance (0.008262537777777778) or no AI-reliant agents
+  Returning AECI variance tuple: (10, 0.0)
+  Current aeci_variance_data length: 10
+  Last 3 entries: [(8, 0.0), (9, 0.0), (10, 0.0)]
+
+--- Retainment Diagnostics at Tick 10 ---
+Agent H_0 (exploitative) retainment stats:
+  accepted_human: 20, accepted_friend: 20, accepted_ai: 5
+  retain_aeci: 0.20, retain_seci: 0.80
+Agent H_1 (exploitative) retainment stats:
+  accepted_human: 13, accepted_friend: 13, accepted_ai: 15
+  retain_aeci: 0.54, retain_seci: 0.46
+Agent H_2 (exploitative) retainment stats:
+  accepted_human: 47, accepted_friend: 47, accepted_ai: 0
+  retain_aeci: 0.00, retain_seci: 1.00
+
+DEBUG: Starting AECI variance calculation at tick 15
+  Found 0/100 AI-reliant agents
+  Global belief variance: 0.0101
+  WARNING: Invalid global variance (0.010127534691358023) or no AI-reliant agents
+  Returning AECI variance tuple: (15, 0.0)
+  Current aeci_variance_data length: 15
+  Last 3 entries: [(13, 0.0), (14, 0.0), (15, 0.0)]
+
+DEBUG: Starting AECI variance calculation at tick 20
+  Found 0/100 AI-reliant agents
+  Global belief variance: 0.0117
+  WARNING: Invalid global variance (0.011728777777777779) or no AI-reliant agents
+  Returning AECI variance tuple: (20, 0.0)
+  Current aeci_variance_data length: 20
+  Last 3 entries: [(18, 0.0), (19, 0.0), (20, 0.0)]
+
+--- Retainment Diagnostics at Tick 20 ---
+Agent H_0 (exploitative) retainment stats:
+  accepted_human: 12, accepted_friend: 12, accepted_ai: 5
+  retain_aeci: 0.29, retain_seci: 0.71
+Agent H_1 (exploitative) retainment stats:
+  accepted_human: 25, accepted_friend: 25, accepted_ai: 5
+  retain_aeci: 0.17, retain_seci: 0.83
+Agent H_2 (exploitative) retainment stats:
+  accepted_human: 31, accepted_friend: 31, accepted_ai: 0
+  retain_aeci: 0.00, retain_seci: 1.00
+
+DEBUG: Starting AECI variance calculation at tick 25
+  Found 0/100 AI-reliant agents
+  Global belief variance: 0.0174
+  WARNING: Invalid global variance (0.017350927283950622) or no AI-reliant agents
+  Returning AECI variance tuple: (25, 0.0)
+  Current aeci_variance_data length: 25
+  Last 3 entries: [(23, 0.0), (24, 0.0), (25, 0.0)]
+
+DEBUG: Starting AECI variance calculation at tick 30
+  Found 0/100 AI-reliant agents
+  Global belief variance: 0.0230
+  WARNING: Invalid global variance (0.02295689432098766) or no AI-reliant agents
+  Returning AECI variance tuple: (30, 0.0)
+  Current aeci_variance_data length: 30
+  Last 3 entries: [(28, 0.0), (29, 0.0), (30, 0.0)]
+
+--- Retainment Diagnostics at Tick 30 ---
+Agent H_0 (exploitative) retainment stats:
+  accepted_human: 30, accepted_friend: 30, accepted_ai: 17
+  retain_aeci: 0.36, retain_seci: 0.64
+Agent H_1 (exploitative) retainment stats:
+  accepted_human: 0, accepted_friend: 0, accepted_ai: 0
+  No acceptances recorded
+Agent H_2 (exploitative) retainment stats:
+  accepted_human: 6, accepted_friend: 6, accepted_ai: 0
+  retain_aeci: 0.00, retain_seci: 1.00
+
+DEBUG: Starting AECI variance calculation at tick 35
+  Found 0/100 AI-reliant agents
+  Global belief variance: 0.0354
+  WARNING: Invalid global variance (0.03542211111111111) or no AI-reliant agents
+  Returning AECI variance tuple: (35, 0.0)
+  Current aeci_variance_data length: 35
+  Last 3 entries: [(33, 0.0), (34, 0.0), (35, 0.0)]
+
+DEBUG: Starting AECI variance calculation at tick 40
+  Found 0/100 AI-reliant agents
+  Global belief variance: 0.0456
+  WARNING: Invalid global variance (0.045601083333333334) or no AI-reliant agents
+  Returning AECI variance tuple: (40, 0.0)
+  Current aeci_variance_data length: 40
+  Last 3 entries: [(38, 0.0), (39, 0.0), (40, 0.0)]
+
+--- Retainment Diagnostics at Tick 40 ---
+Agent H_0 (exploitative) retainment stats:
+  accepted_human: 0, accepted_friend: 0, accepted_ai: 0
+  No acceptances recorded
+Agent H_1 (exploitative) retainment stats:
+  accepted_human: 8, accepted_friend: 8, accepted_ai: 5
+  retain_aeci: 0.38, retain_seci: 0.62
+Agent H_2 (exploitative) retainment stats:
+  accepted_human: 37, accepted_friend: 37, accepted_ai: 7
+  retain_aeci: 0.16, retain_seci: 0.84
+
+DEBUG: Starting AECI variance calculation at tick 45
+  Found 0/100 AI-reliant agents
+  Global belief variance: 0.0508
+  WARNING: Invalid global variance (0.0508123950617284) or no AI-reliant agents
+  Returning AECI variance tuple: (45, 0.0)
+  Current aeci_variance_data length: 45
+  Last 3 entries: [(43, 0.0), (44, 0.0), (45, 0.0)]
+
+DEBUG: Starting AECI variance calculation at tick 50
+  Found 0/100 AI-reliant agents
+  Global belief variance: 0.0597
+  WARNING: Invalid global variance (0.05969082024691358) or no AI-reliant agents
+  Returning AECI variance tuple: (50, 0.0)
+  Current aeci_variance_data length: 50
+  Last 3 entries: [(48, 0.0), (49, 0.0), (50, 0.0)]
+
+--- Retainment Diagnostics at Tick 50 ---
+Agent H_0 (exploitative) retainment stats:
+  accepted_human: 20, accepted_friend: 20, accepted_ai: 0
+  retain_aeci: 0.00, retain_seci: 1.00
+Agent H_1 (exploitative) retainment stats:
+  accepted_human: 28, accepted_friend: 28, accepted_ai: 7
+  retain_aeci: 0.20, retain_seci: 0.80
+Agent H_2 (exploitative) retainment stats:
+  accepted_human: 41, accepted_friend: 41, accepted_ai: 8
+  retain_aeci: 0.16, retain_seci: 0.84
+
+DEBUG: Starting AECI variance calculation at tick 55
+  Found 0/100 AI-reliant agents
+  Global belief variance: 0.0730
+  WARNING: Invalid global variance (0.07301258222222222) or no AI-reliant agents
+  Returning AECI variance tuple: (55, 0.0)
+  Current aeci_variance_data length: 55
+  Last 3 entries: [(53, 0.0), (54, 0.0), (55, 0.0)]
+
+DEBUG: Starting AECI variance calculation at tick 60
+  Found 0/100 AI-reliant agents
+  Global belief variance: 0.0898
+  WARNING: Invalid global variance (0.08982795543209877) or no AI-reliant agents
+  Returning AECI variance tuple: (60, 0.0)
+  Current aeci_variance_data length: 60
+  Last 3 entries: [(58, 0.0), (59, 0.0), (60, 0.0)]
+
+--- Retainment Diagnostics at Tick 60 ---
+Agent H_0 (exploitative) retainment stats:
+  accepted_human: 14, accepted_friend: 14, accepted_ai: 16
+  retain_aeci: 0.53, retain_seci: 0.47
+Agent H_1 (exploitative) retainment stats:
+  accepted_human: 0, accepted_friend: 0, accepted_ai: 0
+  No acceptances recorded
+Agent H_2 (exploitative) retainment stats:
+  accepted_human: 48, accepted_friend: 48, accepted_ai: 0
+  retain_aeci: 0.00, retain_seci: 1.00
+
+DEBUG: Starting AECI variance calculation at tick 65
+  Found 0/100 AI-reliant agents
+  Global belief variance: 0.0968
+  WARNING: Invalid global variance (0.09681133024691355) or no AI-reliant agents
+  Returning AECI variance tuple: (65, 0.0)
+  Current aeci_variance_data length: 65
+  Last 3 entries: [(63, 0.0), (64, 0.0), (65, 0.0)]
+
+DEBUG: Starting AECI variance calculation at tick 70
+  Found 0/100 AI-reliant agents
+  Global belief variance: 0.1106
+  WARNING: Invalid global variance (0.11056805876543209) or no AI-reliant agents
+  Returning AECI variance tuple: (70, 0.0)
+  Current aeci_variance_data length: 70
+  Last 3 entries: [(68, 0.0), (69, 0.0), (70, 0.0)]
+
+--- Retainment Diagnostics at Tick 70 ---
+Agent H_0 (exploitative) retainment stats:
+  accepted_human: 26, accepted_friend: 26, accepted_ai: 6
+  retain_aeci: 0.19, retain_seci: 0.81
+Agent H_1 (exploitative) retainment stats:
+  accepted_human: 10, accepted_friend: 10, accepted_ai: 15
+  retain_aeci: 0.60, retain_seci: 0.40
+Agent H_2 (exploitative) retainment stats:
+  accepted_human: 32, accepted_friend: 32, accepted_ai: 0
+  retain_aeci: 0.00, retain_seci: 1.00
+
+DEBUG: Starting AECI variance calculation at tick 75
+  Found 0/100 AI-reliant agents
+  Global belief variance: 0.1217
+  WARNING: Invalid global variance (0.12171629320987655) or no AI-reliant agents
+  Returning AECI variance tuple: (75, 0.0)
+  Current aeci_variance_data length: 75
+  Last 3 entries: [(73, 0.0), (74, 0.0), (75, 0.0)]
+
+DEBUG: Starting AECI variance calculation at tick 80
+  Found 0/100 AI-reliant agents
+  Global belief variance: 0.1365
+  WARNING: Invalid global variance (0.13649016098765435) or no AI-reliant agents
+  Returning AECI variance tuple: (80, 0.0)
+  Current aeci_variance_data length: 80
+  Last 3 entries: [(78, 0.0), (79, 0.0), (80, 0.0)]
+
+--- Retainment Diagnostics at Tick 80 ---
+Agent H_0 (exploitative) retainment stats:
+  accepted_human: 25, accepted_friend: 25, accepted_ai: 0
+  retain_aeci: 0.00, retain_seci: 1.00
+Agent H_1 (exploitative) retainment stats:
+  accepted_human: 0, accepted_friend: 0, accepted_ai: 0
+  No acceptances recorded
+Agent H_2 (exploitative) retainment stats:
+  accepted_human: 42, accepted_friend: 42, accepted_ai: 0
+  retain_aeci: 0.00, retain_seci: 1.00
+
+DEBUG: Starting AECI variance calculation at tick 85
+  Found 0/100 AI-reliant agents
+  Global belief variance: 0.1474
+  WARNING: Invalid global variance (0.14741518209876545) or no AI-reliant agents
+  Returning AECI variance tuple: (85, 0.0)
+  Current aeci_variance_data length: 85
+  Last 3 entries: [(83, 0.0), (84, 0.0), (85, 0.0)]
+
+DEBUG: Starting AECI variance calculation at tick 90
+  Found 0/100 AI-reliant agents
+  Global belief variance: 0.1565
+  WARNING: Invalid global variance (0.15646575691358025) or no AI-reliant agents
+  Returning AECI variance tuple: (90, 0.0)
+  Current aeci_variance_data length: 90
+  Last 3 entries: [(88, 0.0), (89, 0.0), (90, 0.0)]
+
+--- Retainment Diagnostics at Tick 90 ---
+Agent H_0 (exploitative) retainment stats:
+  accepted_human: 0, accepted_friend: 0, accepted_ai: 0
+  No acceptances recorded
+Agent H_1 (exploitative) retainment stats:
+  accepted_human: 0, accepted_friend: 0, accepted_ai: 0
+  No acceptances recorded
+Agent H_2 (exploitative) retainment stats:
+  accepted_human: 21, accepted_friend: 21, accepted_ai: 0
+  retain_aeci: 0.00, retain_seci: 1.00
+
+DEBUG: Starting AECI variance calculation at tick 95
+  Found 0/100 AI-reliant agents
+  Global belief variance: 0.1635
+  WARNING: Invalid global variance (0.16345350666666666) or no AI-reliant agents
+  Returning AECI variance tuple: (95, 0.0)
+  Current aeci_variance_data length: 95
+  Last 3 entries: [(93, 0.0), (94, 0.0), (95, 0.0)]
+
+DEBUG: Starting AECI variance calculation at tick 100
+  Found 0/100 AI-reliant agents
+  Global belief variance: 0.1702
+  WARNING: Invalid global variance (0.1702342498765432) or no AI-reliant agents
+  Returning AECI variance tuple: (100, 0.0)
+  Current aeci_variance_data length: 100
+  Last 3 entries: [(98, 0.0), (99, 0.0), (100, 0.0)]
+
+--- Retainment Diagnostics at Tick 100 ---
+Agent H_0 (exploitative) retainment stats:
+  accepted_human: 14, accepted_friend: 14, accepted_ai: 0
+  retain_aeci: 0.00, retain_seci: 1.00
+Agent H_1 (exploitative) retainment stats:
+  accepted_human: 0, accepted_friend: 0, accepted_ai: 0
+  No acceptances recorded
+Agent H_2 (exploitative) retainment stats:
+  accepted_human: 28, accepted_friend: 28, accepted_ai: 0
+  retain_aeci: 0.00, retain_seci: 1.00
+
+DEBUG: Starting AECI variance calculation at tick 105
+  Found 0/100 AI-reliant agents
+  Global belief variance: 0.1858
+  WARNING: Invalid global variance (0.18579011111111113) or no AI-reliant agents
+  Returning AECI variance tuple: (105, 0.0)
+  Current aeci_variance_data length: 105
+  Last 3 entries: [(103, 0.0), (104, 0.0), (105, 0.0)]
+
+DEBUG: Starting AECI variance calculation at tick 110
+  Found 0/100 AI-reliant agents
+  Global belief variance: 0.1927
+  WARNING: Invalid global variance (0.1926963554320988) or no AI-reliant agents
+  Returning AECI variance tuple: (110, 0.0)
+  Current aeci_variance_data length: 110
+  Last 3 entries: [(108, 0.0), (109, 0.0), (110, 0.0)]
+
+--- Retainment Diagnostics at Tick 110 ---
+Agent H_0 (exploitative) retainment stats:
+  accepted_human: 25, accepted_friend: 25, accepted_ai: 0
+  retain_aeci: 0.00, retain_seci: 1.00
+Agent H_1 (exploitative) retainment stats:
+  accepted_human: 0, accepted_friend: 0, accepted_ai: 0
+  No acceptances recorded
+Agent H_2 (exploitative) retainment stats:
+  accepted_human: 20, accepted_friend: 20, accepted_ai: 13
+  retain_aeci: 0.39, retain_seci: 0.61
+
+DEBUG: Starting AECI variance calculation at tick 115
+  Found 0/100 AI-reliant agents
+  Global belief variance: 0.1965
+  WARNING: Invalid global variance (0.19651661222222222) or no AI-reliant agents
+  Returning AECI variance tuple: (115, 0.0)
+  Current aeci_variance_data length: 115
+  Last 3 entries: [(113, 0.0), (114, 0.0), (115, 0.0)]
+
+DEBUG: Starting AECI variance calculation at tick 120
+  Found 0/100 AI-reliant agents
+  Global belief variance: 0.2083
+  WARNING: Invalid global variance (0.20827652333333332) or no AI-reliant agents
+  Returning AECI variance tuple: (120, 0.0)
+  Current aeci_variance_data length: 120
+  Last 3 entries: [(118, 0.0), (119, 0.0), (120, 0.0)]
+
+--- Retainment Diagnostics at Tick 120 ---
+Agent H_0 (exploitative) retainment stats:
+  accepted_human: 1, accepted_friend: 1, accepted_ai: 4
+  retain_aeci: 0.80, retain_seci: 0.20
+Agent H_1 (exploitative) retainment stats:
+  accepted_human: 0, accepted_friend: 0, accepted_ai: 0
+  No acceptances recorded
+Agent H_2 (exploitative) retainment stats:
+  accepted_human: 45, accepted_friend: 45, accepted_ai: 0
+  retain_aeci: 0.00, retain_seci: 1.00
+
+DEBUG: Starting AECI variance calculation at tick 125
+  Found 0/100 AI-reliant agents
+  Global belief variance: 0.2142
+  WARNING: Invalid global variance (0.21423221913580248) or no AI-reliant agents
+  Returning AECI variance tuple: (125, 0.0)
+  Current aeci_variance_data length: 125
+  Last 3 entries: [(123, 0.0), (124, 0.0), (125, 0.0)]
+
+DEBUG: Starting AECI variance calculation at tick 130
+  Found 0/100 AI-reliant agents
+  Global belief variance: 0.2182
+  WARNING: Invalid global variance (0.2182187988888889) or no AI-reliant agents
+  Returning AECI variance tuple: (130, 0.0)
+  Current aeci_variance_data length: 130
+  Last 3 entries: [(128, 0.0), (129, 0.0), (130, 0.0)]
+
+--- Retainment Diagnostics at Tick 130 ---
+Agent H_0 (exploitative) retainment stats:
+  accepted_human: 0, accepted_friend: 0, accepted_ai: 13
+  retain_aeci: 1.00, retain_seci: 0.00
+Agent H_1 (exploitative) retainment stats:
+  accepted_human: 0, accepted_friend: 0, accepted_ai: 0
+  No acceptances recorded
+Agent H_2 (exploitative) retainment stats:
+  accepted_human: 27, accepted_friend: 27, accepted_ai: 16
+  retain_aeci: 0.37, retain_seci: 0.63
+
+DEBUG: Starting AECI variance calculation at tick 135
+  Found 0/100 AI-reliant agents
+  Global belief variance: 0.2222
+  WARNING: Invalid global variance (0.22223571839506176) or no AI-reliant agents
+  Returning AECI variance tuple: (135, 0.0)
+  Current aeci_variance_data length: 135
+  Last 3 entries: [(133, 0.0), (134, 0.0), (135, 0.0)]
+
+DEBUG: Starting AECI variance calculation at tick 140
+  Found 0/100 AI-reliant agents
+  Global belief variance: 0.2294
+  WARNING: Invalid global variance (0.2294258211111111) or no AI-reliant agents
+  Returning AECI variance tuple: (140, 0.0)
+  Current aeci_variance_data length: 140
+  Last 3 entries: [(138, 0.0), (139, 0.0), (140, 0.0)]
+
+--- Retainment Diagnostics at Tick 140 ---
+Agent H_0 (exploitative) retainment stats:
+  accepted_human: 0, accepted_friend: 0, accepted_ai: 1
+  retain_aeci: 1.00, retain_seci: 0.00
+Agent H_1 (exploitative) retainment stats:
+  accepted_human: 0, accepted_friend: 0, accepted_ai: 0
+  No acceptances recorded
+Agent H_2 (exploitative) retainment stats:
+  accepted_human: 45, accepted_friend: 45, accepted_ai: 0
+  retain_aeci: 0.00, retain_seci: 1.00
+
+DEBUG: Starting AECI variance calculation at tick 145
+  Found 0/100 AI-reliant agents
+  Global belief variance: 0.2328
+  WARNING: Invalid global variance (0.23280817666666676) or no AI-reliant agents
+  Returning AECI variance tuple: (145, 0.0)
+  Current aeci_variance_data length: 145
+  Last 3 entries: [(143, 0.0), (144, 0.0), (145, 0.0)]
+
+DEBUG: Starting AECI variance calculation at tick 150
+  Found 0/100 AI-reliant agents
+  Global belief variance: 0.2341
+  WARNING: Invalid global variance (0.23405831061728394) or no AI-reliant agents
+  Returning AECI variance tuple: (150, 0.0)
+  Current aeci_variance_data length: 150
+  Last 3 entries: [(148, 0.0), (149, 0.0), (150, 0.0)]
+
+--- Retainment Diagnostics at Tick 150 ---
+Agent H_0 (exploitative) retainment stats:
+  accepted_human: 0, accepted_friend: 0, accepted_ai: 0
+  No acceptances recorded
+Agent H_1 (exploitative) retainment stats:
+  accepted_human: 0, accepted_friend: 0, accepted_ai: 0
+  No acceptances recorded
+Agent H_2 (exploitative) retainment stats:
+  accepted_human: 26, accepted_friend: 26, accepted_ai: 21
+  retain_aeci: 0.45, retain_seci: 0.55
+
+Feedback Event Summary:
+  Exploratory - Info Quality: 0, Relief Outcome: 103
+  Exploitative - Info Quality: 78, Relief Outcome: 41
+
+Generating visualizations...
+
+Visualization saved to: /home/user/DisasterAI/test_results/dual_feedback_test.png
+
+============================================================
+TEST COMPLETE
+============================================================
+
+Expected Results:
+1. Exploratory agents get MORE info quality feedback (more sensing)
+2. High alignment: Exploratory AI Q-value should DECREASE or stay low
+3. Low alignment: Exploratory AI Q-value should INCREASE
+4. Relief feedback should occur 10-20 ticks after info feedback
+5. Exploitative agents less affected by info quality feedback
