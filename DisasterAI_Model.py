@@ -416,15 +416,16 @@ class HumanAgent(Agent):
             # Calculate accuracy based on how close reported level was to actual
             level_error = abs(reported_level - actual_level)
 
-            # Accuracy-based reward (scaled to [-0.03, +0.03] range - small but meaningful)
+            # Accuracy-based reward - scaled to be comparable to relief outcomes
+            # Info quality should be FAST and STRONG signal for learning
             if level_error == 0:
-                accuracy_reward = 0.03  # Perfect accuracy
+                accuracy_reward = 0.5  # Perfect accuracy - strong positive
             elif level_error == 1:
-                accuracy_reward = 0.01  # Close
+                accuracy_reward = 0.2  # Close - moderate positive
             elif level_error == 2:
-                accuracy_reward = -0.01  # Moderate error
+                accuracy_reward = -0.3  # Moderate error - significant penalty
             else:
-                accuracy_reward = -0.03  # Large error
+                accuracy_reward = -0.7  # Large error - strong penalty
 
             # Determine mode from source_id (map to high-level modes)
             if source_id.startswith("H_"):
@@ -437,23 +438,31 @@ class HumanAgent(Agent):
             # Update mode Q-value (what's used in action selection)
             if mode and mode in self.q_table:
                 old_mode_q = self.q_table[mode]
-                info_learning_rate = 0.03  # Smaller than relief outcome learning rate (0.1)
-                new_mode_q = old_mode_q + info_learning_rate * accuracy_reward
+                # Info quality feedback should be FAST and STRONG
+                # Use higher learning rate for exploratory agents to learn quickly from info
+                info_learning_rate = 0.25 if self.agent_type == "exploratory" else 0.12
+                # Use standard Q-learning update: Q += lr * (reward - Q)
+                new_mode_q = old_mode_q + info_learning_rate * (accuracy_reward - old_mode_q)
                 self.q_table[mode] = new_mode_q
 
             # Also update specific source Q-value (for tracking individuals)
             if source_id in self.q_table:
                 old_q = self.q_table[source_id]
-                info_learning_rate = 0.03
-                new_q = old_q + info_learning_rate * accuracy_reward
+                info_learning_rate = 0.25 if self.agent_type == "exploratory" else 0.12
+                # Use standard Q-learning update: Q += lr * (reward - Q)
+                new_q = old_q + info_learning_rate * (accuracy_reward - old_q)
                 self.q_table[source_id] = new_q
 
-            # Update trust similarly (small adjustment)
+            # Update trust similarly - use stronger updates for bad info
             if source_id in self.trust:
                 old_trust = self.trust[source_id]
-                # Map accuracy reward to trust change
-                trust_adjustment = info_learning_rate * accuracy_reward
-                new_trust = max(0.0, min(1.0, old_trust + trust_adjustment))
+                # Map accuracy reward [-0.7, +0.5] to trust target [0.15, 0.75]
+                # Bad info should drop trust low, good info should increase moderately
+                trust_target = 0.5 + 0.5 * accuracy_reward  # Maps -0.7->0.15, 0->0.5, +0.5->0.75
+                # Use higher learning rate for trust updates from info quality
+                trust_lr = 0.15 if self.agent_type == "exploratory" else 0.08
+                trust_change = trust_lr * (trust_target - old_trust)
+                new_trust = max(0.0, min(1.0, old_trust + trust_change))
                 self.trust[source_id] = new_trust
 
             # Mark as evaluated
@@ -911,9 +920,11 @@ class HumanAgent(Agent):
                                 print(f"Agent {self.unique_id}: Using random fallback interest point {interest_point}")
 
             else:  # Exploratory
-                self.find_exploration_targets()
-                interest_point = self.exploration_targets[0] if self.exploration_targets else None
-                query_radius = 3
+                # CRITICAL FIX: Query about current vicinity so info can be evaluated when sensing
+                # Info quality feedback requires querying about cells that will be sensed (radius=2)
+                # Querying about distant exploration targets means no feedback overlap!
+                interest_point = self.pos  # Query about where we are NOW
+                query_radius = 2  # Match sensing radius for evaluation overlap
 
                 # Add robust fallback mechanism
                 if not interest_point:
@@ -1005,11 +1016,17 @@ class HumanAgent(Agent):
                     # NO AI bias - let Q-learning determine AI value through experience
 
                 else:  # exploratory
-                    # Exploratory agents have a slight bias against self-confirmation
-                    scores["self_action"] -= 0.05
-                    decision_factors['biases']["self_action"] = -0.05
+                    # Exploratory agents seek diverse information sources
+                    # Bias toward querying to get info quality feedback
+                    scores["human"] += 0.2   # Encourage querying humans
+                    scores["ai"] += 0.2      # Encourage querying AI
+                    scores["self_action"] -= 0.1  # Discourage pure self-reliance
 
-                    # NO alignment-based biases - let Q-learning determine source values
+                    decision_factors['biases']["human"] = 0.2
+                    decision_factors['biases']["ai"] = 0.2
+                    decision_factors['biases']["self_action"] = -0.1
+
+                    # NO alignment-based biases - let Q-learning determine which sources are good
                     # Exploratory agents will naturally prefer accurate sources through feedback
 
                 # Add small random noise to break ties
@@ -1099,6 +1116,7 @@ class HumanAgent(Agent):
                     self.accum_calls_ai += 1
                     self.accum_calls_total += 1
                 else:
+                    # Invalid source agent
                     source_id = None
 
 
@@ -1943,10 +1961,12 @@ class DisasterModel(Model):
         
         aeci_variance = 0.0  # Default neutral value
         
-        # Define AI-reliant agents with moderate threshold
-        # Agent must have made enough queries (10+) AND majority to AI (50%+)
+        # Define AI-reliant agents with adjusted threshold for observed behavior
+        # With equal +0.2 biases for human/ai and friend selection effects,
+        # agents query ~70% human / ~30% AI in practice (not 50/50)
+        # Threshold set to 25% to capture agents using AI significantly
         min_calls_threshold = 10   # Need stable sample size
-        min_ai_ratio = 0.5         # Majority (50%+) queries to AI
+        min_ai_ratio = 0.25        # Above 25% indicates meaningful AI usage
         
         ai_reliant_agents = []
         for agent in self.humans.values():
@@ -2890,12 +2910,13 @@ class DisasterModel(Model):
             self.trust_stats.append((self.tick, ai_exp_mean, friend_exp_mean, nonfriend_exp_mean,
                                     ai_expl_mean, friend_expl_mean, nonfriend_expl_mean))
 
-            # Reset call counters after computing AECI metrics.
+            # DON'T reset call counters - they should accumulate over the full run
+            # AI-reliant detection needs min_calls_threshold=10, so counters must accumulate
+            # Only reset acceptance counters which are used for retainment metrics
             for agent in self.humans.values():
-                agent.accum_calls_ai = 0
+                # Keep accum_calls_* to accumulate (for AI-reliant detection)
+                # Reset only acceptance counters (for per-period retainment metrics)
                 agent.accepted_friend = 0
-                agent.accum_calls_human = 0
-                agent.accum_calls_total = 0
                 agent.accepted_human = 0
                 agent.accepted_ai = 0
         else:
