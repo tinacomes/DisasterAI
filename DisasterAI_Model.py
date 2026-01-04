@@ -1978,7 +1978,7 @@ class DisasterModel(Model):
         # With equal +0.2 biases for human/ai and friend selection effects,
         # agents query ~70% human / ~30% AI in practice (not 50/50)
         # Threshold set to 25% to capture agents using AI significantly
-        min_calls_threshold = 10   # Need stable sample size
+        min_calls_threshold = 5    # Lowered to 5 for earlier detection
         min_ai_ratio = 0.25        # Above 25% indicates meaningful AI usage
         
         ai_reliant_agents = []
