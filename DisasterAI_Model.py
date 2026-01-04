@@ -920,9 +920,11 @@ class HumanAgent(Agent):
                                 print(f"Agent {self.unique_id}: Using random fallback interest point {interest_point}")
 
             else:  # Exploratory
-                self.find_exploration_targets()
-                interest_point = self.exploration_targets[0] if self.exploration_targets else None
-                query_radius = 3
+                # CRITICAL FIX: Query about current vicinity so info can be evaluated when sensing
+                # Info quality feedback requires querying about cells that will be sensed (radius=2)
+                # Querying about distant exploration targets means no feedback overlap!
+                interest_point = self.pos  # Query about where we are NOW
+                query_radius = 2  # Match sensing radius for evaluation overlap
 
                 # Add robust fallback mechanism
                 if not interest_point:
