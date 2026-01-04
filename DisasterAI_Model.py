@@ -107,9 +107,17 @@ class HumanAgent(Agent):
         self.last_belief_update = {}  # Tracks when each cell was last updated
                      
         # --- Q-Table for Source Values ---
-        self.q_table = {f"A_{k}": 0.0 for k in range(model.num_ai)}
-        self.q_table["human"] = 0.05 # Represents generic value of querying humans
+        # Use high-level modes: self_action, human, ai (not individual AIs)
+        # This allows agents to learn about source CATEGORIES, not just individuals
+        self.q_table = {}
         self.q_table["self_action"] = 0.0
+        self.q_table["human"] = 0.0  # Generic value of querying humans as a category
+        self.q_table["ai"] = 0.0     # Generic value of querying AI as a category
+
+        # Track individual sources separately for selection within each mode
+        # These are updated alongside mode Q-values for granular tracking
+        for k in range(model.num_ai):
+            self.q_table[f"A_{k}"] = 0.0
 
         # --- Belief Update Parameters ---
         # These control how beliefs change when info is ACCEPTED (separate from Q-learning)
@@ -418,11 +426,11 @@ class HumanAgent(Agent):
             else:
                 accuracy_reward = -0.03  # Large error
 
-            # Determine mode from source_id (fixes mode vs source ID mismatch)
+            # Determine mode from source_id (map to high-level modes)
             if source_id.startswith("H_"):
                 mode = "human"
             elif source_id.startswith("A_"):
-                mode = source_id  # AI modes use their ID directly
+                mode = "ai"  # Generic AI mode (not individual AI)
             else:
                 mode = None
 
@@ -961,7 +969,9 @@ class HumanAgent(Agent):
                 #print(f" > Ground truth: {self.model.disaster_grid[interest_point[0], interest_point[1]]}")
 
             # Source selection (epsilon-greedy with type-specific biases)
-            possible_modes = ["self_action", "human"] + [f"A_{k}" for k in range(self.model.num_ai)]
+            # Use 3-mode structure: self_action, human, ai
+            # Then select specific source within chosen mode
+            possible_modes = ["self_action", "human", "ai"]
 
             # Store Q-values
             for mode in possible_modes:
@@ -1031,12 +1041,14 @@ class HumanAgent(Agent):
             self.tokens_this_tick = {chosen_mode: 1}
             self.last_queried_source_ids = []
 
-            # Query source
+            # Query source based on chosen mode
 
             if chosen_mode == "self_action":
                 reports = self.report_beliefs(interest_point, query_radius)
                 source_id = None  # No external source used
+
             elif chosen_mode == "human":
+                # Select specific human source within "human" mode
                 valid_sources = [h for h in self.model.humans if h != self.unique_id]
                 if not valid_sources:
                     return
@@ -1059,13 +1071,11 @@ class HumanAgent(Agent):
                 else:
                     # Invalid source agent
                     source_id = None
-            else:  # AI
 
-                if chosen_mode in self.model.ais:
-                    source_id = chosen_mode
-                else:
-                    # Otherwise, pick best AI for this query
-                    source_id = self.choose_best_ai_for_query(interest_point, query_radius)
+            elif chosen_mode == "ai":
+                # Select specific AI source within "ai" mode
+                # Pick best AI for this query based on knowledge coverage
+                source_id = self.choose_best_ai_for_query(interest_point, query_radius)
 
                 source_agent = self.model.ais.get(source_id)
 
