@@ -377,12 +377,22 @@ def visualize_results(results_high, results_low):
 
     plt.tight_layout()
 
-    # Save figure
-    output_dir = '/home/user/DisasterAI/test_results'
+    # Save figure - detect environment
+    try:
+        # Check if running in Colab
+        import google.colab
+        IN_COLAB = True
+        output_dir = './test_results'  # Save in current directory on Colab
+    except:
+        IN_COLAB = False
+        # Running locally - use full path
+        output_dir = '/home/user/DisasterAI/test_results' if os.path.exists('/home/user/DisasterAI') else './test_results'
+
     os.makedirs(output_dir, exist_ok=True)
     output_path = os.path.join(output_dir, 'dual_feedback_test.png')
     plt.savefig(output_path, dpi=150, bbox_inches='tight')
     print(f"\nVisualization saved to: {output_path}")
+    print(f"{'[COLAB]' if IN_COLAB else '[LOCAL]'} You can download this file from the left sidebar (folder icon)")
 
     return fig
 
