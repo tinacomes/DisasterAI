@@ -1014,11 +1014,17 @@ class HumanAgent(Agent):
                     # NO AI bias - let Q-learning determine AI value through experience
 
                 else:  # exploratory
-                    # Exploratory agents have a slight bias against self-confirmation
-                    scores["self_action"] -= 0.05
-                    decision_factors['biases']["self_action"] = -0.05
+                    # Exploratory agents seek diverse information sources
+                    # Bias toward querying to get info quality feedback
+                    scores["human"] += 0.2   # Encourage querying humans
+                    scores["ai"] += 0.2      # Encourage querying AI
+                    scores["self_action"] -= 0.1  # Discourage pure self-reliance
 
-                    # NO alignment-based biases - let Q-learning determine source values
+                    decision_factors['biases']["human"] = 0.2
+                    decision_factors['biases']["ai"] = 0.2
+                    decision_factors['biases']["self_action"] = -0.1
+
+                    # NO alignment-based biases - let Q-learning determine which sources are good
                     # Exploratory agents will naturally prefer accurate sources through feedback
 
                 # Add small random noise to break ties
