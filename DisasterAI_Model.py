@@ -1116,6 +1116,7 @@ class HumanAgent(Agent):
                     self.accum_calls_ai += 1
                     self.accum_calls_total += 1
                 else:
+                    # Invalid source agent
                     source_id = None
 
 
@@ -1960,12 +1961,12 @@ class DisasterModel(Model):
         
         aeci_variance = 0.0  # Default neutral value
         
-        # Define AI-reliant agents with adjusted threshold for 3-mode structure
-        # With balanced self/human/ai modes, 50%+ AI usage indicates strong preference
-        # Lowered threshold from 50% to 33% to account for 3-mode balance
-        # (33% = equal to random selection among 3 modes)
+        # Define AI-reliant agents with adjusted threshold for observed behavior
+        # With equal +0.2 biases for human/ai and friend selection effects,
+        # agents query ~70% human / ~30% AI in practice (not 50/50)
+        # Threshold set to 25% to capture agents using AI significantly
         min_calls_threshold = 10   # Need stable sample size
-        min_ai_ratio = 0.33        # Above random chance (33%) indicates AI preference
+        min_ai_ratio = 0.25        # Above 25% indicates meaningful AI usage
         
         ai_reliant_agents = []
         for agent in self.humans.values():
@@ -2909,12 +2910,13 @@ class DisasterModel(Model):
             self.trust_stats.append((self.tick, ai_exp_mean, friend_exp_mean, nonfriend_exp_mean,
                                     ai_expl_mean, friend_expl_mean, nonfriend_expl_mean))
 
-            # Reset call counters after computing AECI metrics.
+            # DON'T reset call counters - they should accumulate over the full run
+            # AI-reliant detection needs min_calls_threshold=10, so counters must accumulate
+            # Only reset acceptance counters which are used for retainment metrics
             for agent in self.humans.values():
-                agent.accum_calls_ai = 0
+                # Keep accum_calls_* to accumulate (for AI-reliant detection)
+                # Reset only acceptance counters (for per-period retainment metrics)
                 agent.accepted_friend = 0
-                agent.accum_calls_human = 0
-                agent.accum_calls_total = 0
                 agent.accepted_human = 0
                 agent.accepted_ai = 0
         else:

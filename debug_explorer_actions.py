@@ -77,3 +77,18 @@ print(f"  human:       {mode_counts['human']/50*100:.1f}% ({mode_counts['human']
 print(f"  ai:          {mode_counts['ai']/50*100:.1f}% ({mode_counts['ai']}/50)")
 print(f"\nSignificant belief changes (info added to pending): {significant_changes}")
 print(f"Pending evaluations at end: {len(explorer.pending_info_evaluations)}")
+
+# Check AI-reliant status
+print(f"\n--- AI-Reliant Status Check ---")
+print(f"accum_calls_total: {explorer.accum_calls_total}")
+print(f"accum_calls_ai: {explorer.accum_calls_ai}")
+print(f"accum_calls_human: {explorer.accum_calls_human}")
+if explorer.accum_calls_total > 0:
+    ai_ratio = explorer.accum_calls_ai / explorer.accum_calls_total
+    print(f"AI ratio: {ai_ratio:.2%} ({explorer.accum_calls_ai}/{explorer.accum_calls_total})")
+    min_threshold = 0.25
+    min_calls = 10
+    print(f"Threshold: {min_threshold*100:.0f}% of at least {min_calls} calls")
+    print(f"Qualifies as AI-reliant: {explorer.accum_calls_total >= min_calls and ai_ratio >= min_threshold}")
+else:
+    print("No queries made!")
