@@ -92,6 +92,8 @@ def run_test(ai_alignment, test_name):
     # Run simulation
     for tick in range(params['ticks']):
         # Track metrics before step
+        prev_info_pending = {}
+        prev_relief_pending = {}
         for agent_type in ['exploratory', 'exploitative']:
             if agent_type in sample_agents:
                 agent = sample_agents[agent_type]
@@ -105,8 +107,8 @@ def run_test(ai_alignment, test_name):
                 trust_by_tick[agent_type].append(agent.trust.get('A_0', 0.5))
 
                 # Track pending feedback events
-                prev_info_pending = len(agent.pending_info_evaluations)
-                prev_relief_pending = len(agent.pending_rewards)
+                prev_info_pending[agent_type] = len(agent.pending_info_evaluations)
+                prev_relief_pending[agent_type] = len(agent.pending_rewards)
 
         # Step model
         model.step()
@@ -118,14 +120,14 @@ def run_test(ai_alignment, test_name):
 
                 # Info feedback events (check if pending list got shorter = evaluation happened)
                 current_info_pending = len(agent.pending_info_evaluations)
-                if current_info_pending < prev_info_pending:
-                    info_feedback_counts[agent_type] += (prev_info_pending - current_info_pending)
+                if current_info_pending < prev_info_pending.get(agent_type, 0):
+                    info_feedback_counts[agent_type] += (prev_info_pending[agent_type] - current_info_pending)
                     feedback_timeline['info'].append((tick, agent_type))
 
                 # Relief feedback events
                 current_relief_pending = len(agent.pending_rewards)
-                if current_relief_pending < prev_relief_pending:
-                    relief_feedback_counts[agent_type] += (prev_relief_pending - current_relief_pending)
+                if current_relief_pending < prev_relief_pending.get(agent_type, 0):
+                    relief_feedback_counts[agent_type] += (prev_relief_pending[agent_type] - current_relief_pending)
                     feedback_timeline['relief'].append((tick, agent_type))
 
         # Count AI usage this tick

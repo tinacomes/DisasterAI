@@ -468,11 +468,19 @@ class HumanAgent(Agent):
             # Mark as evaluated
             evaluated.append((tick_received, source_id, eval_cell, reported_level))
 
+            # DEBUG: Track info feedback
+            if self.model.debug_mode and hasattr(self, 'id_num') and (self.id_num < 2 or (50 <= self.id_num < 52)):
+                print(f"[DEBUG] Agent {self.unique_id} ({self.agent_type}) INFO FEEDBACK: source={source_id}, mode={mode}, error={level_error}, reward={accuracy_reward:.3f}")
+
         # Remove evaluated items from pending list
         self.pending_info_evaluations = [
             item for item in self.pending_info_evaluations
             if item not in evaluated
         ]
+
+        # DEBUG: Track pending list size
+        if self.model.debug_mode and hasattr(self, 'id_num') and (self.id_num < 2 or (50 <= self.id_num < 52)) and self.model.tick % 10 == 0:
+            print(f"[DEBUG] Agent {self.unique_id} ({self.agent_type}) tick={self.model.tick}: {len(self.pending_info_evaluations)} pending evals")
 
     def report_beliefs(self, interest_point, query_radius):
         """Reports human agent's beliefs about cells within query_radius of the interest_point."""
@@ -818,15 +826,20 @@ class HumanAgent(Agent):
             confidence_change = abs(posterior_confidence - prior_confidence)
             significant_change = (level_change >= 1 or confidence_change >= 0.1)
 
-            # Track information for quality feedback (all sources, not just AI)
-            # This enables fast feedback (5-10 ticks) when agent observes the cell
-            if source_id and significant_change:
+            # Track information for quality feedback
+            # CRITICAL FIX: Track ALL external queries (human/AI), not just significant changes
+            # This ensures exploratory agents get feedback even when querying about
+            # cells they've already sensed with high confidence
+            if source_id:  # source_id is None for self_action
                 self.pending_info_evaluations.append((
                     self.model.tick,
                     source_id,
                     cell,
-                    int(posterior_level)  # The level we now believe based on this source
+                    int(reported_level)  # The level reported by the source (NOT posterior)
                 ))
+                # DEBUG: Track pending info evaluations
+                if self.model.debug_mode and hasattr(self, 'id_num') and (self.id_num < 2 or (50 <= self.id_num < 52)):
+                    print(f"[DEBUG] Agent {self.unique_id} ({self.agent_type}) added pending info eval: tick={self.model.tick}, source={source_id}, cell={cell}, reported={reported_level}")
 
             # Track AI source information for later trust updates
             is_ai_source = hasattr(self, 'ai_info_sources') and cell in self.ai_info_sources
@@ -1835,7 +1848,7 @@ class DisasterModel(Model):
         self.humans = {}
 
         # Debugging mode
-        self.debug_mode = True  # Set to False for production runs
+        self.debug_mode = False  # Set to False for production runs
 
         # Create human agents.
         for i in range(self.num_humans):
