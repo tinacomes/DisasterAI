@@ -84,10 +84,15 @@ def run_test(ai_alignment, test_name):
         if isinstance(agent, HumanAgent):
             if agent.agent_type == 'exploratory' and 'exploratory' not in sample_agents:
                 sample_agents['exploratory'] = agent
+                print(f"Selected exploratory agent: {agent.unique_id}")
             elif agent.agent_type == 'exploitative' and 'exploitative' not in sample_agents:
                 sample_agents['exploitative'] = agent
+                print(f"Selected exploitative agent: {agent.unique_id}")
         if len(sample_agents) == 2:
             break
+
+    # Track mode choices for exploratory agents
+    mode_choices = {'ai': 0, 'human': 0, 'self_action': 0}
 
     # Run simulation
     for tick in range(params['ticks']):
@@ -110,6 +115,12 @@ def run_test(ai_alignment, test_name):
                 prev_info_pending[agent_type] = len(agent.pending_info_evaluations)
                 prev_relief_pending[agent_type] = len(agent.pending_rewards)
 
+                # Track mode choice BEFORE step (from previous tick)
+                if agent_type == 'exploratory' and hasattr(agent, 'tokens_this_tick'):
+                    for mode in agent.tokens_this_tick:
+                        if mode in mode_choices:
+                            mode_choices[mode] += agent.tokens_this_tick[mode]
+
         # Step model
         model.step()
 
@@ -120,6 +131,11 @@ def run_test(ai_alignment, test_name):
 
                 # Info feedback events (check if pending list got shorter = evaluation happened)
                 current_info_pending = len(agent.pending_info_evaluations)
+
+                # DEBUG: Log pending info at specific ticks
+                if tick in [10, 20, 50, 100] and agent_type == 'exploratory':
+                    print(f"Tick {tick} - {agent_type} ({agent.unique_id}): {current_info_pending} pending info evals")
+
                 if current_info_pending < prev_info_pending.get(agent_type, 0):
                     info_feedback_counts[agent_type] += (prev_info_pending[agent_type] - current_info_pending)
                     feedback_timeline['info'].append((tick, agent_type))
@@ -143,6 +159,11 @@ def run_test(ai_alignment, test_name):
                                 ai_usage_by_tick['exploitative'].append(tick)
                             break
 
+    print(f"\nExploratory Agent Mode Choices:")
+    total_choices = sum(mode_choices.values())
+    if total_choices > 0:
+        for mode, count in mode_choices.items():
+            print(f"  {mode}: {count} ({count/total_choices*100:.1f}%)")
     print(f"\nFeedback Event Summary:")
     print(f"  Exploratory - Info Quality: {info_feedback_counts['exploratory']}, Relief Outcome: {relief_feedback_counts['exploratory']}")
     print(f"  Exploitative - Info Quality: {info_feedback_counts['exploitative']}, Relief Outcome: {relief_feedback_counts['exploitative']}")
