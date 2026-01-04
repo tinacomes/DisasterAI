@@ -967,9 +967,15 @@ class HumanAgent(Agent):
             for mode in possible_modes:
                 decision_factors['q_values'][mode] = self.q_table.get(mode, 0.0)
 
+            # FIX: Exploratory agents need guaranteed human query rate to learn from diverse sources
+            # This prevents epsilon-greedy from diluting human queries across many AI modes
+            if self.agent_type == "exploratory" and random.random() < 0.2:
+                chosen_mode = "human"
+                decision_factors['selection_type'] = 'forced_human_exploration'
+                decision_factors['chosen_mode'] = chosen_mode
             # Epsilon greedy strategy - not to be confused with the agent types :)
             # Exploration case - record randomly chosen mode
-            if random.random() < self.epsilon: #epsilon parameter for randomness
+            elif random.random() < self.epsilon: #epsilon parameter for randomness
                 chosen_mode = random.choice(possible_modes)
                 decision_factors['selection_type'] = 'exploration'
                 decision_factors['chosen_mode'] = chosen_mode
