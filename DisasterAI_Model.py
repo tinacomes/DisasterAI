@@ -416,15 +416,16 @@ class HumanAgent(Agent):
             # Calculate accuracy based on how close reported level was to actual
             level_error = abs(reported_level - actual_level)
 
-            # Accuracy-based reward (scaled to [-0.03, +0.03] range - small but meaningful)
+            # Accuracy-based reward - scaled to be comparable to relief outcomes
+            # Info quality should be FAST and STRONG signal for learning
             if level_error == 0:
-                accuracy_reward = 0.03  # Perfect accuracy
+                accuracy_reward = 0.5  # Perfect accuracy - strong positive
             elif level_error == 1:
-                accuracy_reward = 0.01  # Close
+                accuracy_reward = 0.2  # Close - moderate positive
             elif level_error == 2:
-                accuracy_reward = -0.01  # Moderate error
+                accuracy_reward = -0.3  # Moderate error - significant penalty
             else:
-                accuracy_reward = -0.03  # Large error
+                accuracy_reward = -0.7  # Large error - strong penalty
 
             # Determine mode from source_id (map to high-level modes)
             if source_id.startswith("H_"):
@@ -437,23 +438,31 @@ class HumanAgent(Agent):
             # Update mode Q-value (what's used in action selection)
             if mode and mode in self.q_table:
                 old_mode_q = self.q_table[mode]
-                info_learning_rate = 0.03  # Smaller than relief outcome learning rate (0.1)
-                new_mode_q = old_mode_q + info_learning_rate * accuracy_reward
+                # Info quality feedback should be FAST and STRONG
+                # Use higher learning rate for exploratory agents to learn quickly from info
+                info_learning_rate = 0.25 if self.agent_type == "exploratory" else 0.12
+                # Use standard Q-learning update: Q += lr * (reward - Q)
+                new_mode_q = old_mode_q + info_learning_rate * (accuracy_reward - old_mode_q)
                 self.q_table[mode] = new_mode_q
 
             # Also update specific source Q-value (for tracking individuals)
             if source_id in self.q_table:
                 old_q = self.q_table[source_id]
-                info_learning_rate = 0.03
-                new_q = old_q + info_learning_rate * accuracy_reward
+                info_learning_rate = 0.25 if self.agent_type == "exploratory" else 0.12
+                # Use standard Q-learning update: Q += lr * (reward - Q)
+                new_q = old_q + info_learning_rate * (accuracy_reward - old_q)
                 self.q_table[source_id] = new_q
 
-            # Update trust similarly (small adjustment)
+            # Update trust similarly - use stronger updates for bad info
             if source_id in self.trust:
                 old_trust = self.trust[source_id]
-                # Map accuracy reward to trust change
-                trust_adjustment = info_learning_rate * accuracy_reward
-                new_trust = max(0.0, min(1.0, old_trust + trust_adjustment))
+                # Map accuracy reward [-0.7, +0.5] to trust target [0.15, 0.75]
+                # Bad info should drop trust low, good info should increase moderately
+                trust_target = 0.5 + 0.5 * accuracy_reward  # Maps -0.7->0.15, 0->0.5, +0.5->0.75
+                # Use higher learning rate for trust updates from info quality
+                trust_lr = 0.15 if self.agent_type == "exploratory" else 0.08
+                trust_change = trust_lr * (trust_target - old_trust)
+                new_trust = max(0.0, min(1.0, old_trust + trust_change))
                 self.trust[source_id] = new_trust
 
             # Mark as evaluated
