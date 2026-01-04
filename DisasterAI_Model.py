@@ -1943,10 +1943,12 @@ class DisasterModel(Model):
         
         aeci_variance = 0.0  # Default neutral value
         
-        # Define AI-reliant agents with moderate threshold
-        # Agent must have made enough queries (10+) AND majority to AI (50%+)
+        # Define AI-reliant agents with adjusted threshold for 3-mode structure
+        # With balanced self/human/ai modes, 50%+ AI usage indicates strong preference
+        # Lowered threshold from 50% to 33% to account for 3-mode balance
+        # (33% = equal to random selection among 3 modes)
         min_calls_threshold = 10   # Need stable sample size
-        min_ai_ratio = 0.5         # Majority (50%+) queries to AI
+        min_ai_ratio = 0.33        # Above random chance (33%) indicates AI preference
         
         ai_reliant_agents = []
         for agent in self.humans.values():
