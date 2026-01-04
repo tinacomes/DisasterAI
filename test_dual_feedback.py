@@ -39,8 +39,8 @@ def track_agent_feedback_events(model):
     """Track when feedback events occur for sample agents."""
     info_feedback_events = {'exploratory': [], 'exploitative': []}
     relief_feedback_events = {'exploratory': [], 'exploitative': []}
-    q_value_evolution = {'exploratory': {'A_0': [], 'human': [], 'self_action': []},
-                         'exploitative': {'A_0': [], 'human': [], 'self_action': []}}
+    q_value_evolution = {'exploratory': {'ai': [], 'human': [], 'self_action': []},
+                         'exploitative': {'ai': [], 'human': [], 'self_action': []}}
     trust_evolution = {'exploratory': {'A_0': []},
                       'exploitative': {'A_0': []}}
 
@@ -71,8 +71,8 @@ def run_test(ai_alignment, test_name):
 
     # Tracking structures
     ai_usage_by_tick = {'exploratory': [], 'exploitative': []}
-    q_values_by_tick = {'exploratory': {'A_0': [], 'human': [], 'self_action': []},
-                        'exploitative': {'A_0': [], 'human': [], 'self_action': []}}
+    q_values_by_tick = {'exploratory': {'ai': [], 'human': [], 'self_action': []},
+                        'exploitative': {'ai': [], 'human': [], 'self_action': []}}
     trust_by_tick = {'exploratory': [], 'exploitative': []}
     info_feedback_counts = {'exploratory': 0, 'exploitative': 0}
     relief_feedback_counts = {'exploratory': 0, 'exploitative': 0}
@@ -96,8 +96,8 @@ def run_test(ai_alignment, test_name):
             if agent_type in sample_agents:
                 agent = sample_agents[agent_type]
 
-                # Q-values
-                q_values_by_tick[agent_type]['A_0'].append(agent.q_table.get('A_0', 0.0))
+                # Q-values (track mode-level decisions: ai/human/self_action)
+                q_values_by_tick[agent_type]['ai'].append(agent.q_table.get('ai', 0.0))
                 q_values_by_tick[agent_type]['human'].append(agent.q_table.get('human', 0.0))
                 q_values_by_tick[agent_type]['self_action'].append(agent.q_table.get('self_action', 0.0))
 
@@ -162,7 +162,7 @@ def visualize_results(results_high, results_low):
 
     # 1. Q-Values Evolution (High Alignment)
     ax1 = plt.subplot(3, 3, 1)
-    for source in ['A_0', 'human', 'self_action']:
+    for source in ['ai', 'human', 'self_action']:
         for agent_type in ['exploratory', 'exploitative']:
             data = results_high['q_values'][agent_type][source]
             linestyle = '-' if agent_type == 'exploratory' else '--'
@@ -176,7 +176,7 @@ def visualize_results(results_high, results_low):
 
     # 2. Q-Values Evolution (Low Alignment)
     ax2 = plt.subplot(3, 3, 2)
-    for source in ['A_0', 'human', 'self_action']:
+    for source in ['ai', 'human', 'self_action']:
         for agent_type in ['exploratory', 'exploitative']:
             data = results_low['q_values'][agent_type][source]
             linestyle = '-' if agent_type == 'exploratory' else '--'
@@ -277,14 +277,14 @@ def visualize_results(results_high, results_low):
 
     # 7. Final Q-Value Comparison
     ax7 = plt.subplot(3, 3, 7)
-    sources = ['A_0', 'human', 'self']
+    sources = ['ai', 'human', 'self']
     explor_high = [
-        results_high['q_values']['exploratory']['A_0'][-1],
+        results_high['q_values']['exploratory']['ai'][-1],
         results_high['q_values']['exploratory']['human'][-1],
         results_high['q_values']['exploratory']['self_action'][-1]
     ]
     exploit_high = [
-        results_high['q_values']['exploitative']['A_0'][-1],
+        results_high['q_values']['exploitative']['ai'][-1],
         results_high['q_values']['exploitative']['human'][-1],
         results_high['q_values']['exploitative']['self_action'][-1]
     ]
@@ -304,12 +304,12 @@ def visualize_results(results_high, results_low):
     # 8. Final Q-Value Comparison (Low Alignment)
     ax8 = plt.subplot(3, 3, 8)
     explor_low = [
-        results_low['q_values']['exploratory']['A_0'][-1],
+        results_low['q_values']['exploratory']['ai'][-1],
         results_low['q_values']['exploratory']['human'][-1],
         results_low['q_values']['exploratory']['self_action'][-1]
     ]
     exploit_low = [
-        results_low['q_values']['exploitative']['A_0'][-1],
+        results_low['q_values']['exploitative']['ai'][-1],
         results_low['q_values']['exploitative']['human'][-1],
         results_low['q_values']['exploitative']['self_action'][-1]
     ]
@@ -334,18 +334,19 @@ def visualize_results(results_high, results_low):
     High Alignment (0.9) - Confirming AI:
     ├─ Exploratory: Info={results_high['info_counts']['exploratory']}, Relief={results_high['relief_counts']['exploratory']}
     ├─ Exploitative: Info={results_high['info_counts']['exploitative']}, Relief={results_high['relief_counts']['exploitative']}
-    └─ Final AI Q: Explor={explor_high[0]:.3f}, Exploit={exploit_high[0]:.3f}
+    └─ Final Q: AI={explor_high[0]:.3f}, Human={explor_high[1]:.3f}
 
     Low Alignment (0.1) - Truthful AI:
     ├─ Exploratory: Info={results_low['info_counts']['exploratory']}, Relief={results_low['relief_counts']['exploratory']}
     ├─ Exploitative: Info={results_low['info_counts']['exploitative']}, Relief={results_low['relief_counts']['exploitative']}
-    └─ Final AI Q: Explor={explor_low[0]:.3f}, Exploit={exploit_low[0]:.3f}
+    └─ Final Q: AI={explor_low[0]:.3f}, Human={explor_low[1]:.3f}
 
     Key Findings:
+    • Mode structure: self/human/ai (3 high-level categories)
+    • Agents learn source CATEGORIES through experience
     • Info feedback is faster & more frequent for exploratory
     • Relief feedback has longer delay (15-25 ticks)
-    • Exploratory agents show stronger response to alignment
-    • Dual timeline prevents "lucky confirmation" bias
+    • Human Q-value should now update properly!
     """
 
     ax9.text(0.1, 0.5, summary_text, fontsize=9, family='monospace',
