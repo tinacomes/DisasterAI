@@ -168,7 +168,8 @@ class HumanAgent(Agent):
 
                 # Calculate distance from agent for sensing
                 distance_from_agent = math.sqrt((x - self.pos[0])**2 + (y - self.pos[1])**2)
-                sense_radius = 2  # Same for both agent types
+                # Explorers have wider sensing radius (3) to verify uncertain cells, exploiters narrower (2)
+                sense_radius = 3 if self.agent_type == "exploratory" else 2
 
                 # If cell is within sensing range, initialize with noisy perception of actual disaster
                 if distance_from_agent <= sense_radius:
@@ -330,7 +331,10 @@ class HumanAgent(Agent):
 
     def sense_environment(self):
         pos = self.pos
-        radius = 2  # Same for both agent types - behavioral differences should be in information-seeking, not perception
+        # CRITICAL FIX #1: Explorers need wider sensing radius to verify uncertain cells they query about
+        # This enables the info verification mechanism (pending_info_evaluations) to work for explorers
+        # Exploiters have narrower focus (radius=2), explorers cast wider net (radius=3)
+        radius = 3 if self.agent_type == "exploratory" else 2
         cells = self.model.grid.get_neighborhood(pos, moore=True, radius=radius, include_center=True)
         for cell in cells:
             if 0 <= cell[0] < self.model.width and 0 <= cell[1] < self.model.height:
@@ -1261,6 +1265,13 @@ class HumanAgent(Agent):
                 #if self.model.debug_mode and random.random() < 0.1:
                     #print(f"Agent {self.unique_id} processing rewards for {len(cells_and_beliefs)} cells")
 
+                # CRITICAL FIX #4: Separate ACCURACY vs CONFIRMATION rewards
+                # Exploratory: accuracy = distance from ground truth
+                # Exploitative: confirmation = how well reality matched confident prior beliefs
+
+                accuracy_scores = []  # For exploratory agents
+                confirmation_scores = []  # For exploitative agents
+
                 for cell, belief_level in cells_and_beliefs:
                     if not (0 <= cell[0] < self.model.width and 0 <= cell[1] < self.model.height):
                         continue
@@ -1268,31 +1279,41 @@ class HumanAgent(Agent):
                     # Get the ACTUAL disaster level for this cell
                     actual_level = self.model.disaster_grid[cell[0], cell[1]]
 
-                    # Define correctness criteria
-                    is_correct = actual_level >= 3  # Keep this threshold for "high need"
-
+                    # Define correctness criteria (for metrics tracking)
+                    is_correct = actual_level >= 3
                     if is_correct:
                         correct_in_batch += 1
                     else:
                         incorrect_in_batch += 1
 
-                    # Calculate granular reward based on actual level
-                    if actual_level == 5:
-                        cell_reward = 5.0  # Perfect targeting
-                    elif actual_level == 4:
-                        cell_reward = 3.0  # Very good targeting
-                    elif actual_level == 3:
-                        cell_reward = 1.5  # Good targeting
-                    elif actual_level == 2:
-                        cell_reward = 0.0  # Neutral - borderline need
-                    elif actual_level == 1:
-                        cell_reward = -1.0  # Poor targeting - low need
-                    else:  # Level 0
-                        cell_reward = -2.0  # Very poor targeting - no need
+                    # Get prior belief before updating (needed for confirmation reward)
+                    prior_belief_level = belief_level  # This is what we believed when sending relief
+                    prior_confidence = self.beliefs[cell].get('confidence', 0.5) if cell in self.beliefs else 0.5
 
-                    cell_rewards.append(cell_reward)
+                    if self.agent_type == "exploratory":
+                        # ACCURACY REWARD: How close was belief to ground truth?
+                        # Range: 1.0 (perfect match) to 0.0 (maximum error of 5)
+                        accuracy = 1.0 - abs(prior_belief_level - actual_level) / 5.0
+                        accuracy_scores.append(accuracy)
+                    else:  # exploitative
+                        # CONFIRMATION REWARD: Did reality match our confident beliefs?
+                        # Match quality: how close belief was to reality
+                        match_quality = 1.0 - abs(prior_belief_level - actual_level) / 5.0
 
-                    # Update beliefs based on ground truth
+                        # Weight by prior confidence:
+                        # - High confidence + good match = high reward
+                        # - High confidence + poor match = high penalty
+                        # - Low confidence = low impact either way
+                        if match_quality >= 0.6:  # Reasonably accurate (error <= 2)
+                            # Reward confirming strong beliefs
+                            confirmation = match_quality * prior_confidence
+                        else:  # Inaccurate (error > 2)
+                            # Penalty for strong wrong beliefs
+                            confirmation = -(1.0 - match_quality) * prior_confidence
+
+                        confirmation_scores.append(confirmation)
+
+                    # Update beliefs based on ground truth (same for both agent types)
                     if cell in self.beliefs and isinstance(self.beliefs[cell], dict):
                         old_belief = self.beliefs[cell].copy()
 
@@ -1305,7 +1326,7 @@ class HumanAgent(Agent):
                         blended_level = int(round(update_weight * corrected_level +
                                                 (1 - update_weight) * old_belief.get('level', 0)))
 
-                        # Update confidence based on accuracy - KEY CHANGE: Make this agent-type dependent
+                        # Update confidence based on accuracy (agent-type dependent)
                         if abs(old_belief.get('level', 0) - actual_level) <= 1:
                             # Belief was accurate
                             if self.agent_type == "exploratory":
@@ -1326,25 +1347,26 @@ class HumanAgent(Agent):
                         # Update the belief
                         self.beliefs[cell] = {'level': blended_level, 'confidence': new_conf}
 
-                # Calculate batch reward based on correctness ratio and actual reward
-                if cell_rewards:
-                    # Blend components for final reward - KEY CHANGE: Make this agent-type dependent
-                    if self.agent_type == "exploratory":
-                        # Explorers care more about actual levels (accuracy)
-                        # Explorers care almost exclusively about actual accuracy
-                        avg_actual_reward = sum(cell_rewards) / len(cell_rewards)
-                        correct_ratio = correct_in_batch / len(cell_rewards) if cell_rewards else 0
-                        batch_reward = 0.8 * avg_actual_reward + 0.2 * (correct_ratio * 5.0)  # 80% actual value, 10% correctness
+                # Calculate batch reward - ENTIRELY DIFFERENT for each agent type
+                if self.agent_type == "exploratory":
+                    if accuracy_scores:
+                        # ACCURACY REWARD: Average accuracy across targeted cells
+                        # Scale from [0, 1] to [-3, +5] reward range
+                        avg_accuracy = sum(accuracy_scores) / len(accuracy_scores)
+                        batch_reward = avg_accuracy * 8.0 - 3.0  # 1.0 -> +5, 0.0 -> -3
                     else:
-                        # Exploiters care much more about validation of beliefs than actual accuracy
-                        correct_ratio = correct_in_batch / len(cell_rewards) if cell_rewards else 0
-                        avg_actual_reward = sum(cell_rewards) / len(cell_rewards)
-                        batch_reward = 0.2 * avg_actual_reward + 0.8 * (correct_ratio * 5.0)  # 20% actual value, 70% correctness
+                        batch_reward = -1.0
+                else:  # exploitative
+                    if confirmation_scores:
+                        # CONFIRMATION REWARD: Average confirmation across targeted cells
+                        # Already in range ~[-1, +1], scale to [-3, +5]
+                        avg_confirmation = sum(confirmation_scores) / len(confirmation_scores)
+                        batch_reward = avg_confirmation * 4.0 + 1.0  # +1.0 -> +5, -1.0 -> -3
+                    else:
+                        batch_reward = -1.0
 
-                    # Cap the reward range
-                    batch_reward = max(-3.0, min(5.0, batch_reward))
-                else:
-                    batch_reward = -1.0  # Penalty for targeting nothing
+                # Cap the reward range
+                batch_reward = max(-3.0, min(5.0, batch_reward))
 
                 total_reward += batch_reward
 
@@ -1523,16 +1545,10 @@ class AIAgent(Agent):
             if memory_key in self.memory and random.random() < 0.8:
                 self.sensed[cell] = self.memory[memory_key]
             else:
+                # CRITICAL FIX #3: AI should sense TRUTH accurately
+                # Alignment bias happens in report_beliefs(), not during sensing
+                # This ensures: alignment=0 reports truth, alignment=1 confirms beliefs
                 value = self.model.disaster_grid[x, y]
-
-                # When alignment is low, AI should be more truthful/accurate
-                noise_prob = 0.1  # Default 10% chance of noise
-                if hasattr(self.model, 'ai_alignment_level'):
-                    # Reduce noise when alignment is low (more truthful)
-                    noise_prob = 0.1 * self.model.ai_alignment_level
-
-                if random.random() < noise_prob:
-                    value = max(0, min(5, value + random.choice([-1, 1])))
 
                 self.sensed[cell] = value
                 self.memory[(current_tick, cell)] = value
