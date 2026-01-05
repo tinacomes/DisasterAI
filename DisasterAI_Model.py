@@ -933,35 +933,39 @@ class HumanAgent(Agent):
                                 print(f"Agent {self.unique_id}: Using random fallback interest point {interest_point}")
 
             else:  # Exploratory
-                # CRITICAL FIX: Query about current vicinity so info can be evaluated when sensing
-                # Info quality feedback requires querying about cells that will be sensed (radius=2)
-                # Querying about distant exploration targets means no feedback overlap!
-                interest_point = self.pos  # Query about where we are NOW
-                query_radius = 2  # Match sensing radius for evaluation overlap
+                # CRITICAL FIX: Explorers should seek information about UNCERTAIN cells
+                # This is their core defining characteristic per requirements
+                # Find cells with low confidence (high uncertainty)
+                self.find_exploration_targets(num_targets=3)
 
-                # Add robust fallback mechanism
-                if not interest_point:
-                    # Try finding highest confidence cells
-                    max_conf = -1
-                    highest_conf_cells = []
+                if self.exploration_targets:
+                    # Query about the most uncertain cell (first in exploration targets)
+                    interest_point = self.exploration_targets[0]
+                else:
+                    # Fallback: find cells with lowest confidence manually
+                    min_conf = float('inf')
+                    lowest_conf_cells = []
 
                     if len(self.beliefs) > 0:
                         for cell, belief_info in self.beliefs.items():
                             if isinstance(belief_info, dict):
-                                conf = belief_info.get('confidence', 0.0)
-                                if conf > max_conf:
-                                    max_conf = conf
-                                    highest_conf_cells = [cell]
-                                elif conf == max_conf:
-                                    highest_conf_cells.append(cell)
+                                conf = belief_info.get('confidence', 1.0)
+                                if conf < min_conf:
+                                    min_conf = conf
+                                    lowest_conf_cells = [cell]
+                                elif conf == min_conf:
+                                    lowest_conf_cells.append(cell)
 
-                    if highest_conf_cells:
-                        interest_point = random.choice(highest_conf_cells)
+                    if lowest_conf_cells:
+                        interest_point = random.choice(lowest_conf_cells)
                     else:
-                        # Absolute fallback: pick a random cell
-                        interest_point = (random.randrange(self.model.width), random.randrange(self.model.height))
+                        # Absolute fallback: use current position
+                        interest_point = self.pos
                         if self.model.debug_mode:
-                            print(f"Agent {self.unique_id}: Using random fallback interest point {interest_point}")
+                            print(f"Agent {self.unique_id}: Using position as fallback interest point {interest_point}")
+
+                # Use wider query radius for exploration (explorers cast wider net)
+                query_radius = 3
 
             # Final safety check
             if not interest_point:
