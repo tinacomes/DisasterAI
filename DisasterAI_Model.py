@@ -105,6 +105,9 @@ class HumanAgent(Agent):
         self.tokens_this_tick = {} # Tracks mode choice leading to send_relief THIS tick
         self.last_queried_source_ids = [] # Temp store for source IDs
         self.last_belief_update = {}  # Tracks when each cell was last updated
+
+        # --- TRIANGULATION: Track multiple reports per cell for far-cell verification ---
+        self.recent_reports = {}  # {cell: [(tick, level, source_id), ...]} - for comparing multiple sources
                      
         # --- Q-Table for Source Values ---
         # Use high-level modes: self_action, human, ai (not individual AIs)
@@ -721,6 +724,130 @@ class HumanAgent(Agent):
             # Apply the calculated decay rate
             self.trust[source_id] = max(0, self.trust[source_id] - decay_rate)
 
+    def triangulate_cell_reports(self, cell, reported_level, source_id):
+        """
+        TRIANGULATION: Compare multiple source reports about the same cell.
+        Provides Q-learning feedback for far-away cells that cannot be directly sensed.
+
+        Key features:
+        - Uses MEDIAN for consensus (robust to outliers)
+        - Updates incrementally as more reports arrive (consensus improves over time)
+        - Weights feedback by VARIANCE (low variance = high confidence in consensus)
+        - Only evaluates NEW reports (avoids double-counting)
+        """
+        current_tick = self.model.tick
+
+        # Initialize tracking for this cell if needed
+        if cell not in self.recent_reports:
+            self.recent_reports[cell] = []
+
+        # Clean old reports (>20 ticks)
+        self.recent_reports[cell] = [
+            (t, l, s) for t, l, s in self.recent_reports[cell]
+            if current_tick - t <= 20
+        ]
+
+        # Get previous reports (excluding current source to avoid self-comparison)
+        previous_reports = [
+            (t, l, s) for t, l, s in self.recent_reports[cell]
+            if s != source_id  # Don't compare source to itself
+        ]
+
+        # Add current report to tracking
+        self.recent_reports[cell].append((current_tick, reported_level, source_id))
+
+        # Need at least 2 DIFFERENT sources for triangulation
+        if len(previous_reports) >= 1:
+            # Collect all report levels (previous + current)
+            all_levels = [l for _, l, _ in previous_reports] + [reported_level]
+
+            # Calculate MEDIAN consensus (robust to outliers)
+            sorted_levels = sorted(all_levels)
+            n = len(sorted_levels)
+            if n % 2 == 0:
+                median = (sorted_levels[n//2 - 1] + sorted_levels[n//2]) / 2.0
+            else:
+                median = sorted_levels[n//2]
+            consensus_level = round(median)
+
+            # Calculate VARIANCE (measure of agreement among sources)
+            mean_level = sum(all_levels) / len(all_levels)
+            variance = sum((l - mean_level) ** 2 for l in all_levels) / len(all_levels)
+
+            # Variance weighting: low variance = high confidence in consensus
+            # variance ranges from 0 (perfect agreement) to ~4 (max disagreement on 0-5 scale)
+            # Map to confidence: 0 variance → 1.0 confidence, 4 variance → 0.2 confidence
+            consensus_confidence = max(0.2, 1.0 - variance / 5.0)
+
+            # Evaluate CURRENT source against consensus
+            error = abs(reported_level - consensus_level)
+
+            # Base reward scaled by error
+            if error == 0:
+                base_reward = 0.4  # Perfect match with consensus
+            elif error == 1:
+                base_reward = 0.15  # Close to consensus
+            elif error == 2:
+                base_reward = -0.2  # Moderate deviation
+            else:
+                base_reward = -0.5  # Large deviation (outlier)
+
+            # Weight reward by consensus confidence (variance-based)
+            # High confidence (low variance) = strong signal
+            # Low confidence (high variance) = weak signal
+            weighted_reward = base_reward * consensus_confidence
+
+            # Update Q-values and trust for the current source
+            self.update_q_from_triangulation(source_id, weighted_reward, n_reports=len(all_levels))
+
+            # DEBUG: Log triangulation events
+            if self.model.debug_mode and hasattr(self, 'id_num') and (self.id_num < 2 or (50 <= self.id_num < 52)):
+                print(f"[TRIANGULATION] Agent {self.unique_id} ({self.agent_type}) cell={cell}")
+                print(f"  Reports: {all_levels} → Median={consensus_level}, Variance={variance:.3f}, Confidence={consensus_confidence:.3f}")
+                print(f"  Source {source_id}: reported={reported_level}, error={error}, reward={weighted_reward:.3f}")
+
+    def update_q_from_triangulation(self, source_id, reward, n_reports):
+        """Update Q-values and trust based on triangulation feedback."""
+        # Determine mode from source_id
+        if source_id.startswith("H_"):
+            mode = "human"
+        elif source_id.startswith("A_"):
+            mode = "ai"
+        else:
+            mode = None
+
+        # Learning rate adjusted by agent type and number of reports
+        # More reports = more confidence in consensus = higher learning rate
+        base_lr = 0.25 if self.agent_type == "exploratory" else 0.12
+        # Scale learning rate by sqrt(n_reports) - diminishing returns
+        report_factor = min(1.5, (n_reports / 2.0) ** 0.5)
+        effective_lr = base_lr * report_factor
+
+        # Update mode Q-value
+        if mode and mode in self.q_table:
+            old_mode_q = self.q_table[mode]
+            new_mode_q = old_mode_q + effective_lr * (reward - old_mode_q)
+            self.q_table[mode] = new_mode_q
+
+        # Update specific source Q-value
+        if source_id in self.q_table:
+            old_q = self.q_table[source_id]
+            new_q = old_q + effective_lr * (reward - old_q)
+            self.q_table[source_id] = new_q
+
+        # Update trust
+        if source_id in self.trust:
+            old_trust = self.trust[source_id]
+            # Map reward [-0.5, +0.4] to trust target [0.2, 0.8]
+            # Weighted by consensus confidence through the reward
+            trust_target = 0.5 + reward  # Simple linear mapping
+            trust_target = max(0.1, min(0.9, trust_target))
+
+            trust_lr = 0.15 if self.agent_type == "exploratory" else 0.08
+            trust_change = trust_lr * (trust_target - old_trust)
+            new_trust = max(0.0, min(1.0, old_trust + trust_change))
+            self.trust[source_id] = new_trust
+
     def update_belief_bayesian(self, cell, reported_level, source_trust, source_id=None):
         """Update agent's belief about a cell using Bayesian principles."""
         try:
@@ -845,6 +972,9 @@ class HumanAgent(Agent):
                 # DEBUG: Track pending info evaluations
                 if self.model.debug_mode and hasattr(self, 'id_num') and (self.id_num < 2 or (50 <= self.id_num < 52)):
                     print(f"[DEBUG] Agent {self.unique_id} ({self.agent_type}) added pending info eval: tick={self.model.tick}, source={source_id}, cell={cell}, reported={reported_level}")
+
+                # TRIANGULATION: Track report and evaluate against previous reports
+                self.triangulate_cell_reports(cell, int(reported_level), source_id)
 
             # Track AI source information for later trust updates
             is_ai_source = hasattr(self, 'ai_info_sources') and cell in self.ai_info_sources
