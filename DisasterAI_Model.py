@@ -357,10 +357,10 @@ class HumanAgent(Agent):
                             belief_conf = 0.85 # HIGH confidence if accurately sensing L3+
                         elif belief_level > 0:
                             belief_conf = 0.75 # Moderate confidence for L1/L2
-                    else: # Exploratory (Keep previous boost: 0.90 base, 0.98 for L>0)
+                    else: # Exploratory
                         belief_conf = 0.9
                         if belief_level > 0:
-                            belief_conf = 0.98
+                            belief_conf = 0.92  # Priority 4: Lower from 0.98 to match new ceiling
 
                 if cell in self.beliefs and isinstance(self.beliefs[cell], dict):
                     old_belief = self.beliefs[cell]
@@ -382,7 +382,7 @@ class HumanAgent(Agent):
 
                     # For confidence, use weighted average with bounds
                     final_confidence = (sense_weight * belief_conf) + ((1 - sense_weight) * old_confidence)
-                    final_confidence = max(0.1, min(0.98, final_confidence))
+                    final_confidence = max(0.1, min(0.95, final_confidence))  # Priority 4: Lower ceiling from 0.98
 
                     self.beliefs[cell] = {'level': final_level, 'confidence': final_confidence}
                 else:
@@ -790,15 +790,17 @@ class HumanAgent(Agent):
 
             # Constrain to valid ranges
             posterior_level = max(0, min(5, round(posterior_level)))
-            posterior_confidence = max(0.1, min(0.98, posterior_confidence))
+            posterior_confidence = max(0.1, min(0.95, posterior_confidence))  # Priority 4: Lower ceiling from 0.98
 
             # Agent-type-specific adjustments
             if self.agent_type == "exploitative":
                 # Exploitative agents give more weight to consistent information
                 if abs(posterior_level - prior_level) <= 1:
-                    # Information confirms existing belief - stronger boost
-                    confirmation_boost = min(0.3, 0.35 * prior_confidence)
-                    posterior_confidence = min(0.98, posterior_confidence + confirmation_boost)
+                    # Priority 2: FIX - Slower confirmation boost with diminishing returns
+                    # Old: min(0.3, 0.35 * prior_confidence) - too fast, reached 0.98 in 2 steps
+                    # New: Uses prior_confidence * (1 - prior_confidence) for diminishing returns
+                    confirmation_boost = min(0.12, 0.20 * prior_confidence * (1 - prior_confidence))
+                    posterior_confidence = min(0.95, posterior_confidence + confirmation_boost)  # Priority 4: Lower ceiling
             else:  # exploratory
                 # Exploratory agents are more accepting of new information
                 if abs(posterior_level - prior_level) >= 2:
@@ -806,10 +808,9 @@ class HumanAgent(Agent):
                     # Don't reduce confidence as much - they value the new information
                     posterior_confidence = max(0.2, posterior_confidence * 0.95)
 
-                # Explorers gain extra confidence when source is trusted and reported level is high
-                if source_trust > 0.6 and reported_level >= 3:
-                    info_value_boost = min(0.3, 0.4 * source_trust)
-                    posterior_confidence = min(0.97, posterior_confidence + info_value_boost)
+                # Priority 3: REMOVED explorer high-level boost
+                # Old logic conflated disaster severity with information accuracy
+                # Explorers should value accuracy, not severity
 
             # Apply a smoothing factor to reduce large jumps in level for both agent types
             if abs(posterior_level - prior_level) >= 2:
@@ -1342,7 +1343,7 @@ class HumanAgent(Agent):
                                 new_conf = min(0.9, old_belief.get('confidence', 0.5) + 0.15)
                             else:
                                 # Exploiters strongly increase confidence when correct (confirmation bias)
-                                new_conf = min(0.98, old_belief.get('confidence', 0.5) + 0.25)
+                                new_conf = min(0.95, old_belief.get('confidence', 0.5) + 0.25)  # Priority 4: Lower from 0.98
                         else:
                             # Belief was inaccurate
                             if self.agent_type == "exploratory":
