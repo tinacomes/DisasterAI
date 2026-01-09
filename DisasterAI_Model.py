@@ -35,6 +35,120 @@ os.makedirs(save_dir, exist_ok=True)
 print(f"✓ Results will be saved to: {save_dir}")
 
 #########################################
+# FIX #6: HARDCODED PARAMETERS DOCUMENTATION
+#########################################
+"""
+This section documents all hardcoded parameters in the model.
+Future work: Extract these to a configuration file or model parameters.
+
+AGENT INITIALIZATION (initialize_beliefs, line ~172-203):
+- noise_chance = 0.4 (40% chance of noisy initial sensing)
+- noise_values = [-2, -1, -1, 0, 0, 1, 1, 2]
+- explorer_confidence_range = (0.5, 0.7)
+- exploiter_confidence_range = (0.3, 0.6)
+- rumor_variation = [-1, 0, 1]
+- rumor_confidence_variation = ±0.1
+
+BELIEF DECAY (apply_confidence_decay, line ~267-310):
+- base_decay_exploiter = 0.0003
+- base_decay_explorer = 0.0005
+- min_confidence_exploiter = 0.1
+- min_confidence_explorer = 0.15
+- high_confidence_threshold = 0.8, 0.9
+- high_level_threshold = 4
+- decay_multiplier_high_conf = 1.5
+
+SENSING (sense_environment, line ~326-377):
+- sense_radius_exploiter = 2
+- sense_radius_explorer = 3
+- noise_threshold = 0.08
+- noise_values = [-1, 0, 1]
+- failure_prob_high_disaster = 0.1 (for level >= 4)
+- random_action_prob = 0.05, 0.5 in various locations
+
+INTEREST POINT SELECTION (find_exploration_targets, line ~422-500):
+- uncertainty_weight_base = 0.6
+- level_weight_base = 0.4
+- confidence_uncertainty_exponent = 2.0
+- query_radius_exploiter = 2 (line 785)
+- query_radius_explorer = 3 (line 834)
+
+BELIEF UPDATES (update_belief_bayesian, line ~627-757):
+- precision_level_weight_exploiter = 1.8
+- precision_level_weight_explorer = 1.5
+- precision_conf_divisor_offset = 1e-6
+- max_precision_exploiter = 8.0
+- max_precision_explorer = 12.0
+- precision_floor = 0.1
+- smoothing_weight = 0.2 (for changes >= 2 levels)
+
+REWARD PROCESSING (process_reward, line ~1182-1244):
+- reward_level_5 = 5.0
+- reward_level_4 = 3.0
+- reward_level_3 = 1.5
+- reward_level_2 = 0.0
+- reward_level_1 = -1.0
+- reward_level_0 = -2.0
+- correctness_threshold = 3 (actual_level >= 3)
+- explorer_reward_blend = (0.8 actual, 0.2 correctness)
+- exploiter_reward_blend = (0.2 actual, 0.8 correctness)
+- reward_cap = (-3.0, 5.0)
+- update_noise_prob = 0.2
+- update_noise_values = [-1, 0, 0, 0, 1]
+- belief_update_weight = 0.7
+- confidence_boost_accurate_explorer = 0.15
+- confidence_boost_accurate_exploiter = 0.25
+- confidence_penalty_wrong_explorer = 0.3
+- confidence_penalty_wrong_exploiter = 0.1
+
+Q-LEARNING (process_reward, line ~1240-1254):
+- ai_lr_multiplier_explorer = 1.5 + (1.0 - alignment) * 0.5
+- ai_lr_multiplier_exploiter = 1.0
+
+TRUST UPDATES (process_reward, line ~1256-1304):
+- trust_change_multiplier_explorer_low_align = 2.0
+- trust_change_multiplier_explorer_high_align = 0.5
+- trust_decay_rate = 0.001 (line 593)
+
+AI AGENT (AIAgent.sense, line ~1434-1467):
+- ai_sense_fraction = 0.15 (senses 15% of cells per tick)
+- ai_noise_prob = 0.1
+- ai_noise_values = [-1, 1]
+
+AI GUESSING (AIAgent.report_beliefs, line ~1524-1585):
+- ai_guess_probability = 0.75 (75% chance to guess unsensed cells)
+- nearby_search_distance = query_radius + 1
+- distance_weight = 1.0 / dist (inverse square)
+- guess_noise_values = [-1, 0, 0, 0, 1]
+- guess_noise_weight = 0.5
+- caller_belief_confidence_threshold = 0.3
+- guess_distributions_by_distance:
+  - close (< 0.3): [2, 3, 3, 4, 4]
+  - medium (0.3-0.6): [1, 2, 2, 3, 3]
+  - far (> 0.6): [0, 0, 1, 1, 2]
+
+SOURCE SELECTION BIASES (seek_information, line ~913-934):
+- exploit_friend_bias = 0.1 (parameter)
+- exploiter_ai_bias_factor = alignment * 0.3
+- explorer_ai_bias = (1 - alignment) * 0.5 + 0.1
+- explorer_human_bias = alignment * 0.15
+- epsilon_noise_range = ±0.01
+
+DISASTER DYNAMICS (update_disaster, line ~2254-2306):
+- stable_decay_prob = 0.3
+- stable_shock_multiplier = 0.3
+- medium_decay_prob = 0.15
+- medium_shock_multiplier = 1.0
+- volatile_decay_prob = 0.05
+- volatile_shock_multiplier = 2.0
+- aftershock_probability = 0.5
+- aftershock_adjacency = 4 directions (NSEW)
+
+TARGET SELECTION (send_relief, line ~1086):
+- max_target_cells = 5
+"""
+
+#########################################
 # Helper Classes and Agent Definitions
 #########################################
 
@@ -97,18 +211,18 @@ class HumanAgent(Agent):
         # --- Agent State ---
         self.beliefs = {} # {(x, y): {'level': L, 'confidence': C}}
         self.trust = {}# {f"A_{k}": model.base_ai_trust for k in range(model.num_ai)} # Trust in AI agents
-        self.q_table = {}
         # Human trust initialized later in model setup
         self.friends = set() # Use set for efficient checking ('H_j' format)
         self.pending_rewards = [] # [(tick_due, mode, [(cell, belief_level), ...]), ...]
         self.tokens_this_tick = {} # Tracks mode choice leading to send_relief THIS tick
         self.last_queried_source_ids = [] # Temp store for source IDs
         self.last_belief_update = {}  # Tracks when each cell was last updated
-                     
-        # --- Q-Table for Source Values ---
-        self.q_table = {f"A_{k}": 0.0 for k in range(model.num_ai)}
-        self.q_table["human"] = 0.05 # Represents generic value of querying humans
-        self.q_table["self_action"] = 0.0
+
+        # --- FIX #4: Q-Table for Source Selection (human OR ai) ---
+        self.q_table = {
+            "human": 0.05,  # Initial value for querying humans
+            "ai": 0.0       # Initial value for querying AI
+        }
 
         # --- Belief Update Parameters ---
         # These control how beliefs change when info is ACCEPTED (separate from Q-learning)
@@ -886,24 +1000,24 @@ class HumanAgent(Agent):
                # print(f" > My belief: {self.beliefs.get(interest_point, {})}")
                 #print(f" > Ground truth: {self.model.disaster_grid[interest_point[0], interest_point[1]]}")
 
-            # Source selection (epsilon-greedy with type-specific biases)
-            possible_modes = ["self_action", "human"] + [f"A_{k}" for k in range(self.model.num_ai)]
+            # FIX #4: Simplified source selection - choose between "human" OR "ai" only
+            # Self-sensing happens separately (via sense_environment), not in Q-learning
+            possible_modes = ["human", "ai"]
 
             # Store Q-values
             for mode in possible_modes:
                 decision_factors['q_values'][mode] = self.q_table.get(mode, 0.0)
 
-            # Epsilon greedy strategy - not to be confused with the agent types :)
-            # Exploration case - record randomly chosen mode
-            if random.random() < self.epsilon: #epsilon parameter for randomness
+            # Epsilon greedy strategy
+            if random.random() < self.epsilon:
                 chosen_mode = random.choice(possible_modes)
                 decision_factors['selection_type'] = 'exploration'
                 decision_factors['chosen_mode'] = chosen_mode
             else:
-                # Exploitation case - record all factors in decision
+                # Exploitation case
                 decision_factors['selection_type'] = 'exploitation'
 
-                # Base scores are from Q-table
+                # Base scores from Q-table
                 scores = {mode: self.q_table.get(mode, 0.0) for mode in possible_modes}
                 decision_factors['base_scores'] = scores.copy()
 
@@ -911,45 +1025,26 @@ class HumanAgent(Agent):
                 decision_factors['biases'] = {}
 
                 if self.agent_type == "exploitative":
-                    # Exploitative agents prefer friends and self-confirmation
+                    # Exploitative agents prefer friends (humans)
                     scores["human"] += self.exploit_friend_bias
-                    scores["self_action"] += self.exploit_self_bias
-
                     decision_factors['biases']["human"] = self.exploit_friend_bias
-                    decision_factors['biases']["self_action"] = self.exploit_self_bias
 
-                    # AI alignment effect on exploitative agents
-                    # Higher alignment directly increases preference for AI
-                    ai_alignment_factor = self.model.ai_alignment_level * 0.3  # Increased effect
-                    for k in range(self.model.num_ai):
-                        ai_id = f"A_{k}"
-                        ai_bias = ai_alignment_factor  # Directly proportional to alignment
-                        scores[ai_id] += ai_bias
-                        decision_factors['biases'][ai_id] = ai_bias
+                    # AI alignment effect: higher alignment increases AI preference
+                    ai_bias = self.model.ai_alignment_level * 0.3
+                    scores["ai"] += ai_bias
+                    decision_factors['biases']["ai"] = ai_bias
 
                 else:  # exploratory
-                    # Exploratory agents have a slight bias against self-confirmation
-                    scores["self_action"] -= 0.05
-                    decision_factors['biases']["self_action"] = -0.05
-
-                    # Strengthen inverse alignment effect for exploratory agents
                     # Exploratory agents prefer truth-telling AI (low alignment)
-                    inverse_alignment_factor = (1.0 - self.model.ai_alignment_level) * 0.5  # Stronger effect
-                    baseline_ai_factor = 0.1  # alignment more important than AI preference
+                    inverse_alignment = (1.0 - self.model.ai_alignment_level) * 0.5
+                    baseline_ai = 0.1
+                    ai_bias = inverse_alignment + baseline_ai
+                    scores["ai"] += ai_bias
+                    decision_factors['biases']["ai"] = ai_bias
 
-
-                    for k in range(self.model.num_ai):
-                        ai_id = f"A_{k}"
-                        # Combine baseline with inverse alignment for more stable behavior
-                        ai_bias = inverse_alignment_factor +baseline_ai_factor
-                        scores[ai_id] += ai_bias
-                        decision_factors['biases'][ai_id] = ai_bias
-
-                    # Reduce bias for human consultation when alignment is low
-                    # Exploratory agents prefer humans more when AI alignment is high
-                    # (since high alignment means less valuable AI information)
+                    # Prefer humans more when AI alignment is high
                     human_bias = self.model.ai_alignment_level * 0.15
-                    scores["human"] += human_bias  # Note: changed to positive bias now
+                    scores["human"] += human_bias
                     decision_factors['biases']["human"] = human_bias
 
                 # Add small random noise to break ties
@@ -982,11 +1077,7 @@ class HumanAgent(Agent):
             self.last_queried_source_ids = []
 
             # Query source
-
-            if chosen_mode == "self_action":
-                reports = self.report_beliefs(interest_point, query_radius)
-                source_id = None  # No external source used
-            elif chosen_mode == "human":
+            if chosen_mode == "human":
                 valid_sources = [h for h in self.model.humans if h != self.unique_id]
                 if not valid_sources:
                     return
@@ -1009,20 +1100,16 @@ class HumanAgent(Agent):
                 else:
                     # Invalid source agent
                     source_id = None
-            else:  # AI
 
-                if chosen_mode in self.model.ais:
-                    source_id = chosen_mode
-                else:
-                    # Otherwise, pick best AI for this query
-                    source_id = self.choose_best_ai_for_query(interest_point, query_radius)
-
+            elif chosen_mode == "ai":
+                # FIX #4: Pick best AI for this query based on knowledge coverage
+                source_id = self.choose_best_ai_for_query(interest_point, query_radius)
                 source_agent = self.model.ais.get(source_id)
 
                 if source_agent:
                     reports = source_agent.report_beliefs(interest_point, query_radius, self.beliefs, self.trust.get(source_id, 0.1))
 
-                    # track AI source
+                    # Track AI source
                     self.last_queried_source_ids = [source_id]
 
                     if not hasattr(self, 'ai_info_sources'):
@@ -1031,10 +1118,6 @@ class HumanAgent(Agent):
                     # Track which cells got info from which AI
                     for cell, reported_value in reports.items():
                         self.ai_info_sources[cell] = source_id
-
-                    # DEBUG PRINT to track AI source queries
-                    #if self.model.debug_mode and random.random() < 0.1:  # 10% of the time
-                        #print(f"DEBUG: Agent {self.unique_id} queried AI {source_id} for {len(reports)} cells")
 
                     self.accum_calls_ai += 1
                     self.accum_calls_total += 1
@@ -1106,7 +1189,9 @@ class HumanAgent(Agent):
             # Select top targets
             top_cells = sorted(cell_scores, key=lambda x: x['score'], reverse=True)[:max_target_cells]
             targeted_cells = [item['cell'] for item in top_cells]
-            reward_cells = [(item['cell'], item['level']) for item in top_cells]
+            # FIX #1: Filter to only include in-bounds cells to prevent division by zero
+            reward_cells = [(item['cell'], item['level']) for item in top_cells
+                          if 0 <= item['cell'][0] < self.model.width and 0 <= item['cell'][1] < self.model.height]
 
             # Fallback if no targets
             if not targeted_cells and min_forced_tokens > 0 and max_believed_level > -1:
@@ -1114,7 +1199,9 @@ class HumanAgent(Agent):
                 if best_cells:
                     random.shuffle(best_cells)
                     targeted_cells = best_cells[:min_forced_tokens]
-                    reward_cells = [(cell, max_believed_level) for cell in targeted_cells]
+                    # FIX #1: Filter to only include in-bounds cells
+                    reward_cells = [(cell, max_believed_level) for cell in targeted_cells
+                                  if 0 <= cell[0] < self.model.width and 0 <= cell[1] < self.model.height]
 
             if targeted_cells:
                 responsible_mode = list(self.tokens_this_tick.keys())[0] if self.tokens_this_tick else "self_action"
@@ -1258,31 +1345,27 @@ class HumanAgent(Agent):
                 target_trust = (scaled_reward + 1.0) / 2.0  # Map to [0,1] for trust
 
                 # Update Q-table and trust - KEY CHANGE: Adjust learning rates by agent type
-                if mode == "self_action":
-                    old_q = self.q_table.get("self_action", 0.0)
-                    # Explorers learn faster from self-action outcomes
-                    effective_learning_rate = self.learning_rate * (1.5 if self.agent_type == "exploratory" else 1.0)
-                    new_q = old_q + effective_learning_rate * (scaled_reward - old_q)
-                    self.q_table["self_action"] = new_q
-
-                elif source_ids:
+                # FIX #4: Map specific source_id to generic mode ("human" or "ai")
+                if source_ids:
                     for source_id in source_ids:
-                        if source_id in self.q_table:
-                            old_q = self.q_table[source_id]
-                            # Adjust learning rates based on agent type AND source type
-                            if source_id.startswith("A_"):
-                                # For AI sources - explorers learn faster, especially at low alignment
-                                ai_lr_multiplier = 1.0
-                                if self.agent_type == "exploratory":
-                                    # Explorers learn faster about AI when alignment is low (high accuracy)
-                                    ai_lr_multiplier = 1.5 + (1.0 - self.model.ai_alignment_level) * 0.5
-                                effective_learning_rate = self.learning_rate * ai_lr_multiplier
-                            else:
-                                # For human sources - default learning rate
-                                effective_learning_rate = self.learning_rate
+                        # Determine which mode this source belongs to
+                        if source_id.startswith("A_"):
+                            q_mode = "ai"
+                            # For AI sources - explorers learn faster, especially at low alignment
+                            ai_lr_multiplier = 1.0
+                            if self.agent_type == "exploratory":
+                                # Explorers learn faster about AI when alignment is low (high accuracy)
+                                ai_lr_multiplier = 1.5 + (1.0 - self.model.ai_alignment_level) * 0.5
+                            effective_learning_rate = self.learning_rate * ai_lr_multiplier
+                        else:
+                            # Human source (H_x format)
+                            q_mode = "human"
+                            effective_learning_rate = self.learning_rate
 
-                            new_q = old_q + effective_learning_rate * (scaled_reward - old_q)
-                            self.q_table[source_id] = new_q
+                        # Update Q-value for the generic mode
+                        old_q = self.q_table.get(q_mode, 0.0)
+                        new_q = old_q + effective_learning_rate * (scaled_reward - old_q)
+                        self.q_table[q_mode] = new_q
 
                         if source_id in self.trust:
                             old_trust = self.trust[source_id]
@@ -1613,34 +1696,15 @@ class AIAgent(Agent):
         human_vals = np.array(human_vals_list)
         human_conf = np.array(human_confidence_list)
 
-        # --- Alignment Logic - Stronger effect ---
+        # --- FIX #2: Simplified Alignment Logic ---
+        # Linear interpolation between AI sensing (0) and human beliefs (1)
+        # alignment = 0: AI reports exactly what it senses
+        # alignment = 1: AI reports ONLY human beliefs
         alignment_strength = self.model.ai_alignment_level
-        low_trust_amplification = getattr(self.model, 'low_trust_amplification_factor', 0.5)
-        clipped_trust = max(0.0, min(1.0, caller_trust_in_ai))
 
-        # If alignment is 0, report pure truth (no adjustments)
-        if alignment_strength == 0:
-            # Ground truth - no adjustments at all
-            corrected = sensed_vals
-        else:
-            # Calculate adjustments based on alignment level
-            alignment_factors = alignment_strength * (1.0 + human_conf * 2.0)
-
-            # Add trust-based effect
-            alignment_factors += alignment_strength * low_trust_amplification * (1.0 - clipped_trust)
-
-            # Cap the maximum alignment factor
-            alignment_factors = np.clip(alignment_factors, 0.0, 3.0)
-
-            # Calculate the difference between human beliefs and AI sensed values
-            belief_differences = human_vals - sensed_vals
-
-            # Apply proportional adjustments based on alignment factors
-            adjustments = alignment_factors * belief_differences
-
-            # Apply adjustments to sensed values
-            corrected = np.round(sensed_vals + adjustments)
-            corrected = np.clip(corrected, 0, 5)  # Keep values in valid range
+        # Simple linear interpolation: corrected = (1 - α) * sensed + α * human
+        corrected = np.round((1.0 - alignment_strength) * sensed_vals + alignment_strength * human_vals)
+        corrected = np.clip(corrected, 0, 5)  # Keep values in valid range [0, 5]
 
         # Build the report dictionary with aligned values
         for i, cell in enumerate(valid_cells_in_query):
@@ -2289,17 +2353,71 @@ class DisasterModel(Model):
             plt.close()
 
     def update_disaster(self):
+        """
+        FIX #6: Implement disaster_dynamics parameter
+        - dynamics = 1: Stable environment (shocks decay, rare new shocks)
+        - dynamics = 2: Medium environment (balanced)
+        - dynamics = 3: Volatile environment (frequent new shocks + aftershocks)
+        """
         # Store a copy of the current grid before updating
         if self.disaster_grid is not None:
             self.previous_grid = self.disaster_grid.copy()
         else:
             self.previous_grid = None
 
-        # Replace this with your actual update_disaster logic
-        # Example placeholder: Create a hotspot with some probability
-        if random.random() < 0.1:  # 10% chance each tick
-            x, y = np.random.randint(0, self.disaster_grid.shape[0]), np.random.randint(0, self.disaster_grid.shape[1])
-            self.disaster_grid[x, y] = min(5, self.disaster_grid[x, y] + 3)
+        # Disaster dynamics based on parameter
+        if self.disaster_dynamics == 1:
+            # STABLE: Decay shocks, rare new events
+            # Apply decay to all cells
+            decay_prob = 0.3  # 30% of cells may decay
+            for x in range(self.width):
+                for y in range(self.height):
+                    if self.disaster_grid[x, y] > 0 and random.random() < decay_prob:
+                        self.disaster_grid[x, y] = max(0, self.disaster_grid[x, y] - 1)
+
+            # Rare new shock
+            if random.random() < self.shock_probability * 0.3:  # 30% of base shock rate
+                x, y = random.randint(0, self.width-1), random.randint(0, self.height-1)
+                shock_level = min(5, self.shock_magnitude)
+                self.disaster_grid[x, y] = min(5, self.disaster_grid[x, y] + shock_level)
+
+        elif self.disaster_dynamics == 2:
+            # MEDIUM: Balanced - some decay, moderate new shocks
+            # Apply moderate decay
+            decay_prob = 0.15  # 15% of cells may decay
+            for x in range(self.width):
+                for y in range(self.height):
+                    if self.disaster_grid[x, y] > 0 and random.random() < decay_prob:
+                        self.disaster_grid[x, y] = max(0, self.disaster_grid[x, y] - 1)
+
+            # Normal shock probability
+            if random.random() < self.shock_probability:
+                x, y = random.randint(0, self.width-1), random.randint(0, self.height-1)
+                shock_level = min(5, self.shock_magnitude)
+                self.disaster_grid[x, y] = min(5, self.disaster_grid[x, y] + shock_level)
+
+        elif self.disaster_dynamics == 3:
+            # VOLATILE: Minimal decay, frequent new shocks + aftershocks
+            # Minimal decay
+            decay_prob = 0.05  # Only 5% of cells may decay
+            for x in range(self.width):
+                for y in range(self.height):
+                    if self.disaster_grid[x, y] > 0 and random.random() < decay_prob:
+                        self.disaster_grid[x, y] = max(0, self.disaster_grid[x, y] - 1)
+
+            # Frequent new shocks (2x base rate)
+            if random.random() < self.shock_probability * 2.0:
+                x, y = random.randint(0, self.width-1), random.randint(0, self.height-1)
+                shock_level = min(5, self.shock_magnitude)
+                self.disaster_grid[x, y] = min(5, self.disaster_grid[x, y] + shock_level)
+
+                # Aftershocks: spread to nearby cells
+                for dx, dy in [(0,1), (1,0), (0,-1), (-1,0)]:
+                    nx, ny = x + dx, y + dy
+                    if 0 <= nx < self.width and 0 <= ny < self.height:
+                        if random.random() < 0.5:  # 50% chance of aftershock in adjacent cell
+                            aftershock_level = max(1, shock_level - 1)
+                            self.disaster_grid[nx, ny] = min(5, self.disaster_grid[nx, ny] + aftershock_level)
 
         # Detect significant changes
         if self.previous_grid is not None:
