@@ -1,8 +1,9 @@
 
-# Install mesa if not already installed
-!pip install mesa
+# NOTE: Install mesa before importing this module:
+# In Colab: !pip install mesa
+# Locally: pip install mesa
 
-# Mount Google Drive FIRST (for Colab)
+# Mount Google Drive (for Colab - optional)
 try:
     from google.colab import drive
     drive.mount('/content/drive')
