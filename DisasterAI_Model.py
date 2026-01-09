@@ -1929,9 +1929,10 @@ class DisasterModel(Model):
 
         for agent in self.humans.values(): # Iterate through all human agents
             agent.friends = set(f"H_{j}" for j in self.social_network.neighbors(agent.id_num) if f"H_{j}" in self.humans)
-            agent.q_table['self_action'] = 0.0 # Q-value for acting on own belief
+            # FIX #4: No longer adding individual source Q-values
+            # Q-table already initialized with only {'human': 0.05, 'ai': 0.0} in __init__
 
-            # Initialize trust/Q for other humans
+            # Initialize trust for other humans (trust is still per-source, Q-values are generic)
             for other_id in all_human_ids:
                 if agent.unique_id == other_id: continue # Skip self
 
@@ -1939,13 +1940,13 @@ class DisasterModel(Model):
                 if other_id in agent.friends:
                     initial_t = min(1.0, initial_t + 0.1) # Friend boost
                 agent.trust[other_id] = initial_t
-                agent.q_table[other_id] = default_q_value # Initialize Q for this specific human
+                # Removed: agent.q_table[other_id] = default_q_value
 
-            # Initialize trust/Q for AI agents
+            # Initialize trust for AI agents
             for ai_id in all_ai_ids:
                 initial_ai_t = random.uniform(base_ai_trust_val - 0.1, base_ai_trust_val + 0.1)
                 agent.trust[ai_id] = max(0.0, min(1.0, initial_ai_t))
-                agent.q_table[ai_id] = default_q_value # Initialize Q for this specific AI
+                # Removed: agent.q_table[ai_id] = default_q_value
 
 
 
