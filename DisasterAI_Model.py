@@ -271,6 +271,53 @@ class HumanAgent(Agent):
         # No AI has knowledge - pick random
         return f"A_{random.randrange(self.model.num_ai)}"
 
+    def find_highest_uncertainty_area(self):
+        """
+        Explorer seeks areas with highest combined uncertainty.
+        Combined metric: 60% low confidence + 40% spatial variance (neighborhood disagreement).
+        Returns a cell from top-5 uncertain areas for exploration diversity.
+        """
+        scored_cells = []
+
+        for cell, belief in self.beliefs.items():
+            if not isinstance(belief, dict):
+                continue
+
+            # Component 1: Low confidence (60% weight)
+            conf_uncertainty = 1.0 - belief.get('confidence', 0.1)
+
+            # Component 2: Spatial variance - disagreement among neighbors (40% weight)
+            neighbors = self.model.grid.get_neighborhood(cell, moore=True, radius=1, include_center=False)
+            neighbor_levels = []
+            for n in neighbors:
+                if n in self.beliefs and isinstance(self.beliefs[n], dict):
+                    neighbor_levels.append(self.beliefs[n].get('level', 0))
+
+            if len(neighbor_levels) > 1:
+                # Calculate variance of neighbor beliefs
+                mean_level = sum(neighbor_levels) / len(neighbor_levels)
+                spatial_var = sum((lvl - mean_level) ** 2 for lvl in neighbor_levels) / len(neighbor_levels)
+                # Normalize variance (max theoretical variance for levels 0-5 is 6.25)
+                normalized_var = min(1.0, spatial_var / 6.25)
+            else:
+                # No neighbors with beliefs = high uncertainty
+                normalized_var = 0.5
+
+            # Combined uncertainty score
+            uncertainty = 0.6 * conf_uncertainty + 0.4 * normalized_var
+            scored_cells.append((cell, uncertainty))
+
+        if not scored_cells:
+            # Fallback to current position if no beliefs
+            return self.pos
+
+        # Sort by uncertainty descending
+        scored_cells.sort(key=lambda x: -x[1])
+
+        # Return from top-5 uncertain cells (adds exploration diversity)
+        top_k = scored_cells[:5]
+        return random.choice(top_k)[0]
+
     def apply_confidence_decay(self):
         """Apply confidence decay with more stability and cell-specific rates."""
         base_decay_rate = 0.0003 if self.agent_type == "exploitative" else 0.0005  # Higher for exploratory
@@ -328,6 +375,43 @@ class HumanAgent(Agent):
                 return source_agent.report_beliefs(interest_point, query_radius)
         return {}
 
+    def reward_belief_accuracy(self, cell, actual_level):
+        """
+        Reward agent for having correct beliefs about a cell (separate from source quality).
+        This evaluates the agent's OWN assessment accuracy, updating self_action Q-value.
+        Called before belief is updated with new sensory data.
+        """
+        prior_belief = self.beliefs.get(cell, {})
+        if not isinstance(prior_belief, dict):
+            return  # No prior belief to evaluate
+
+        prior_level = prior_belief.get('level', 0)
+        prior_confidence = prior_belief.get('confidence', 0.1)
+
+        # Only evaluate if agent had meaningful confidence in prior belief
+        if prior_confidence < 0.3:
+            return  # Too uncertain to count as a real assessment
+
+        # Calculate belief accuracy reward
+        belief_error = abs(prior_level - actual_level)
+        if belief_error == 0:
+            belief_reward = 0.4   # Perfect belief
+        elif belief_error == 1:
+            belief_reward = 0.1   # Close
+        elif belief_error == 2:
+            belief_reward = -0.1  # Moderate error
+        else:
+            belief_reward = -0.3  # Large error
+
+        # Scale reward by confidence (more confident = higher stakes)
+        belief_reward *= prior_confidence
+
+        # Update self_action Q-value (rewards good internal model)
+        learning_rate = 0.1 if self.agent_type == "exploratory" else 0.08
+        old_q = self.q_table.get("self_action", 0.0)
+        new_q = old_q + learning_rate * (belief_reward - old_q)
+        self.q_table["self_action"] = new_q
+
     def sense_environment(self):
         pos = self.pos
         radius = 2  # Same for both agent types - behavioral differences should be in information-seeking, not perception
@@ -335,6 +419,11 @@ class HumanAgent(Agent):
         for cell in cells:
             if 0 <= cell[0] < self.model.width and 0 <= cell[1] < self.model.height:
                 actual = self.model.disaster_grid[cell[0], cell[1]]
+
+                # Issue 2 FIX: Reward agent's own belief accuracy BEFORE updating belief
+                # This is separate from source quality - evaluates agent's internal model
+                self.reward_belief_accuracy(cell, actual)
+
                 noise_roll = random.random()
                 noise_threshold = 0.08
 
@@ -413,19 +502,40 @@ class HumanAgent(Agent):
                 continue
 
             # Within window: evaluate information quality
-            # Calculate accuracy based on how close reported level was to actual
+            # Calculate ACCURACY score: how close was reported level to actual ground truth
             level_error = abs(reported_level - actual_level)
-
-            # Accuracy-based reward - scaled to be comparable to relief outcomes
-            # Info quality should be FAST and STRONG signal for learning
             if level_error == 0:
-                accuracy_reward = 0.5  # Perfect accuracy - strong positive
+                accuracy_score = 1.0   # Perfect accuracy
             elif level_error == 1:
-                accuracy_reward = 0.2  # Close - moderate positive
+                accuracy_score = 0.5   # Close
             elif level_error == 2:
-                accuracy_reward = -0.3  # Moderate error - significant penalty
+                accuracy_score = -0.2  # Moderate error
             else:
-                accuracy_reward = -0.7  # Large error - strong penalty
+                accuracy_score = -0.6  # Large error
+
+            # Calculate CONFIRMATION score: how close was reported level to agent's PRIOR belief
+            prior_belief = self.beliefs.get(cell, {})
+            prior_level = prior_belief.get('level', 0) if isinstance(prior_belief, dict) else 0
+            prior_error = abs(reported_level - prior_level)
+            if prior_error == 0:
+                confirmation_score = 1.0   # Perfect confirmation of prior
+            elif prior_error == 1:
+                confirmation_score = 0.5   # Close to prior
+            elif prior_error == 2:
+                confirmation_score = -0.2  # Contradicts prior moderately
+            else:
+                confirmation_score = -0.6  # Strongly contradicts prior
+
+            # Weighted combination by agent type:
+            # Exploiters value CONFIRMATION over accuracy (0.8/0.2)
+            # Explorers value ACCURACY over confirmation (0.8/0.2)
+            if self.agent_type == "exploitative":
+                combined_reward = 0.8 * confirmation_score + 0.2 * accuracy_score
+            else:
+                combined_reward = 0.8 * accuracy_score + 0.2 * confirmation_score
+
+            # Scale to [-0.7, +0.5] range to match existing Q-update expectations
+            accuracy_reward = combined_reward * 0.6 - 0.1
 
             # Determine mode from source_id (map to high-level modes)
             if source_id.startswith("H_"):
@@ -933,35 +1043,16 @@ class HumanAgent(Agent):
                                 print(f"Agent {self.unique_id}: Using random fallback interest point {interest_point}")
 
             else:  # Exploratory
-                # CRITICAL FIX: Query about current vicinity so info can be evaluated when sensing
-                # Info quality feedback requires querying about cells that will be sensed (radius=2)
-                # Querying about distant exploration targets means no feedback overlap!
-                interest_point = self.pos  # Query about where we are NOW
-                query_radius = 2  # Match sensing radius for evaluation overlap
+                # Explorers seek HIGH UNCERTAINTY areas - not just their current position
+                # This enables them to gather information about poorly understood regions
+                interest_point = self.find_highest_uncertainty_area()
+                query_radius = 2  # Standard query radius
 
-                # Add robust fallback mechanism
+                # Fallback if uncertainty search fails
                 if not interest_point:
-                    # Try finding highest confidence cells
-                    max_conf = -1
-                    highest_conf_cells = []
-
-                    if len(self.beliefs) > 0:
-                        for cell, belief_info in self.beliefs.items():
-                            if isinstance(belief_info, dict):
-                                conf = belief_info.get('confidence', 0.0)
-                                if conf > max_conf:
-                                    max_conf = conf
-                                    highest_conf_cells = [cell]
-                                elif conf == max_conf:
-                                    highest_conf_cells.append(cell)
-
-                    if highest_conf_cells:
-                        interest_point = random.choice(highest_conf_cells)
-                    else:
-                        # Absolute fallback: pick a random cell
-                        interest_point = (random.randrange(self.model.width), random.randrange(self.model.height))
-                        if self.model.debug_mode:
-                            print(f"Agent {self.unique_id}: Using random fallback interest point {interest_point}")
+                    interest_point = self.pos
+                    if self.model.debug_mode:
+                        print(f"Agent {self.unique_id}: Uncertainty search failed, using current position")
 
             # Final safety check
             if not interest_point:
@@ -1403,15 +1494,47 @@ class HumanAgent(Agent):
 
         return total_reward
 
-    def step(self):
+    # =========================================================================
+    # AGENT STEP: Three-Phase Decision Cycle
+    # =========================================================================
+    # Phase 1 (OBSERVE): sense_environment() - Agent observes local area
+    # Phase 2 (REQUEST): seek_information() - Agent requests info to confirm (exploit) or explore (explore)
+    # Phase 3 (DECIDE):  send_relief() - Agent decides where to send relief based on beliefs
+    # =========================================================================
+
+    def phase_observe(self):
+        """Phase 1: OBSERVE - Sense local environment and update beliefs from direct perception."""
         self.sense_environment()
+
+    def phase_request(self):
+        """Phase 2: REQUEST - Seek additional information from humans or AI.
+        - Exploiters query around believed epicenter (confirmation-seeking)
+        - Explorers query high-uncertainty areas (information-seeking)
+        """
         self.seek_information()
+
+    def phase_decide(self):
+        """Phase 3: DECIDE - Send relief based on current beliefs."""
         self.send_relief()
+
+    def step(self):
+        """Execute the three-phase decision cycle: Observe → Request → Decide"""
+        # Phase 1: OBSERVE - sense local environment
+        self.phase_observe()
+
+        # Phase 2: REQUEST - seek additional information
+        self.phase_request()
+
+        # Phase 3: DECIDE - send relief based on beliefs
+        self.phase_decide()
+
+        # Process delayed feedback from previous relief decisions
         reward = self.process_reward()
 
-        self.update_trust_for_accuracy() # Add direct trust update for accurate information
-        self.apply_trust_decay() # Apply slow trust decay to all relationships
-        self.apply_confidence_decay() # Apply slow decay to confidence
+        # Maintenance: update trust and apply decay
+        self.update_trust_for_accuracy()
+        self.apply_trust_decay()
+        self.apply_confidence_decay()
         #confidence_decay_rate = 0.005 # Start very small and tune
 
         #confidence decay
