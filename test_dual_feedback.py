@@ -77,6 +77,7 @@ def run_test(ai_alignment, test_name):
     info_feedback_counts = {'exploratory': 0, 'exploitative': 0}
     relief_feedback_counts = {'exploratory': 0, 'exploitative': 0}
     feedback_timeline = {'info': [], 'relief': []}  # (tick, agent_type, event_type)
+    belief_accuracy = {'exploratory': [], 'exploitative': []}  # MAE every 10 ticks
 
     # Select sample agents
     sample_agents = {}
@@ -143,6 +144,24 @@ def run_test(ai_alignment, test_name):
                                 ai_usage_by_tick['exploitative'].append(tick)
                             break
 
+        # Collect belief accuracy (MAE) every 10 ticks
+        if tick % 10 == 0:
+            for agent_type_label in ['exploratory', 'exploitative']:
+                errors = []
+                for agent in model.agent_list:
+                    if isinstance(agent, HumanAgent) and agent.agent_type == agent_type_label:
+                        mae = 0
+                        count = 0
+                        for cell, belief_info in agent.beliefs.items():
+                            if isinstance(belief_info, dict):
+                                belief_level = belief_info.get('level', 0)
+                                true_level = model.disaster_grid[cell]
+                                mae += abs(belief_level - true_level)
+                                count += 1
+                        if count > 0:
+                            errors.append(mae / count)
+                belief_accuracy[agent_type_label].append(np.mean(errors) if errors else 0)
+
     print(f"\nFeedback Event Summary:")
     print(f"  Exploratory - Info Quality: {info_feedback_counts['exploratory']}, Relief Outcome: {relief_feedback_counts['exploratory']}")
     print(f"  Exploitative - Info Quality: {info_feedback_counts['exploitative']}, Relief Outcome: {relief_feedback_counts['exploitative']}")
@@ -154,6 +173,7 @@ def run_test(ai_alignment, test_name):
         'info_counts': info_feedback_counts,
         'relief_counts': relief_feedback_counts,
         'feedback_timeline': feedback_timeline,
+        'belief_accuracy': belief_accuracy,
         'sample_agents': sample_agents,
         'model': model
     }
@@ -277,48 +297,40 @@ def visualize_results(results_high, results_low):
     ax6.legend(fontsize=8)
     ax6.grid(True, alpha=0.3, axis='y')
 
-    # 7. Final Q-Value Comparison
+    # 7. Belief Accuracy (MAE) Evolution
     ax7 = plt.subplot(3, 3, 7)
+    for label, results, color in [('High (0.9)', results_high, 'orange'), ('Low (0.1)', results_low, 'green')]:
+        for agent_type in ['exploratory', 'exploitative']:
+            data = results['belief_accuracy'][agent_type]
+            ticks = list(range(0, len(data) * 10, 10))
+            ls = '-' if agent_type == 'exploratory' else '--'
+            ax7.plot(ticks, data, linestyle=ls, color=color, linewidth=1.5, alpha=0.8,
+                     label=f"{label} {agent_type[:6]}")
+    ax7.set_title('Belief Accuracy (MAE) Evolution\n(Lower = More accurate beliefs)', fontsize=10, fontweight='bold')
+    ax7.set_xlabel('Tick')
+    ax7.set_ylabel('Mean Absolute Error')
+    ax7.legend(fontsize=7, loc='best')
+    ax7.grid(True, alpha=0.3)
+
+    # 8. Final Q-Value Comparison (both conditions)
+    ax8 = plt.subplot(3, 3, 8)
     sources = ['ai', 'human', 'self']
     explor_high = [
         results_high['q_values']['exploratory']['ai'][-1],
         results_high['q_values']['exploratory']['human'][-1],
         results_high['q_values']['exploratory']['self_action'][-1]
     ]
-    exploit_high = [
-        results_high['q_values']['exploitative']['ai'][-1],
-        results_high['q_values']['exploitative']['human'][-1],
-        results_high['q_values']['exploitative']['self_action'][-1]
-    ]
-
-    x = np.arange(len(sources))
-    width = 0.35
-    ax7.bar(x - width/2, explor_high, width, label='Exploratory', alpha=0.8, color='blue')
-    ax7.bar(x + width/2, exploit_high, width, label='Exploitative', alpha=0.8, color='red')
-    ax7.set_title('Final Q-Values\nHigh Alignment (0.9)', fontsize=10, fontweight='bold')
-    ax7.set_ylabel('Q-Value')
-    ax7.set_xticks(x)
-    ax7.set_xticklabels(sources, fontsize=8)
-    ax7.legend(fontsize=8)
-    ax7.grid(True, alpha=0.3, axis='y')
-    ax7.axhline(y=0, color='k', linestyle=':', alpha=0.3)
-
-    # 8. Final Q-Value Comparison (Low Alignment)
-    ax8 = plt.subplot(3, 3, 8)
     explor_low = [
         results_low['q_values']['exploratory']['ai'][-1],
         results_low['q_values']['exploratory']['human'][-1],
         results_low['q_values']['exploratory']['self_action'][-1]
     ]
-    exploit_low = [
-        results_low['q_values']['exploitative']['ai'][-1],
-        results_low['q_values']['exploitative']['human'][-1],
-        results_low['q_values']['exploitative']['self_action'][-1]
-    ]
 
-    ax8.bar(x - width/2, explor_low, width, label='Exploratory', alpha=0.8, color='blue')
-    ax8.bar(x + width/2, exploit_low, width, label='Exploitative', alpha=0.8, color='red')
-    ax8.set_title('Final Q-Values\nLow Alignment (0.1)', fontsize=10, fontweight='bold')
+    x = np.arange(len(sources))
+    width = 0.35
+    ax8.bar(x - width/2, explor_high, width, label='High Align (0.9)', alpha=0.8, color='orange')
+    ax8.bar(x + width/2, explor_low, width, label='Low Align (0.1)', alpha=0.8, color='green')
+    ax8.set_title('Final Q-Values: Exploratory\n(Cross-condition comparison)', fontsize=10, fontweight='bold')
     ax8.set_ylabel('Q-Value')
     ax8.set_xticks(x)
     ax8.set_xticklabels(sources, fontsize=8)
@@ -330,25 +342,29 @@ def visualize_results(results_high, results_low):
     ax9 = plt.subplot(3, 3, 9)
     ax9.axis('off')
 
+    mae_high_explor = results_high['belief_accuracy']['exploratory'][-1] if results_high['belief_accuracy']['exploratory'] else 0
+    mae_high_exploit = results_high['belief_accuracy']['exploitative'][-1] if results_high['belief_accuracy']['exploitative'] else 0
+    mae_low_explor = results_low['belief_accuracy']['exploratory'][-1] if results_low['belief_accuracy']['exploratory'] else 0
+    mae_low_exploit = results_low['belief_accuracy']['exploitative'][-1] if results_low['belief_accuracy']['exploitative'] else 0
+
     summary_text = f"""
     DUAL-TIMELINE FEEDBACK TEST SUMMARY
 
     High Alignment (0.9) - Confirming AI:
-    ├─ Exploratory: Info={results_high['info_counts']['exploratory']}, Relief={results_high['relief_counts']['exploratory']}
-    ├─ Exploitative: Info={results_high['info_counts']['exploitative']}, Relief={results_high['relief_counts']['exploitative']}
-    └─ Final Q: AI={explor_high[0]:.3f}, Human={explor_high[1]:.3f}
+    ├─ Info/Relief: Explor={results_high['info_counts']['exploratory']}/{results_high['relief_counts']['exploratory']}, Exploit={results_high['info_counts']['exploitative']}/{results_high['relief_counts']['exploitative']}
+    ├─ Final Q(AI): Explor={explor_high[0]:.3f}, Low={explor_low[0]:.3f}
+    └─ Final MAE: Explor={mae_high_explor:.3f}, Exploit={mae_high_exploit:.3f}
 
     Low Alignment (0.1) - Truthful AI:
-    ├─ Exploratory: Info={results_low['info_counts']['exploratory']}, Relief={results_low['relief_counts']['exploratory']}
-    ├─ Exploitative: Info={results_low['info_counts']['exploitative']}, Relief={results_low['relief_counts']['exploitative']}
-    └─ Final Q: AI={explor_low[0]:.3f}, Human={explor_low[1]:.3f}
+    ├─ Info/Relief: Explor={results_low['info_counts']['exploratory']}/{results_low['relief_counts']['exploratory']}, Exploit={results_low['info_counts']['exploitative']}/{results_low['relief_counts']['exploitative']}
+    ├─ Final Q(AI): Explor={explor_low[0]:.3f}
+    └─ Final MAE: Explor={mae_low_explor:.3f}, Exploit={mae_low_exploit:.3f}
 
     Key Findings:
-    • Mode structure: self/human/ai (3 high-level categories)
-    • Agents learn source CATEGORIES through experience
-    • Info feedback is faster & more frequent for exploratory
-    • Relief feedback has longer delay (15-25 ticks)
-    • Human Q-value should now update properly!
+    • Info feedback: fast (3-15 ticks), relief: slow (15-25 ticks)
+    • MAE shows whether learning improves actual beliefs
+    • Truthful AI should yield lower MAE (more accurate)
+    • Confirming AI should yield higher MAE (less accurate)
     """
 
     ax9.text(0.1, 0.5, summary_text, fontsize=9, family='monospace',
