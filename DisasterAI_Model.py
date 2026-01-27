@@ -1044,9 +1044,30 @@ class HumanAgent(Agent):
 
             else:  # Exploratory
                 # Explorers seek HIGH UNCERTAINTY areas - not just their current position
-                # This enables them to gather information about poorly understood regions
-                interest_point = self.find_highest_uncertainty_area()
-                query_radius = 2  # Standard query radius
+                # This enables them to gather information about poorly understood regions.
+                # However, they must also query locally sometimes so that info quality
+                # feedback can fire (requires sensing the queried cell within 3-15 ticks,
+                # and agents don't move, so remote queries can never be verified).
+                # Mix: 70% remote high-uncertainty, 30% local (within sensing radius)
+                query_radius = 2
+                if random.random() < 0.3:
+                    # Local query: pick highest-uncertainty cell within sensing radius
+                    local_cells = self.model.grid.get_neighborhood(
+                        self.pos, moore=True, radius=2, include_center=True)
+                    best_cell = None
+                    best_unc = -1
+                    for cell in local_cells:
+                        if cell in self.beliefs and isinstance(self.beliefs[cell], dict):
+                            unc = 1.0 - self.beliefs[cell].get('confidence', 0.1)
+                        else:
+                            unc = 0.9  # Unknown cell = high uncertainty
+                        if unc > best_unc:
+                            best_unc = unc
+                            best_cell = cell
+                    interest_point = best_cell if best_cell else self.pos
+                else:
+                    # Remote query: seek high-uncertainty areas across the grid
+                    interest_point = self.find_highest_uncertainty_area()
 
                 # Fallback if uncertainty search fails
                 if not interest_point:
