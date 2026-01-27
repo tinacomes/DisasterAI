@@ -479,9 +479,12 @@ class HumanAgent(Agent):
 
     def evaluate_information_quality(self, cell, actual_level):
         """
-        Evaluate pending information about a cell when directly observed.
+        Evaluate pending information about a cell against a reference level.
+        Called in two contexts:
+        1. Direct sensing: actual_level is ground truth from the environment
+        2. Cross-referencing: actual_level is from a high-confidence belief (>=0.6),
+           allowing agents to verify remote queries without physically visiting the cell.
         Provides fast feedback (3-15 tick window) on information accuracy.
-        Wider window to accommodate different agent movement patterns.
         """
         current_tick = self.model.tick
         evaluated = []
@@ -951,6 +954,21 @@ class HumanAgent(Agent):
                 if self.model.debug_mode and hasattr(self, 'id_num') and (self.id_num < 2 or (50 <= self.id_num < 52)):
                     print(f"[DEBUG] Agent {self.unique_id} ({self.agent_type}) added pending info eval: tick={self.model.tick}, source={source_id}, cell={cell}, reported={reported_level}")
 
+                # CROSS-REFERENCE EVALUATION: Agents verify information by comparing
+                # against their existing high-confidence beliefs (from prior sensing or
+                # trusted sources), not just by direct sensing. This is how people
+                # actually evaluate info quality — they cross-check against what they
+                # already know from multiple sources. Without this, agents that query
+                # remote cells (especially explorers) can never get info feedback because
+                # they don't move and can't sense those cells.
+                existing_belief = self.beliefs.get(cell, {})
+                if isinstance(existing_belief, dict):
+                    belief_conf = existing_belief.get('confidence', 0.0)
+                    if belief_conf >= 0.6:
+                        # Use high-confidence belief as reference for evaluation
+                        reference_level = existing_belief.get('level', 0)
+                        self.evaluate_information_quality(cell, reference_level)
+
             # Track AI source information for later trust updates
             is_ai_source = hasattr(self, 'ai_info_sources') and cell in self.ai_info_sources
             if is_ai_source and significant_change:
@@ -1044,30 +1062,9 @@ class HumanAgent(Agent):
 
             else:  # Exploratory
                 # Explorers seek HIGH UNCERTAINTY areas - not just their current position
-                # This enables them to gather information about poorly understood regions.
-                # However, they must also query locally sometimes so that info quality
-                # feedback can fire (requires sensing the queried cell within 3-15 ticks,
-                # and agents don't move, so remote queries can never be verified).
-                # Mix: 70% remote high-uncertainty, 30% local (within sensing radius)
-                query_radius = 2
-                if random.random() < 0.3:
-                    # Local query: pick highest-uncertainty cell within sensing radius
-                    local_cells = self.model.grid.get_neighborhood(
-                        self.pos, moore=True, radius=2, include_center=True)
-                    best_cell = None
-                    best_unc = -1
-                    for cell in local_cells:
-                        if cell in self.beliefs and isinstance(self.beliefs[cell], dict):
-                            unc = 1.0 - self.beliefs[cell].get('confidence', 0.1)
-                        else:
-                            unc = 0.9  # Unknown cell = high uncertainty
-                        if unc > best_unc:
-                            best_unc = unc
-                            best_cell = cell
-                    interest_point = best_cell if best_cell else self.pos
-                else:
-                    # Remote query: seek high-uncertainty areas across the grid
-                    interest_point = self.find_highest_uncertainty_area()
+                # This enables them to gather information about poorly understood regions
+                interest_point = self.find_highest_uncertainty_area()
+                query_radius = 2  # Standard query radius
 
                 # Fallback if uncertainty search fails
                 if not interest_point:
