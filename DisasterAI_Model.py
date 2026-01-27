@@ -479,9 +479,12 @@ class HumanAgent(Agent):
 
     def evaluate_information_quality(self, cell, actual_level):
         """
-        Evaluate pending information about a cell when directly observed.
+        Evaluate pending information about a cell against a reference level.
+        Called in two contexts:
+        1. Direct sensing: actual_level is ground truth from the environment
+        2. Cross-referencing: actual_level is from a high-confidence belief (>=0.6),
+           allowing agents to verify remote queries without physically visiting the cell.
         Provides fast feedback (3-15 tick window) on information accuracy.
-        Wider window to accommodate different agent movement patterns.
         """
         current_tick = self.model.tick
         evaluated = []
@@ -950,6 +953,21 @@ class HumanAgent(Agent):
                 # DEBUG: Track pending info evaluations
                 if self.model.debug_mode and hasattr(self, 'id_num') and (self.id_num < 2 or (50 <= self.id_num < 52)):
                     print(f"[DEBUG] Agent {self.unique_id} ({self.agent_type}) added pending info eval: tick={self.model.tick}, source={source_id}, cell={cell}, reported={reported_level}")
+
+                # CROSS-REFERENCE EVALUATION: Agents verify information by comparing
+                # against their existing high-confidence beliefs (from prior sensing or
+                # trusted sources), not just by direct sensing. This is how people
+                # actually evaluate info quality — they cross-check against what they
+                # already know from multiple sources. Without this, agents that query
+                # remote cells (especially explorers) can never get info feedback because
+                # they don't move and can't sense those cells.
+                existing_belief = self.beliefs.get(cell, {})
+                if isinstance(existing_belief, dict):
+                    belief_conf = existing_belief.get('confidence', 0.0)
+                    if belief_conf >= 0.6:
+                        # Use high-confidence belief as reference for evaluation
+                        reference_level = existing_belief.get('level', 0)
+                        self.evaluate_information_quality(cell, reference_level)
 
             # Track AI source information for later trust updates
             is_ai_source = hasattr(self, 'ai_info_sources') and cell in self.ai_info_sources
