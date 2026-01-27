@@ -595,6 +595,118 @@ class HumanAgent(Agent):
         if self.model.debug_mode and hasattr(self, 'id_num') and (self.id_num < 2 or (50 <= self.id_num < 52)) and self.model.tick % 10 == 0:
             print(f"[DEBUG] Agent {self.unique_id} ({self.agent_type}) tick={self.model.tick}: {len(self.pending_info_evaluations)} pending evals")
 
+    def evaluate_pending_info(self):
+        """
+        Dedicated pass to evaluate ALL pending info evaluations using current beliefs.
+        Called each tick after both sense_environment() and seek_information() have run,
+        so beliefs are up-to-date from both direct sensing and queried reports.
+
+        This decouples info feedback from sensing: agents don't need to physically
+        visit a cell to evaluate whether the info they received about it was good.
+        They cross-reference against their current belief (which may come from
+        sensing, other queries, or accumulated knowledge).
+        """
+        if not self.pending_info_evaluations:
+            return
+
+        current_tick = self.model.tick
+        evaluated = []
+
+        for tick_received, source_id, cell, reported_level in self.pending_info_evaluations:
+            ticks_elapsed = current_tick - tick_received
+
+            # Too old — expire without evaluation
+            if ticks_elapsed > 15:
+                evaluated.append((tick_received, source_id, cell, reported_level))
+                continue
+
+            # Too soon — wait for beliefs to stabilize
+            if ticks_elapsed < 3:
+                continue
+
+            # Within evaluation window: use current belief as reference
+            belief = self.beliefs.get(cell, {})
+            if not isinstance(belief, dict):
+                continue
+
+            belief_conf = belief.get('confidence', 0.0)
+            # Require moderate confidence to evaluate (sensing gives >=0.5)
+            if belief_conf < 0.4:
+                continue
+
+            reference_level = belief.get('level', 0)
+
+            # --- Accuracy score ---
+            level_error = abs(reported_level - reference_level)
+            if level_error == 0:
+                accuracy_score = 1.0
+            elif level_error == 1:
+                accuracy_score = 0.5
+            elif level_error == 2:
+                accuracy_score = -0.2
+            else:
+                accuracy_score = -0.6
+
+            # --- Confirmation score ---
+            prior_belief = self.beliefs.get(cell, {})
+            prior_level = prior_belief.get('level', 0) if isinstance(prior_belief, dict) else 0
+            prior_error = abs(reported_level - prior_level)
+            if prior_error == 0:
+                confirmation_score = 1.0
+            elif prior_error == 1:
+                confirmation_score = 0.5
+            elif prior_error == 2:
+                confirmation_score = -0.2
+            else:
+                confirmation_score = -0.6
+
+            # Weighted combination by agent type
+            if self.agent_type == "exploitative":
+                combined_reward = 0.8 * confirmation_score + 0.2 * accuracy_score
+            else:
+                combined_reward = 0.8 * accuracy_score + 0.2 * confirmation_score
+
+            accuracy_reward = combined_reward * 0.6 - 0.1
+
+            # Determine mode from source_id
+            if source_id.startswith("H_"):
+                mode = "human"
+            elif source_id.startswith("A_"):
+                mode = "ai"
+            else:
+                mode = None
+
+            # Update mode Q-value
+            if mode and mode in self.q_table:
+                old_mode_q = self.q_table[mode]
+                info_lr = 0.25 if self.agent_type == "exploratory" else 0.12
+                self.q_table[mode] = old_mode_q + info_lr * (accuracy_reward - old_mode_q)
+
+            # Update specific source Q-value
+            if source_id in self.q_table:
+                old_q = self.q_table[source_id]
+                info_lr = 0.25 if self.agent_type == "exploratory" else 0.12
+                self.q_table[source_id] = old_q + info_lr * (accuracy_reward - old_q)
+
+            # Update trust
+            if source_id in self.trust:
+                old_trust = self.trust[source_id]
+                trust_target = 0.5 + 0.5 * accuracy_reward
+                trust_lr = 0.15 if self.agent_type == "exploratory" else 0.08
+                new_trust = max(0.0, min(1.0, old_trust + trust_lr * (trust_target - old_trust)))
+                self.trust[source_id] = new_trust
+
+            evaluated.append((tick_received, source_id, cell, reported_level))
+
+            if self.model.debug_mode and hasattr(self, 'id_num') and (self.id_num < 2 or (50 <= self.id_num < 52)):
+                print(f"[DEBUG] Agent {self.unique_id} ({self.agent_type}) PENDING INFO EVAL: source={source_id}, mode={mode}, error={level_error}, reward={accuracy_reward:.3f}, ref_conf={belief_conf:.2f}")
+
+        # Remove evaluated/expired items
+        self.pending_info_evaluations = [
+            item for item in self.pending_info_evaluations
+            if item not in evaluated
+        ]
+
     def report_beliefs(self, interest_point, query_radius):
         """Reports human agent's beliefs about cells within query_radius of the interest_point."""
         report = {}
@@ -954,20 +1066,11 @@ class HumanAgent(Agent):
                 if self.model.debug_mode and hasattr(self, 'id_num') and (self.id_num < 2 or (50 <= self.id_num < 52)):
                     print(f"[DEBUG] Agent {self.unique_id} ({self.agent_type}) added pending info eval: tick={self.model.tick}, source={source_id}, cell={cell}, reported={reported_level}")
 
-                # CROSS-REFERENCE EVALUATION: Agents verify information by comparing
-                # against their existing high-confidence beliefs (from prior sensing or
-                # trusted sources), not just by direct sensing. This is how people
-                # actually evaluate info quality — they cross-check against what they
-                # already know from multiple sources. Without this, agents that query
-                # remote cells (especially explorers) can never get info feedback because
-                # they don't move and can't sense those cells.
-                existing_belief = self.beliefs.get(cell, {})
-                if isinstance(existing_belief, dict):
-                    belief_conf = existing_belief.get('confidence', 0.0)
-                    if belief_conf >= 0.6:
-                        # Use high-confidence belief as reference for evaluation
-                        reference_level = existing_belief.get('level', 0)
-                        self.evaluate_information_quality(cell, reference_level)
+                # NOTE: Cross-reference evaluation moved to evaluate_pending_info()
+                # which runs as a dedicated pass each tick after both sense and query.
+                # Previously this was called here on the same tick, but
+                # evaluate_information_quality requires ticks_elapsed >= 3, so
+                # same-tick cross-reference never actually worked.
 
             # Track AI source information for later trust updates
             is_ai_source = hasattr(self, 'ai_info_sources') and cell in self.ai_info_sources
@@ -1536,14 +1639,21 @@ class HumanAgent(Agent):
         self.send_relief()
 
     def step(self):
-        """Execute the three-phase decision cycle: Observe → Request → Decide"""
-        # Phase 1: OBSERVE - sense local environment
-        self.phase_observe()
-
-        # Phase 2: REQUEST - seek additional information
+        """Execute the three-phase decision cycle: Query → Sense → Decide
+        Querying is MANDATORY (agents must seek info each tick).
+        Sensing is supplementary (updates beliefs from local environment).
+        """
+        # Phase 1: REQUEST - seek information (MANDATORY, every tick)
         self.phase_request()
 
-        # Phase 3: DECIDE - send relief based on beliefs
+        # Phase 2: OBSERVE - sense local environment (supplementary)
+        self.phase_observe()
+
+        # Phase 3: Evaluate pending info quality against current beliefs
+        # (runs after both query and sense so beliefs are up-to-date)
+        self.evaluate_pending_info()
+
+        # Phase 4: DECIDE - send relief based on beliefs
         self.phase_decide()
 
         # Process delayed feedback from previous relief decisions
