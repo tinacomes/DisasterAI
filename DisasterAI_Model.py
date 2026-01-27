@@ -489,7 +489,13 @@ class HumanAgent(Agent):
         current_tick = self.model.tick
         evaluated = []
 
-        for tick_received, source_id, eval_cell, reported_level in self.pending_info_evaluations:
+        for item in self.pending_info_evaluations:
+            # Support both old (4-tuple) and new (6-tuple) format
+            if len(item) == 6:
+                tick_received, source_id, eval_cell, reported_level, _, _ = item
+            else:
+                tick_received, source_id, eval_cell, reported_level = item
+
             if eval_cell != cell:
                 continue
 
@@ -497,7 +503,7 @@ class HumanAgent(Agent):
             ticks_elapsed = current_tick - tick_received
             if ticks_elapsed > 15:
                 # Too old, remove from pending
-                evaluated.append((tick_received, source_id, eval_cell, reported_level))
+                evaluated.append(item)
                 continue
 
             if ticks_elapsed < 3:
@@ -517,8 +523,12 @@ class HumanAgent(Agent):
                 accuracy_score = -0.6  # Large error
 
             # Calculate CONFIRMATION score: how close was reported level to agent's PRIOR belief
-            prior_belief = self.beliefs.get(cell, {})
-            prior_level = prior_belief.get('level', 0) if isinstance(prior_belief, dict) else 0
+            # Use stored prior from tuple if available (uncontaminated by query update)
+            if len(item) == 6:
+                prior_level = item[4]  # stored_prior_level
+            else:
+                prior_belief = self.beliefs.get(cell, {})
+                prior_level = prior_belief.get('level', 0) if isinstance(prior_belief, dict) else 0
             prior_error = abs(reported_level - prior_level)
             if prior_error == 0:
                 confirmation_score = 1.0   # Perfect confirmation of prior
@@ -579,7 +589,7 @@ class HumanAgent(Agent):
                 self.trust[source_id] = new_trust
 
             # Mark as evaluated
-            evaluated.append((tick_received, source_id, eval_cell, reported_level))
+            evaluated.append(item)
 
             # DEBUG: Track info feedback
             if self.model.debug_mode and hasattr(self, 'id_num') and (self.id_num < 2 or (50 <= self.id_num < 52)):
@@ -612,12 +622,20 @@ class HumanAgent(Agent):
         current_tick = self.model.tick
         evaluated = []
 
-        for tick_received, source_id, cell, reported_level in self.pending_info_evaluations:
+        for item in self.pending_info_evaluations:
+            # Support both old (4-tuple) and new (6-tuple) format
+            if len(item) == 6:
+                tick_received, source_id, cell, reported_level, stored_prior_level, stored_prior_conf = item
+            else:
+                tick_received, source_id, cell, reported_level = item
+                stored_prior_level = None
+                stored_prior_conf = 0.0
+
             ticks_elapsed = current_tick - tick_received
 
             # Too old — expire without evaluation
             if ticks_elapsed > 15:
-                evaluated.append((tick_received, source_id, cell, reported_level))
+                evaluated.append(item)
                 continue
 
             # Too soon — wait for beliefs to stabilize
@@ -630,13 +648,35 @@ class HumanAgent(Agent):
                 continue
 
             belief_conf = belief.get('confidence', 0.0)
-            # Require moderate confidence to evaluate (sensing gives >=0.5)
-            if belief_conf < 0.4:
-                continue
-
             reference_level = belief.get('level', 0)
 
-            # --- Accuracy score ---
+            # CRITICAL FIX: Detect self-contaminated references.
+            # If the current belief was primarily set by the info being evaluated
+            # (reference matches reported and confidence hasn't increased from an
+            # independent source like direct sensing), skip this evaluation to
+            # prevent the echo chamber where incorrect info validates itself.
+            if stored_prior_level is not None:
+                # Check if belief changed since we received this info
+                # If reference == reported AND confidence didn't increase significantly
+                # from an independent source, the belief is self-contaminated
+                if (reference_level == reported_level and
+                    reference_level != stored_prior_level and
+                    belief_conf < 0.7):
+                    # Belief was shifted by this very report and hasn't been
+                    # independently confirmed (sensing gives conf >= 0.7)
+                    # Skip — can't cross-reference against self
+                    continue
+
+                # If belief hasn't changed at all from pre-query state AND
+                # confidence is still low, also require independent confirmation
+                if belief_conf < 0.4:
+                    continue
+            else:
+                # Legacy path: require moderate confidence
+                if belief_conf < 0.4:
+                    continue
+
+            # --- Accuracy score: reported vs current reference ---
             level_error = abs(reported_level - reference_level)
             if level_error == 0:
                 accuracy_score = 1.0
@@ -647,9 +687,8 @@ class HumanAgent(Agent):
             else:
                 accuracy_score = -0.6
 
-            # --- Confirmation score ---
-            prior_belief = self.beliefs.get(cell, {})
-            prior_level = prior_belief.get('level', 0) if isinstance(prior_belief, dict) else 0
+            # --- Confirmation score: reported vs STORED prior (uncontaminated) ---
+            prior_level = stored_prior_level if stored_prior_level is not None else reference_level
             prior_error = abs(reported_level - prior_level)
             if prior_error == 0:
                 confirmation_score = 1.0
@@ -696,7 +735,7 @@ class HumanAgent(Agent):
                 new_trust = max(0.0, min(1.0, old_trust + trust_lr * (trust_target - old_trust)))
                 self.trust[source_id] = new_trust
 
-            evaluated.append((tick_received, source_id, cell, reported_level))
+            evaluated.append(item)
 
             if self.model.debug_mode and hasattr(self, 'id_num') and (self.id_num < 2 or (50 <= self.id_num < 52)):
                 print(f"[DEBUG] Agent {self.unique_id} ({self.agent_type}) PENDING INFO EVAL: source={source_id}, mode={mode}, error={level_error}, reward={accuracy_reward:.3f}, ref_conf={belief_conf:.2f}")
@@ -1060,7 +1099,9 @@ class HumanAgent(Agent):
                     self.model.tick,
                     source_id,
                     cell,
-                    int(reported_level)  # The level reported by the source (NOT posterior)
+                    int(reported_level),  # The level reported by the source (NOT posterior)
+                    int(prior_level),     # Prior belief BEFORE this update (for uncontaminated cross-ref)
+                    float(prior_confidence)  # Prior confidence BEFORE this update
                 ))
                 # DEBUG: Track pending info evaluations
                 if self.model.debug_mode and hasattr(self, 'id_num') and (self.id_num < 2 or (50 <= self.id_num < 52)):
