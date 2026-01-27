@@ -327,6 +327,68 @@ def test_phase_structure():
 
 
 # ============================================================================
+# Test 5: Agents Always Query External Sources
+# ============================================================================
+
+def test_always_queries():
+    """
+    Verify that agents always query an external source (human or AI) at each step.
+    Track query mode distribution and feedback event counts over a short run.
+    """
+    print("\n--- Test 5: Agents Always Query External Sources ---")
+
+    params = base_params.copy()
+    params['ai_alignment_level'] = 0.5
+    params['ticks'] = 50
+    model = DisasterModel(**params)
+
+    # Track mode choices and feedback events per agent type
+    mode_counts = {'exploratory': {'human': 0, 'ai': 0, 'self_action': 0},
+                   'exploitative': {'human': 0, 'ai': 0, 'self_action': 0}}
+    info_feedback = {'exploratory': 0, 'exploitative': 0}
+    total_steps = {'exploratory': 0, 'exploitative': 0}
+
+    for tick in range(params['ticks']):
+        # Snapshot pending evals before step
+        pre_pending = {}
+        for agent in model.agent_list:
+            if isinstance(agent, HumanAgent):
+                pre_pending[agent.unique_id] = len(agent.pending_info_evaluations)
+
+        model.step()
+
+        # Count mode choices and feedback events
+        for agent in model.agent_list:
+            if not isinstance(agent, HumanAgent):
+                continue
+            atype = agent.agent_type
+            total_steps[atype] += 1
+
+            # Check what mode was chosen this tick
+            for mode in agent.tokens_this_tick:
+                if mode in mode_counts[atype]:
+                    mode_counts[atype][mode] += 1
+
+            # Check if info feedback fired (pending list got shorter)
+            post_pending = len(agent.pending_info_evaluations)
+            pre = pre_pending.get(agent.unique_id, 0)
+            if post_pending < pre:
+                info_feedback[atype] += (pre - post_pending)
+
+    for atype in ['exploratory', 'exploitative']:
+        total = sum(mode_counts[atype].values())
+        print(f"\n  {atype} ({total_steps[atype]} agent-steps):")
+        for mode, count in mode_counts[atype].items():
+            pct = (count / total * 100) if total > 0 else 0
+            print(f"    {mode:12s}: {count:5d} ({pct:.1f}%)")
+        self_pct = (mode_counts[atype]['self_action'] / total * 100) if total > 0 else 0
+        print(f"    PASS no self_action queries: {mode_counts[atype]['self_action'] == 0}")
+        print(f"    Info feedback events: {info_feedback[atype]}")
+
+    return mode_counts, info_feedback
+
+
+# ============================================================================
 # Integration Test: Full Simulation with Tracking
 # ============================================================================
 
@@ -474,6 +536,7 @@ if __name__ == "__main__":
     test_weighted_q_reward()           # Issue 5
     test_belief_accuracy_reward()      # Issue 2
     test_phase_structure()             # Issue 3
+    test_always_queries()              # Agents always query external sources
 
     # Issue 4 needs a warmed-up model (run a few ticks first)
     print("\n--- Warming up model for uncertainty-seeking test ---")

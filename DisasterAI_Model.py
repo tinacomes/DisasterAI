@@ -275,9 +275,16 @@ class HumanAgent(Agent):
         """
         Explorer seeks areas with highest combined uncertainty.
         Combined metric: 60% low confidence + 40% spatial variance (neighborhood disagreement).
+
+        Prioritizes cells within or near sensing range (radius=2) so that info
+        quality feedback can fire when the agent later senses these cells.
+        Cells beyond sensing range get a distance penalty to balance exploration
+        with feedback capability.
+
         Returns a cell from top-5 uncertain areas for exploration diversity.
         """
         scored_cells = []
+        sensing_radius = 2
 
         for cell, belief in self.beliefs.items():
             if not isinstance(belief, dict):
@@ -303,9 +310,23 @@ class HumanAgent(Agent):
                 # No neighbors with beliefs = high uncertainty
                 normalized_var = 0.5
 
-            # Combined uncertainty score
+            # Combined base uncertainty score
             uncertainty = 0.6 * conf_uncertainty + 0.4 * normalized_var
-            scored_cells.append((cell, uncertainty))
+
+            # Distance penalty: strongly prefer cells within sensing range
+            # so that info quality feedback can verify queried information.
+            # Cells within radius get full score; beyond that, score decays.
+            if self.pos:
+                dist = math.sqrt((cell[0] - self.pos[0])**2 + (cell[1] - self.pos[1])**2)
+                if dist <= sensing_radius:
+                    distance_factor = 1.0  # Full score for sensible cells
+                else:
+                    # Decay: cells at 2x sensing radius get 50% weight
+                    distance_factor = max(0.2, 1.0 - (dist - sensing_radius) / (sensing_radius * 2))
+            else:
+                distance_factor = 1.0
+
+            scored_cells.append((cell, uncertainty * distance_factor))
 
         if not scored_cells:
             # Fallback to current position if no beliefs
@@ -1084,9 +1105,10 @@ class HumanAgent(Agent):
                 #print(f" > Ground truth: {self.model.disaster_grid[interest_point[0], interest_point[1]]}")
 
             # Source selection (epsilon-greedy with type-specific biases)
-            # Use 3-mode structure: self_action, human, ai
-            # Then select specific source within chosen mode
-            possible_modes = ["self_action", "human", "ai"]
+            # Agents ALWAYS query an external source (human or AI) at each step.
+            # Q-learning determines WHO to ask, not WHETHER to ask.
+            # self_action Q-value is updated separately via belief accuracy reward.
+            possible_modes = ["human", "ai"]
 
             # Store Q-values
             for mode in possible_modes:
@@ -1110,28 +1132,17 @@ class HumanAgent(Agent):
                 decision_factors['biases'] = {}
 
                 if self.agent_type == "exploitative":
-                    # Exploitative agents prefer friends and self-confirmation
+                    # Exploitative agents prefer friends (human sources)
                     scores["human"] += self.exploit_friend_bias
-                    scores["self_action"] += self.exploit_self_bias
 
                     decision_factors['biases']["human"] = self.exploit_friend_bias
-                    decision_factors['biases']["self_action"] = self.exploit_self_bias
-
-                    # NO AI bias - let Q-learning determine AI value through experience
 
                 else:  # exploratory
                     # Exploratory agents seek diverse information sources
-                    # Bias toward querying to get info quality feedback
-                    scores["human"] += 0.2   # Encourage querying humans
-                    scores["ai"] += 0.2      # Encourage querying AI
-                    scores["self_action"] -= 0.1  # Discourage pure self-reliance
+                    # Mild bias toward AI for broader coverage
+                    scores["ai"] += 0.1
 
-                    decision_factors['biases']["human"] = 0.2
-                    decision_factors['biases']["ai"] = 0.2
-                    decision_factors['biases']["self_action"] = -0.1
-
-                    # NO alignment-based biases - let Q-learning determine which sources are good
-                    # Exploratory agents will naturally prefer accurate sources through feedback
+                    decision_factors['biases']["ai"] = 0.1
 
                 # Add small random noise to break ties
                 for mode in scores:
@@ -1162,13 +1173,9 @@ class HumanAgent(Agent):
             self.tokens_this_tick = {chosen_mode: 1}
             self.last_queried_source_ids = []
 
-            # Query source based on chosen mode
+            # Query source based on chosen mode (always external: human or AI)
 
-            if chosen_mode == "self_action":
-                reports = self.report_beliefs(interest_point, query_radius)
-                source_id = None  # No external source used
-
-            elif chosen_mode == "human":
+            if chosen_mode == "human":
                 # Select specific human source within "human" mode
                 valid_sources = [h for h in self.model.humans if h != self.unique_id]
                 if not valid_sources:
