@@ -587,16 +587,20 @@ class HumanAgent(Agent):
                 new_q = old_q + info_learning_rate * (accuracy_reward - old_q)
                 self.q_table[source_id] = new_q
 
-            # Update trust similarly - use stronger updates for bad info
+            # Update trust with ASYMMETRIC learning: penalize bad info faster
             if source_id in self.trust:
                 old_trust = self.trust[source_id]
-                # Map accuracy reward [-0.7, +0.5] to trust target [0.15, 0.75]
-                # Bad info should drop trust low, good info should increase moderately
-                trust_target = 0.5 + 0.5 * accuracy_reward  # Maps -0.7->0.15, 0->0.5, +0.5->0.75
-                # Use higher learning rate for trust updates from info quality
-                trust_lr = 0.15 if self.agent_type == "exploratory" else 0.08
-                trust_change = trust_lr * (trust_target - old_trust)
-                new_trust = max(0.0, min(1.0, old_trust + trust_change))
+                # More aggressive trust target: bad info → low trust, good info → high trust
+                # accuracy_reward range: [-0.7, +0.5] → trust_target range: [0.0, 0.75]
+                if accuracy_reward < 0:
+                    # Bad info: aggressive penalty, target drops to 0 for worst case
+                    trust_target = max(0.0, 0.5 + accuracy_reward)  # -0.7→0, 0→0.5
+                    trust_lr = 0.25 if self.agent_type == "exploratory" else 0.15  # FAST penalty
+                else:
+                    # Good info: moderate reward
+                    trust_target = min(1.0, 0.5 + 0.5 * accuracy_reward)  # 0→0.5, +0.5→0.75
+                    trust_lr = 0.12 if self.agent_type == "exploratory" else 0.06  # Slower reward
+                new_trust = max(0.0, min(1.0, old_trust + trust_lr * (trust_target - old_trust)))
                 self.trust[source_id] = new_trust
 
             # Mark as evaluated
@@ -734,18 +738,22 @@ class HumanAgent(Agent):
                 info_lr = 0.25 if self.agent_type == "exploratory" else 0.12
                 self.q_table[source_id] = old_q + info_lr * (accuracy_reward - old_q)
 
-            # Update trust
+            # Update trust with ASYMMETRIC learning: penalize bad info faster
             if source_id in self.trust:
                 old_trust = self.trust[source_id]
-                trust_target = 0.5 + 0.5 * accuracy_reward
-                trust_lr = 0.15 if self.agent_type == "exploratory" else 0.08
+                if accuracy_reward < 0:
+                    trust_target = max(0.0, 0.5 + accuracy_reward)
+                    trust_lr = 0.25 if self.agent_type == "exploratory" else 0.15
+                else:
+                    trust_target = min(1.0, 0.5 + 0.5 * accuracy_reward)
+                    trust_lr = 0.12 if self.agent_type == "exploratory" else 0.06
                 new_trust = max(0.0, min(1.0, old_trust + trust_lr * (trust_target - old_trust)))
                 self.trust[source_id] = new_trust
 
             evaluated.append(item)
 
             if self.model.debug_mode and hasattr(self, 'id_num') and (self.id_num < 2 or (50 <= self.id_num < 52)):
-                print(f"[DEBUG] Agent {self.unique_id} ({self.agent_type}) PENDING INFO EVAL: source={source_id}, mode={mode}, error={level_error}, reward={accuracy_reward:.3f}, ref_conf={belief_conf:.2f}")
+                print(f"[DEBUG] Agent {self.unique_id} ({self.agent_type}) PENDING INFO EVAL: source={source_id}, mode={mode}, error={level_error}, acc_rew={accuracy_reward:.3f}, trust={new_trust:.2f}")
 
         # Remove evaluated/expired items
         self.pending_info_evaluations = [
@@ -967,26 +975,25 @@ class HumanAgent(Agent):
             self.exploration_targets = [self.pos]  # Use current position as a last resort
 
     def apply_trust_decay(self):
-        """Applies a slow decay to all trust relationships."""
-        #  Make decay rates more distinct and agent-specific
+        """Applies decay to all trust relationships toward neutral (0.5).
+        This prevents trust from staying stuck at extremes and allows
+        re-evaluation of sources based on recent performance.
+        """
+        # Decay toward 0.5 (neutral) rather than 0 - allows recovery
+        neutral_trust = 0.5
+
         if self.agent_type == "exploitative":
-            base_decay_rate = 0.002     # Standard decay
-            friend_decay_rate = 0.0005  # Very slow decay for friends - exploiters value stable relationships
+            decay_rate = 0.01   # Moderate decay toward neutral
         else:  # exploratory
-            base_decay_rate = 0.003     # Slightly faster standard decay - more critical
-            friend_decay_rate = 0.0015  # Faster friend decay - less friend bias
+            decay_rate = 0.015  # Slightly faster - more responsive to change
 
-        # Apply uniform decay rates (no alignment peeking)
         for source_id in list(self.trust.keys()):
-            # Friend decay rate
-            if source_id in self.friends:
-                decay_rate = friend_decay_rate
-            # Standard decay for all other sources (AI and non-friends)
-            else:
-                decay_rate = base_decay_rate
-
-            # Apply the calculated decay rate
-            self.trust[source_id] = max(0, self.trust[source_id] - decay_rate)
+            old_trust = self.trust[source_id]
+            # Decay toward neutral (0.5), not toward 0
+            if old_trust > neutral_trust:
+                self.trust[source_id] = max(neutral_trust, old_trust - decay_rate)
+            elif old_trust < neutral_trust:
+                self.trust[source_id] = min(neutral_trust, old_trust + decay_rate)
 
     def update_belief_bayesian(self, cell, reported_level, source_trust, source_id=None):
         """Update agent's belief about a cell using Bayesian principles."""
@@ -1034,10 +1041,8 @@ class HumanAgent(Agent):
             if source_trust < 0.03:
                 source_precision *= 0.05  # Almost entirely ignore
 
-            if is_ai_source and source_trust > 0.3:
-                # Give extra weight to AI information from somewhat trusted sources
-                # No alignment peeking - trust should capture source quality
-                source_precision = source_precision * 1.5
+            # No special AI bonus - trust should capture source quality through feedback
+            # AI sources are treated the same as human sources based on learned trust
 
             # Apply a maximum to source precision to prevent overwhelming prior
             # Different maximums by agent type
@@ -1648,10 +1653,14 @@ class HumanAgent(Agent):
                         if source_id in self.trust:
                             old_trust = self.trust[source_id]
 
-                            # Pure feedback-based trust update: no alignment peeking
-                            # Trust naturally increases for sources that lead to good outcomes
-                            # and decreases for sources that lead to bad outcomes
-                            trust_change = self.trust_learning_rate * (target_trust - old_trust)
+                            # ASYMMETRIC trust update: penalize bad outcomes faster
+                            if target_trust < old_trust:
+                                # Bad outcome: faster learning rate to drop trust
+                                effective_trust_lr = self.trust_learning_rate * 2.5
+                            else:
+                                # Good outcome: normal learning rate
+                                effective_trust_lr = self.trust_learning_rate
+                            trust_change = effective_trust_lr * (target_trust - old_trust)
 
                             new_trust = max(0.0, min(1.0, old_trust + trust_change))
                             self.trust[source_id] = new_trust
@@ -1779,22 +1788,17 @@ class HumanAgent(Agent):
                     # Calculate accuracy (how close belief is to reality)
                     accuracy = 1.0 - (abs(believed_level - actual_level) / 5.0)
 
-                    # Apply direct trust update based on accuracy
-                    if accuracy > 0.8:  # High accuracy
-                        if ai_source in self.trust:
-                            old_trust = self.trust[ai_source]
-
-                            # Pure feedback-based trust boost - no alignment peeking
-                            boost = 0.05  # Small boost for accurate information
-
-                            # Apply trust update with limits
-                            new_trust = min(1.0, old_trust + boost)
-                            self.trust[ai_source] = new_trust
-
-                            # Debug logging
-                            #if self.model.debug_mode and random.random() < 0.1:
-                               # print(f"Agent {self.unique_id} direct trust update for {ai_source}:")
-                               # print(f"  - Accuracy: {accuracy:.2f}, Trust: {old_trust:.2f} -> {new_trust:.2f}")
+                    # Apply direct trust update based on accuracy (SYMMETRIC: both boost AND penalty)
+                    if ai_source in self.trust:
+                        old_trust = self.trust[ai_source]
+                        if accuracy > 0.8:  # High accuracy: small boost
+                            trust_change = 0.03
+                        elif accuracy < 0.4:  # Low accuracy: penalty (LARGER than boost)
+                            trust_change = -0.08
+                        else:
+                            trust_change = 0.0  # Neutral range
+                        new_trust = max(0.0, min(1.0, old_trust + trust_change))
+                        self.trust[ai_source] = new_trust
 
 
 class AIAgent(Agent):
