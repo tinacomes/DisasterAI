@@ -127,10 +127,10 @@ def check_mechanic_2_social_network_preference():
     print(f"  Exploiters: {exploit_human_rate:.2%}")
     print(f"  Explorers:  {explor_human_rate:.2%}")
 
-    # Check if exploiters are querying about cells their friends know
-    # This is tricky - let me check the actual targeting logic
-    print("\n  NOTE: Current implementation - exploiters target their OWN believed epicenter,")
-    print("        not cells their friends know about. This may need review.")
+    # Note about social network preference
+    print("\n  NOTE: Exploiters now query about cells OUTSIDE sensing range.")
+    print("        When their own believed_epicenter is not found, they fall back to")
+    print("        friend's believed_epicenter, incorporating social network knowledge.")
 
 def check_mechanic_3_ai_alignment_effect():
     """Check: Does AI alignment create expected filter bubble patterns?"""
@@ -209,28 +209,32 @@ def main():
     check_mechanic_4_delayed_feedback()
 
     print("\n" + "="*60)
-    print("SUMMARY OF POTENTIAL ISSUES")
+    print("MECHANICS STATUS")
     print("="*60)
     print("""
-1. EXPLOITERS SOCIAL NETWORK CELL PREFERENCE:
-   - Current: Exploiters target their OWN believed epicenter
-   - Expected: Should prefer cells their social network knows about
-   - FIX NEEDED: Modify seek_information() to factor in friend beliefs
+1. QUERY TARGETING (FIXED):
+   - Agents now query about cells OUTSIDE their sensing radius
+   - This prevents trivial verification of AI/human information
+   - Exploiters: believed epicenter outside sensing range
+   - Explorers: high-uncertainty areas outside sensing range
 
 2. AI ALIGNMENT MECHANISM:
-   - Current: High alignment = AI confirms caller beliefs
-   - Issue: If AI confirms wrong beliefs, it REINFORCES filter bubbles
-   - Expected: High alignment should somehow BREAK social bubbles
-   - Question: Should high alignment mean AI provides alternative info?
+   - Low alignment (truthful AI): provides accurate information
+   - High alignment (confirming AI): confirms caller beliefs
+   - Expected pattern:
+     * Explorers should trust truthful AI more (they value accuracy)
+     * Exploiters may trust confirming AI more (they value confirmation)
+     * But confirming AI is less accurate, so over time trust should drop
 
-3. CONFIRMATION BIAS IN FEEDBACK:
-   - Exploiters rate sources 80% on confirmation, 20% on accuracy
-   - This means they'll trust inaccurate sources that confirm beliefs
-   - May need to check if this creates the expected dynamics
+3. FEEDBACK MECHANISM:
+   - Exploiters: 80% confirmation + 20% accuracy weighting
+   - Explorers: 80% accuracy + 20% confirmation weighting
+   - Delayed info feedback: 3-15 ticks
+   - Delayed relief feedback: 15-25 ticks
 
-4. QUERY TARGETING:
-   - Explorers seek uncertainty areas (correct)
-   - Exploiters seek their believed epicenter (may not match intent)
+4. SOCIAL NETWORK PREFERENCE:
+   - Exploiters prefer querying friends (higher human query rate)
+   - Exploiters also use friend's believed_epicenter as fallback
 """)
 
 if __name__ == "__main__":

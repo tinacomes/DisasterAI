@@ -276,11 +276,18 @@ class HumanAgent(Agent):
         Explorer seeks areas with highest combined uncertainty.
         Combined metric: 60% low confidence + 40% spatial variance (neighborhood disagreement).
         Returns a cell from top-5 uncertain areas for exploration diversity.
+
+        IMPORTANT: Excludes cells within sensing radius - agents should query about
+        cells they CANNOT directly sense, otherwise they can trivially verify info.
         """
         scored_cells = []
 
         for cell, belief in self.beliefs.items():
             if not isinstance(belief, dict):
+                continue
+
+            # Skip cells within sensing radius - querying about these is useless
+            if self.is_within_sensing_range(cell):
                 continue
 
             # Component 1: Low confidence (60% weight)
@@ -308,8 +315,15 @@ class HumanAgent(Agent):
             scored_cells.append((cell, uncertainty))
 
         if not scored_cells:
-            # Fallback to current position if no beliefs
-            return self.pos
+            # Fallback: find ANY cell outside sensing range
+            for cell in self.beliefs.keys():
+                if not self.is_within_sensing_range(cell):
+                    return cell
+            # Last resort: random cell far from agent
+            return (
+                (self.pos[0] + 5) % self.model.width,
+                (self.pos[1] + 5) % self.model.height
+            )
 
         # Sort by uncertainty descending
         scored_cells.sort(key=lambda x: -x[1])
@@ -840,13 +854,27 @@ class HumanAgent(Agent):
 
         return report
 
+    def is_within_sensing_range(self, cell):
+        """Check if a cell is within the agent's sensing radius (Moore neighborhood)."""
+        if not self.pos or not cell:
+            return False
+        sensing_radius = 2
+        return abs(cell[0] - self.pos[0]) <= sensing_radius and abs(cell[1] - self.pos[1]) <= sensing_radius
+
     def find_believed_epicenter(self):
-        """Finds the cell with the highest believed disaster level."""
+        """
+        Finds the cell with the highest believed disaster level.
+        IMPORTANT: Excludes cells within sensing radius - agents should query about
+        cells they CANNOT directly sense, otherwise they can trivially verify info.
+        """
         max_level = -1
         best_cells = []
-        # Check own beliefs first
+        # Check own beliefs, excluding cells within sensing range
         for cell, belief_info in self.beliefs.items():
             if isinstance(belief_info, dict):
+                # Skip cells within sensing radius - querying about these is useless
+                if self.is_within_sensing_range(cell):
+                    continue
                 level = belief_info.get('level', -1)
                 if level > max_level:
                     max_level = level
@@ -854,11 +882,11 @@ class HumanAgent(Agent):
                 elif level == max_level:
                     best_cells.append(cell)
 
-        # If no beliefs > 0 return None
-        if best_cells and max_level > 0: # Only consider if found something >= L1
-            self.believed_epicenter = random.choice(best_cells) # Return one coordinate tuple (x,y)
+        # If no beliefs > 0 outside sensing range, return None
+        if best_cells and max_level > 0:  # Only consider if found something >= L1
+            self.believed_epicenter = random.choice(best_cells)
         else:
-            self.believed_epicenter = None # Indicate no clear epicenter believed yet
+            self.believed_epicenter = None  # No valid epicenter outside sensing range
 
 
     def find_exploration_targets(self, num_targets=1):
@@ -1190,16 +1218,18 @@ class HumanAgent(Agent):
                         if friend.believed_epicenter and friend.beliefs.get(friend.believed_epicenter, {}).get('level', 0) >= 1:
                             interest_point = friend.believed_epicenter
 
-                    # Second try: Use highest confidence cell
+                    # Second try: Use highest confidence cell OUTSIDE sensing range
                     if not interest_point or self.beliefs.get(interest_point, {}).get('level', 0) <= 0:
-                        # FIX: Initialize max_conf and highest_conf_cells properly
                         max_conf = -1
                         highest_conf_cells = []
 
-                        # Ensure we have valid beliefs to search through
+                        # Search for cells outside sensing range
                         if len(self.beliefs) > 0:
                             for cell, belief_info in self.beliefs.items():
-                                if isinstance(belief_info, dict):  # Make sure it's a valid belief dictionary
+                                if isinstance(belief_info, dict):
+                                    # Skip cells within sensing radius
+                                    if self.is_within_sensing_range(cell):
+                                        continue
                                     conf = belief_info.get('confidence', 0.0)
                                     if conf > max_conf:
                                         max_conf = conf
@@ -1207,14 +1237,18 @@ class HumanAgent(Agent):
                                     elif conf == max_conf:
                                         highest_conf_cells.append(cell)
 
-                        # Ensure we have at least one valid cell before choosing
                         if highest_conf_cells:
                             interest_point = random.choice(highest_conf_cells)
                         else:
-                            # Absolute fallback: pick a random cell in the grid
-                            interest_point = (random.randrange(self.model.width), random.randrange(self.model.height))
+                            # Absolute fallback: pick a random cell OUTSIDE sensing range
+                            # Offset by at least sensing_radius + 1 to ensure outside
+                            offset = 3  # sensing_radius (2) + 1
+                            interest_point = (
+                                (self.pos[0] + offset + random.randrange(self.model.width - 2*offset)) % self.model.width,
+                                (self.pos[1] + offset + random.randrange(self.model.height - 2*offset)) % self.model.height
+                            )
                             if self.model.debug_mode:
-                                print(f"Agent {self.unique_id}: Using random fallback interest point {interest_point}")
+                                print(f"Agent {self.unique_id}: Using random fallback interest point {interest_point} (outside sensing range)")
 
             else:  # Exploratory
                 # Explorers seek HIGH UNCERTAINTY areas - not just their current position
@@ -1222,11 +1256,15 @@ class HumanAgent(Agent):
                 interest_point = self.find_highest_uncertainty_area()
                 query_radius = 2  # Standard query radius
 
-                # Fallback if uncertainty search fails
+                # Fallback if uncertainty search fails - pick cell OUTSIDE sensing range
                 if not interest_point:
-                    interest_point = self.pos
+                    offset = 3  # sensing_radius (2) + 1
+                    interest_point = (
+                        (self.pos[0] + offset + random.randrange(max(1, self.model.width - 2*offset))) % self.model.width,
+                        (self.pos[1] + offset + random.randrange(max(1, self.model.height - 2*offset))) % self.model.height
+                    )
                     if self.model.debug_mode:
-                        print(f"Agent {self.unique_id}: Uncertainty search failed, using current position")
+                        print(f"Agent {self.unique_id}: Uncertainty search failed, using random cell outside sensing range")
 
             # Final safety check
             if not interest_point:
