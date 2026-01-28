@@ -720,17 +720,21 @@ class HumanAgent(Agent):
             elif prior_error == 1:
                 confirmation_score = 0.5
             elif prior_error == 2:
-                confirmation_score = -0.2
+                confirmation_score = -0.4  # Exploiters penalize more for moderate disagreement
             else:
-                confirmation_score = -0.6
+                confirmation_score = -0.8  # Exploiters strongly penalize large disagreement
 
             # Weighted combination by agent type
+            # EXPLOITERS: Almost entirely driven by confirmation (they want to hear what they believe)
+            # EXPLORERS: Almost entirely driven by accuracy (they want correct information)
             if self.agent_type == "exploitative":
-                combined_reward = 0.8 * confirmation_score + 0.2 * accuracy_score
+                # 95% confirmation, 5% accuracy - exploiters reward sources that agree with them
+                combined_reward = 0.95 * confirmation_score + 0.05 * accuracy_score
             else:
-                combined_reward = 0.8 * accuracy_score + 0.2 * confirmation_score
+                # 95% accuracy, 5% confirmation - explorers reward sources that are correct
+                combined_reward = 0.95 * accuracy_score + 0.05 * confirmation_score
 
-            accuracy_reward = combined_reward * 0.6 - 0.1
+            accuracy_reward = combined_reward * 0.7 - 0.1  # Slightly larger scale
 
             # Determine mode from source_id
             if source_id.startswith("H_"):
@@ -1003,25 +1007,34 @@ class HumanAgent(Agent):
             self.exploration_targets = [self.pos]  # Use current position as a last resort
 
     def apply_trust_decay(self):
-        """Applies decay to all trust relationships toward neutral (0.5).
-        This prevents trust from staying stuck at extremes and allows
-        re-evaluation of sources based on recent performance.
+        """Applies decay to all trust relationships toward neutral points.
+        EXPLOITERS: Maintain friend/non-friend distinction - friends decay toward 0.6,
+                    non-friends and AI decay toward 0.35. This preserves social network loyalty.
+        EXPLORERS: All sources decay toward 0.5 - they're open to re-evaluating anyone.
         """
-        # Decay toward 0.5 (neutral) rather than 0 - allows recovery
-        neutral_trust = 0.5
-
         if self.agent_type == "exploitative":
-            decay_rate = 0.01   # Moderate decay toward neutral
+            decay_rate = 0.008  # Slow decay - exploiters are stubborn
+            for source_id in list(self.trust.keys()):
+                old_trust = self.trust[source_id]
+                # Friends have higher neutral point (maintain loyalty)
+                if source_id in self.friends:
+                    neutral = 0.60
+                else:
+                    # Non-friends and AI have lower neutral point (maintain suspicion)
+                    neutral = 0.35
+                if old_trust > neutral:
+                    self.trust[source_id] = max(neutral, old_trust - decay_rate)
+                elif old_trust < neutral:
+                    self.trust[source_id] = min(neutral, old_trust + decay_rate)
         else:  # exploratory
-            decay_rate = 0.015  # Slightly faster - more responsive to change
-
-        for source_id in list(self.trust.keys()):
-            old_trust = self.trust[source_id]
-            # Decay toward neutral (0.5), not toward 0
-            if old_trust > neutral_trust:
-                self.trust[source_id] = max(neutral_trust, old_trust - decay_rate)
-            elif old_trust < neutral_trust:
-                self.trust[source_id] = min(neutral_trust, old_trust + decay_rate)
+            decay_rate = 0.012  # Moderate decay - responsive to change
+            neutral_trust = 0.5
+            for source_id in list(self.trust.keys()):
+                old_trust = self.trust[source_id]
+                if old_trust > neutral_trust:
+                    self.trust[source_id] = max(neutral_trust, old_trust - decay_rate)
+                elif old_trust < neutral_trust:
+                    self.trust[source_id] = min(neutral_trust, old_trust + decay_rate)
 
     def update_belief_bayesian(self, cell, reported_level, source_trust, source_id=None):
         """Update agent's belief about a cell using Bayesian principles."""
@@ -1038,13 +1051,41 @@ class HumanAgent(Agent):
             # Apply a minimum confidence threshold to prevent wild swings
             prior_confidence = max(0.1, prior_confidence)
 
+            # EXPLOITER REJECTION MECHANISM: Reject conflicting information
+            # Exploiters with high confidence REJECT info that conflicts with their beliefs
+            level_diff = abs(reported_level - prior_level)
+            if self.agent_type == "exploitative" and prior_confidence > 0.4:
+                # Higher confidence = higher rejection threshold
+                # If info differs by 2+ levels and confidence is high, likely reject
+                rejection_prob = 0.0
+                if level_diff >= 3:
+                    rejection_prob = 0.9 * prior_confidence  # Almost always reject big differences
+                elif level_diff >= 2:
+                    rejection_prob = 0.7 * prior_confidence  # Often reject moderate differences
+                elif level_diff >= 1:
+                    rejection_prob = 0.3 * prior_confidence  # Sometimes reject small differences
+
+                # Friends get a pass - lower rejection probability
+                is_friend = source_id in self.friends if source_id else False
+                if is_friend:
+                    rejection_prob *= 0.3  # Much less likely to reject friend info
+
+                if random.random() < rejection_prob:
+                    # REJECT the information - still track for feedback but don't update belief
+                    if source_id:
+                        self.pending_info_evaluations.append((
+                            self.model.tick, source_id, cell,
+                            int(reported_level), int(prior_level), float(prior_confidence)
+                        ))
+                    return False  # No belief change
+
             # Convert confidence to precision with agent-specific scaling
             if self.agent_type == "exploitative":
                 # Exploiters have higher prior precision (stronger resistance to change)
-                prior_precision = 1.8 * prior_confidence / (1 - prior_confidence + 1e-6)
+                prior_precision = 2.5 * prior_confidence / (1 - prior_confidence + 1e-6)
             else:
                 # Explorers have lower prior precision (more open to new information)
-                prior_precision = 0.8 * prior_confidence / (1 - prior_confidence + 1e-6)
+                prior_precision = 0.6 * prior_confidence / (1 - prior_confidence + 1e-6)
 
             # Source precision calculation - Agent-type dependent
             if self.agent_type == "exploitative":
@@ -2289,18 +2330,36 @@ class DisasterModel(Model):
             agent.q_table['self_action'] = 0.0 # Q-value for acting on own belief
 
             # Initialize trust/Q for other humans
+            # EXPLOITERS: High trust in friends (same beliefs), low trust in non-friends
+            # EXPLORERS: More uniform trust, willing to hear from anyone
             for other_id in all_human_ids:
                 if agent.unique_id == other_id: continue # Skip self
 
-                initial_t = random.uniform(base_human_trust - 0.05, base_human_trust + 0.05)
-                if other_id in agent.friends:
-                    initial_t = min(1.0, initial_t + 0.1) # Friend boost
+                if agent.agent_type == "exploitative":
+                    if other_id in agent.friends:
+                        # Exploiters HIGHLY trust friends (they share beliefs)
+                        initial_t = random.uniform(0.65, 0.80)
+                    else:
+                        # Exploiters are skeptical of non-friends
+                        initial_t = random.uniform(0.15, 0.30)
+                else:  # exploratory
+                    # Explorers have more uniform trust - willing to hear from anyone
+                    initial_t = random.uniform(base_human_trust - 0.05, base_human_trust + 0.05)
+                    if other_id in agent.friends:
+                        initial_t = min(1.0, initial_t + 0.05)  # Small friend boost
                 agent.trust[other_id] = initial_t
                 agent.q_table[other_id] = default_q_value # Initialize Q for this specific human
 
             # Initialize trust/Q for AI agents
+            # EXPLOITERS: Start skeptical of AI (it's not in their social network)
+            # EXPLORERS: More open to AI as information source
             for ai_id in all_ai_ids:
-                initial_ai_t = random.uniform(base_ai_trust_val - 0.1, base_ai_trust_val + 0.1)
+                if agent.agent_type == "exploitative":
+                    # Exploiters start very skeptical of AI
+                    initial_ai_t = random.uniform(0.10, 0.25)
+                else:
+                    # Explorers more open to AI
+                    initial_ai_t = random.uniform(base_ai_trust_val, base_ai_trust_val + 0.15)
                 agent.trust[ai_id] = max(0.0, min(1.0, initial_ai_t))
                 agent.q_table[ai_id] = default_q_value # Initialize Q for this specific AI
 
