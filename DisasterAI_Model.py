@@ -1687,18 +1687,20 @@ class HumanAgent(Agent):
         self.send_relief()
 
     def step(self):
-        """Execute the three-phase decision cycle: Query → Sense → Decide
-        Querying is MANDATORY (agents must seek info each tick).
+        """Execute the decision cycle: Sense → Query → Evaluate → Decide
         Sensing is supplementary (updates beliefs from local environment).
+        Querying is MANDATORY (agents must seek info each tick).
+        Order matters: sensing first gives agents ground-truth beliefs that
+        improve query target selection and info quality evaluation.
         """
-        # Phase 1: REQUEST - seek information (MANDATORY, every tick)
-        self.phase_request()
-
-        # Phase 2: OBSERVE - sense local environment (supplementary)
+        # Phase 1: OBSERVE - sense local environment (supplementary)
         self.phase_observe()
 
+        # Phase 2: REQUEST - seek information (MANDATORY, every tick)
+        self.phase_request()
+
         # Phase 3: Evaluate pending info quality against current beliefs
-        # (runs after both query and sense so beliefs are up-to-date)
+        # (runs after both sense and query so beliefs are up-to-date)
         self.evaluate_pending_info()
 
         # Phase 4: DECIDE - send relief based on beliefs
@@ -3046,40 +3048,60 @@ class DisasterModel(Model):
 
             self.belief_variance_data.append((self.tick, var_exploit, var_explor))
 
-            # --- AECI Calculation ---
+            # --- AECI Calculation (Variance-based, matching SECI methodology) ---
+            # For each AI-reliant agent, compare their belief variance against
+            # global variance. Negative = AI reduces diversity (echo chamber),
+            # Positive = AI increases diversity. Same normalization as SECI.
             aeci_exp = []
             aeci_expl = []
 
+            min_ai_calls = 5  # Need some AI usage to be meaningful
+
             for agent in self.humans.values():
-                # Make sure counters are valid
                 if not hasattr(agent, 'accum_calls_ai') or not hasattr(agent, 'accum_calls_total'):
-                    if self.debug_mode:
-                        print(f"Warning: Agent {agent.unique_id} missing call counters")
                     continue
 
-                # Ensure no negative values
                 agent.accum_calls_ai = max(0, agent.accum_calls_ai)
                 agent.accum_calls_total = max(0, agent.accum_calls_total)
 
-                # Calculate AECI (AI Query Ratio) with robust error handling
-                # NOTE: AECI measures proportion of QUERIES to AI, not acceptances
-                # High AECI = agent frequently queries AI (regardless of whether they accept the info)
-                if agent.accum_calls_total > 0:
-                    # Ensure ratio is properly bounded between 0 and 1
-                    ratio = max(0.0, min(1.0, agent.accum_calls_ai / agent.accum_calls_total))
+                # Only include agents that have used AI meaningfully
+                if agent.accum_calls_ai < min_ai_calls:
+                    continue
 
-                    if agent.agent_type == "exploitative":
-                        aeci_exp.append(ratio)
-                    else:  # exploratory
-                        aeci_expl.append(ratio)
+                # Collect this agent's belief levels
+                agent_belief_levels = []
+                for belief_info in agent.beliefs.values():
+                    if isinstance(belief_info, dict):
+                        level = belief_info.get('level', 0)
+                        if not np.isnan(level):
+                            agent_belief_levels.append(level)
 
-            # Calculate means with added safety
-            avg_aeci_exp = np.mean(aeci_exp) if aeci_exp else 0.0
-            avg_aeci_expl = np.mean(aeci_expl) if aeci_expl else 0.0
+                if len(agent_belief_levels) < 2:
+                    continue
 
-            # Ensure averages are also properly bounded
-            avg_aeci_exp = max(0.0, min(1.0, avg_aeci_exp))
-            avg_aeci_expl = max(0.0, min(1.0, avg_aeci_expl))
+                agent_var = np.var(agent_belief_levels)
+
+                # Calculate AECI same way as SECI: variance diff normalized
+                if global_var > 1e-9:
+                    var_diff = agent_var - global_var
+                    if var_diff < 0:  # Variance reduction (echo chamber)
+                        aeci_val = max(-1, var_diff / global_var)
+                    else:  # Variance increase (diversification)
+                        max_possible_var = 5.0
+                        aeci_val = min(1, var_diff / (max_possible_var - global_var))
+                else:
+                    aeci_val = 0.0
+
+                if agent.agent_type == "exploitative":
+                    aeci_exp.append(aeci_val)
+                else:
+                    aeci_expl.append(aeci_val)
+
+            avg_aeci_exp = float(np.mean(aeci_exp)) if aeci_exp else 0.0
+            avg_aeci_expl = float(np.mean(aeci_expl)) if aeci_expl else 0.0
+
+            avg_aeci_exp = max(-1.0, min(1.0, avg_aeci_exp))
+            avg_aeci_expl = max(-1.0, min(1.0, avg_aeci_expl))
 
             # Update last metrics
             self._last_metrics['aeci'] = {
