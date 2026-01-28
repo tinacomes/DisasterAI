@@ -83,9 +83,7 @@ def run_test(ai_alignment, test_name):
 
     # --- Run simulation ---
     for tick in range(params['ticks']):
-        # Track Q-values and trust before step
-        prev_info_pending = {}
-        prev_relief_pending = {}
+        # Track Q-values and trust from sample agents before step
         for agent_type in ['exploratory', 'exploitative']:
             if agent_type in sample_agents:
                 agent = sample_agents[agent_type]
@@ -93,24 +91,34 @@ def run_test(ai_alignment, test_name):
                 q_values_by_tick[agent_type]['human'].append(agent.q_table.get('human', 0.0))
                 q_values_by_tick[agent_type]['self_action'].append(agent.q_table.get('self_action', 0.0))
                 trust_by_tick[agent_type].append(agent.trust.get('A_0', 0.5))
-                prev_info_pending[agent_type] = len(agent.pending_info_evaluations)
-                prev_relief_pending[agent_type] = len(agent.pending_rewards)
+
+        # Snapshot pending counts for ALL agents (for accurate feedback counting)
+        prev_info_pending = {}
+        prev_relief_pending = {}
+        for agent in model.agent_list:
+            if isinstance(agent, HumanAgent):
+                prev_info_pending[agent.unique_id] = len(agent.pending_info_evaluations)
+                prev_relief_pending[agent.unique_id] = len(agent.pending_rewards)
 
         # Step
         model.step()
 
-        # Track feedback events that fired this tick
-        for agent_type in ['exploratory', 'exploitative']:
-            if agent_type in sample_agents:
-                agent = sample_agents[agent_type]
-                current_info = len(agent.pending_info_evaluations)
-                if current_info < prev_info_pending.get(agent_type, 0):
-                    info_feedback_counts[agent_type] += (prev_info_pending[agent_type] - current_info)
-                    feedback_timeline['info'].append((tick, agent_type))
-                current_relief = len(agent.pending_rewards)
-                if current_relief < prev_relief_pending.get(agent_type, 0):
-                    relief_feedback_counts[agent_type] += (prev_relief_pending[agent_type] - current_relief)
-                    feedback_timeline['relief'].append((tick, agent_type))
+        # Track feedback events across ALL agents (not just one sample)
+        for agent in model.agent_list:
+            if not isinstance(agent, HumanAgent):
+                continue
+            agent_type = agent.agent_type
+            agent_id = agent.unique_id
+            current_info = len(agent.pending_info_evaluations)
+            prev_info = prev_info_pending.get(agent_id, current_info)
+            if current_info < prev_info:
+                info_feedback_counts[agent_type] += (prev_info - current_info)
+                feedback_timeline['info'].append((tick, agent_type))
+            current_relief = len(agent.pending_rewards)
+            prev_relief = prev_relief_pending.get(agent_id, current_relief)
+            if current_relief < prev_relief:
+                relief_feedback_counts[agent_type] += (prev_relief - current_relief)
+                feedback_timeline['relief'].append((tick, agent_type))
 
         # Extract SECI from model (model appends each tick)
         if model.seci_data and len(model.seci_data) > 0:

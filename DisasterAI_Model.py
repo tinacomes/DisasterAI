@@ -377,9 +377,11 @@ class HumanAgent(Agent):
 
     def reward_belief_accuracy(self, cell, actual_level):
         """
-        Reward agent for having correct beliefs about a cell (separate from source quality).
-        This evaluates the agent's OWN assessment accuracy, updating self_action Q-value.
-        Called before belief is updated with new sensory data.
+        Accumulate belief accuracy reward for a cell (separate from source quality).
+        This evaluates the agent's OWN assessment accuracy.
+        Rewards are accumulated and applied as a single self_action Q-update
+        at the end of sense_environment() to avoid inflating self_action Q
+        with ~25 updates per tick while human/ai get 0-1 updates.
         """
         prior_belief = self.beliefs.get(cell, {})
         if not isinstance(prior_belief, dict):
@@ -406,11 +408,10 @@ class HumanAgent(Agent):
         # Scale reward by confidence (more confident = higher stakes)
         belief_reward *= prior_confidence
 
-        # Update self_action Q-value (rewards good internal model)
-        learning_rate = 0.1 if self.agent_type == "exploratory" else 0.08
-        old_q = self.q_table.get("self_action", 0.0)
-        new_q = old_q + learning_rate * (belief_reward - old_q)
-        self.q_table["self_action"] = new_q
+        # Accumulate for batch update (applied in sense_environment)
+        if not hasattr(self, '_belief_accuracy_rewards'):
+            self._belief_accuracy_rewards = []
+        self._belief_accuracy_rewards.append(belief_reward)
 
     def sense_environment(self):
         pos = self.pos
@@ -477,6 +478,16 @@ class HumanAgent(Agent):
                 # Evaluate information quality feedback for this sensed cell
                 self.evaluate_information_quality(cell, actual)
 
+        # Batch update self_action Q-value: ONE update per tick with average reward
+        # This prevents self_action from being inflated by ~25 per-cell updates
+        # while human/ai Q-values only get 0-1 updates per tick
+        if hasattr(self, '_belief_accuracy_rewards') and self._belief_accuracy_rewards:
+            avg_reward = sum(self._belief_accuracy_rewards) / len(self._belief_accuracy_rewards)
+            learning_rate = 0.1 if self.agent_type == "exploratory" else 0.08
+            old_q = self.q_table.get("self_action", 0.0)
+            self.q_table["self_action"] = old_q + learning_rate * (avg_reward - old_q)
+            self._belief_accuracy_rewards = []
+
     def evaluate_information_quality(self, cell, actual_level):
         """
         Evaluate pending information about a cell against a reference level.
@@ -489,7 +500,13 @@ class HumanAgent(Agent):
         current_tick = self.model.tick
         evaluated = []
 
-        for tick_received, source_id, eval_cell, reported_level in self.pending_info_evaluations:
+        for item in self.pending_info_evaluations:
+            # Support both old (4-tuple) and new (6-tuple) format
+            if len(item) == 6:
+                tick_received, source_id, eval_cell, reported_level, _, _ = item
+            else:
+                tick_received, source_id, eval_cell, reported_level = item
+
             if eval_cell != cell:
                 continue
 
@@ -497,7 +514,7 @@ class HumanAgent(Agent):
             ticks_elapsed = current_tick - tick_received
             if ticks_elapsed > 15:
                 # Too old, remove from pending
-                evaluated.append((tick_received, source_id, eval_cell, reported_level))
+                evaluated.append(item)
                 continue
 
             if ticks_elapsed < 3:
@@ -517,8 +534,12 @@ class HumanAgent(Agent):
                 accuracy_score = -0.6  # Large error
 
             # Calculate CONFIRMATION score: how close was reported level to agent's PRIOR belief
-            prior_belief = self.beliefs.get(cell, {})
-            prior_level = prior_belief.get('level', 0) if isinstance(prior_belief, dict) else 0
+            # Use stored prior from tuple if available (uncontaminated by query update)
+            if len(item) == 6:
+                prior_level = item[4]  # stored_prior_level
+            else:
+                prior_belief = self.beliefs.get(cell, {})
+                prior_level = prior_belief.get('level', 0) if isinstance(prior_belief, dict) else 0
             prior_error = abs(reported_level - prior_level)
             if prior_error == 0:
                 confirmation_score = 1.0   # Perfect confirmation of prior
@@ -579,7 +600,7 @@ class HumanAgent(Agent):
                 self.trust[source_id] = new_trust
 
             # Mark as evaluated
-            evaluated.append((tick_received, source_id, eval_cell, reported_level))
+            evaluated.append(item)
 
             # DEBUG: Track info feedback
             if self.model.debug_mode and hasattr(self, 'id_num') and (self.id_num < 2 or (50 <= self.id_num < 52)):
@@ -612,12 +633,20 @@ class HumanAgent(Agent):
         current_tick = self.model.tick
         evaluated = []
 
-        for tick_received, source_id, cell, reported_level in self.pending_info_evaluations:
+        for item in self.pending_info_evaluations:
+            # Support both old (4-tuple) and new (6-tuple) format
+            if len(item) == 6:
+                tick_received, source_id, cell, reported_level, stored_prior_level, stored_prior_conf = item
+            else:
+                tick_received, source_id, cell, reported_level = item
+                stored_prior_level = None
+                stored_prior_conf = 0.0
+
             ticks_elapsed = current_tick - tick_received
 
             # Too old — expire without evaluation
             if ticks_elapsed > 15:
-                evaluated.append((tick_received, source_id, cell, reported_level))
+                evaluated.append(item)
                 continue
 
             # Too soon — wait for beliefs to stabilize
@@ -630,13 +659,31 @@ class HumanAgent(Agent):
                 continue
 
             belief_conf = belief.get('confidence', 0.0)
-            # Require moderate confidence to evaluate (sensing gives >=0.5)
-            if belief_conf < 0.4:
-                continue
-
             reference_level = belief.get('level', 0)
 
-            # --- Accuracy score ---
+            # CRITICAL FIX: Detect self-contaminated references.
+            # If the current belief was primarily set by the info being evaluated
+            # (reference matches reported and confidence hasn't increased from an
+            # independent source), we can't cross-reference — use stored prior instead.
+            use_prior_as_reference = False
+            if stored_prior_level is not None:
+                # If belief was shifted BY this report (matches reported, differs from prior)
+                # AND no independent confirmation (confidence didn't grow beyond what
+                # the Bayesian update from this single source would give)
+                if (reference_level == reported_level and
+                    reference_level != stored_prior_level and
+                    belief_conf < stored_prior_conf + 0.3):
+                    # Belief is self-contaminated. Use stored prior as reference instead
+                    # of skipping entirely (which starves info feedback).
+                    use_prior_as_reference = True
+                    reference_level = stored_prior_level
+                    belief_conf = stored_prior_conf
+
+            # Require moderate confidence to evaluate
+            if belief_conf < 0.3:
+                continue
+
+            # --- Accuracy score: reported vs current reference ---
             level_error = abs(reported_level - reference_level)
             if level_error == 0:
                 accuracy_score = 1.0
@@ -647,9 +694,8 @@ class HumanAgent(Agent):
             else:
                 accuracy_score = -0.6
 
-            # --- Confirmation score ---
-            prior_belief = self.beliefs.get(cell, {})
-            prior_level = prior_belief.get('level', 0) if isinstance(prior_belief, dict) else 0
+            # --- Confirmation score: reported vs STORED prior (uncontaminated) ---
+            prior_level = stored_prior_level if stored_prior_level is not None else reference_level
             prior_error = abs(reported_level - prior_level)
             if prior_error == 0:
                 confirmation_score = 1.0
@@ -696,7 +742,7 @@ class HumanAgent(Agent):
                 new_trust = max(0.0, min(1.0, old_trust + trust_lr * (trust_target - old_trust)))
                 self.trust[source_id] = new_trust
 
-            evaluated.append((tick_received, source_id, cell, reported_level))
+            evaluated.append(item)
 
             if self.model.debug_mode and hasattr(self, 'id_num') and (self.id_num < 2 or (50 <= self.id_num < 52)):
                 print(f"[DEBUG] Agent {self.unique_id} ({self.agent_type}) PENDING INFO EVAL: source={source_id}, mode={mode}, error={level_error}, reward={accuracy_reward:.3f}, ref_conf={belief_conf:.2f}")
@@ -1060,7 +1106,9 @@ class HumanAgent(Agent):
                     self.model.tick,
                     source_id,
                     cell,
-                    int(reported_level)  # The level reported by the source (NOT posterior)
+                    int(reported_level),  # The level reported by the source (NOT posterior)
+                    int(prior_level),     # Prior belief BEFORE this update (for uncontaminated cross-ref)
+                    float(prior_confidence)  # Prior confidence BEFORE this update
                 ))
                 # DEBUG: Track pending info evaluations
                 if self.model.debug_mode and hasattr(self, 'id_num') and (self.id_num < 2 or (50 <= self.id_num < 52)):
@@ -1639,18 +1687,20 @@ class HumanAgent(Agent):
         self.send_relief()
 
     def step(self):
-        """Execute the three-phase decision cycle: Query → Sense → Decide
-        Querying is MANDATORY (agents must seek info each tick).
+        """Execute the decision cycle: Sense → Query → Evaluate → Decide
         Sensing is supplementary (updates beliefs from local environment).
+        Querying is MANDATORY (agents must seek info each tick).
+        Order matters: sensing first gives agents ground-truth beliefs that
+        improve query target selection and info quality evaluation.
         """
-        # Phase 1: REQUEST - seek information (MANDATORY, every tick)
-        self.phase_request()
-
-        # Phase 2: OBSERVE - sense local environment (supplementary)
+        # Phase 1: OBSERVE - sense local environment (supplementary)
         self.phase_observe()
 
+        # Phase 2: REQUEST - seek information (MANDATORY, every tick)
+        self.phase_request()
+
         # Phase 3: Evaluate pending info quality against current beliefs
-        # (runs after both query and sense so beliefs are up-to-date)
+        # (runs after both sense and query so beliefs are up-to-date)
         self.evaluate_pending_info()
 
         # Phase 4: DECIDE - send relief based on beliefs
@@ -2998,40 +3048,60 @@ class DisasterModel(Model):
 
             self.belief_variance_data.append((self.tick, var_exploit, var_explor))
 
-            # --- AECI Calculation ---
+            # --- AECI Calculation (Variance-based, matching SECI methodology) ---
+            # For each AI-reliant agent, compare their belief variance against
+            # global variance. Negative = AI reduces diversity (echo chamber),
+            # Positive = AI increases diversity. Same normalization as SECI.
             aeci_exp = []
             aeci_expl = []
 
+            min_ai_calls = 5  # Need some AI usage to be meaningful
+
             for agent in self.humans.values():
-                # Make sure counters are valid
                 if not hasattr(agent, 'accum_calls_ai') or not hasattr(agent, 'accum_calls_total'):
-                    if self.debug_mode:
-                        print(f"Warning: Agent {agent.unique_id} missing call counters")
                     continue
 
-                # Ensure no negative values
                 agent.accum_calls_ai = max(0, agent.accum_calls_ai)
                 agent.accum_calls_total = max(0, agent.accum_calls_total)
 
-                # Calculate AECI (AI Query Ratio) with robust error handling
-                # NOTE: AECI measures proportion of QUERIES to AI, not acceptances
-                # High AECI = agent frequently queries AI (regardless of whether they accept the info)
-                if agent.accum_calls_total > 0:
-                    # Ensure ratio is properly bounded between 0 and 1
-                    ratio = max(0.0, min(1.0, agent.accum_calls_ai / agent.accum_calls_total))
+                # Only include agents that have used AI meaningfully
+                if agent.accum_calls_ai < min_ai_calls:
+                    continue
 
-                    if agent.agent_type == "exploitative":
-                        aeci_exp.append(ratio)
-                    else:  # exploratory
-                        aeci_expl.append(ratio)
+                # Collect this agent's belief levels
+                agent_belief_levels = []
+                for belief_info in agent.beliefs.values():
+                    if isinstance(belief_info, dict):
+                        level = belief_info.get('level', 0)
+                        if not np.isnan(level):
+                            agent_belief_levels.append(level)
 
-            # Calculate means with added safety
-            avg_aeci_exp = np.mean(aeci_exp) if aeci_exp else 0.0
-            avg_aeci_expl = np.mean(aeci_expl) if aeci_expl else 0.0
+                if len(agent_belief_levels) < 2:
+                    continue
 
-            # Ensure averages are also properly bounded
-            avg_aeci_exp = max(0.0, min(1.0, avg_aeci_exp))
-            avg_aeci_expl = max(0.0, min(1.0, avg_aeci_expl))
+                agent_var = np.var(agent_belief_levels)
+
+                # Calculate AECI same way as SECI: variance diff normalized
+                if global_var > 1e-9:
+                    var_diff = agent_var - global_var
+                    if var_diff < 0:  # Variance reduction (echo chamber)
+                        aeci_val = max(-1, var_diff / global_var)
+                    else:  # Variance increase (diversification)
+                        max_possible_var = 5.0
+                        aeci_val = min(1, var_diff / (max_possible_var - global_var))
+                else:
+                    aeci_val = 0.0
+
+                if agent.agent_type == "exploitative":
+                    aeci_exp.append(aeci_val)
+                else:
+                    aeci_expl.append(aeci_val)
+
+            avg_aeci_exp = float(np.mean(aeci_exp)) if aeci_exp else 0.0
+            avg_aeci_expl = float(np.mean(aeci_expl)) if aeci_expl else 0.0
+
+            avg_aeci_exp = max(-1.0, min(1.0, avg_aeci_exp))
+            avg_aeci_expl = max(-1.0, min(1.0, avg_aeci_expl))
 
             # Update last metrics
             self._last_metrics['aeci'] = {
