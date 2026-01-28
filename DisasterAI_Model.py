@@ -377,9 +377,11 @@ class HumanAgent(Agent):
 
     def reward_belief_accuracy(self, cell, actual_level):
         """
-        Reward agent for having correct beliefs about a cell (separate from source quality).
-        This evaluates the agent's OWN assessment accuracy, updating self_action Q-value.
-        Called before belief is updated with new sensory data.
+        Accumulate belief accuracy reward for a cell (separate from source quality).
+        This evaluates the agent's OWN assessment accuracy.
+        Rewards are accumulated and applied as a single self_action Q-update
+        at the end of sense_environment() to avoid inflating self_action Q
+        with ~25 updates per tick while human/ai get 0-1 updates.
         """
         prior_belief = self.beliefs.get(cell, {})
         if not isinstance(prior_belief, dict):
@@ -406,11 +408,10 @@ class HumanAgent(Agent):
         # Scale reward by confidence (more confident = higher stakes)
         belief_reward *= prior_confidence
 
-        # Update self_action Q-value (rewards good internal model)
-        learning_rate = 0.1 if self.agent_type == "exploratory" else 0.08
-        old_q = self.q_table.get("self_action", 0.0)
-        new_q = old_q + learning_rate * (belief_reward - old_q)
-        self.q_table["self_action"] = new_q
+        # Accumulate for batch update (applied in sense_environment)
+        if not hasattr(self, '_belief_accuracy_rewards'):
+            self._belief_accuracy_rewards = []
+        self._belief_accuracy_rewards.append(belief_reward)
 
     def sense_environment(self):
         pos = self.pos
@@ -476,6 +477,16 @@ class HumanAgent(Agent):
 
                 # Evaluate information quality feedback for this sensed cell
                 self.evaluate_information_quality(cell, actual)
+
+        # Batch update self_action Q-value: ONE update per tick with average reward
+        # This prevents self_action from being inflated by ~25 per-cell updates
+        # while human/ai Q-values only get 0-1 updates per tick
+        if hasattr(self, '_belief_accuracy_rewards') and self._belief_accuracy_rewards:
+            avg_reward = sum(self._belief_accuracy_rewards) / len(self._belief_accuracy_rewards)
+            learning_rate = 0.1 if self.agent_type == "exploratory" else 0.08
+            old_q = self.q_table.get("self_action", 0.0)
+            self.q_table["self_action"] = old_q + learning_rate * (avg_reward - old_q)
+            self._belief_accuracy_rewards = []
 
     def evaluate_information_quality(self, cell, actual_level):
         """
@@ -653,28 +664,24 @@ class HumanAgent(Agent):
             # CRITICAL FIX: Detect self-contaminated references.
             # If the current belief was primarily set by the info being evaluated
             # (reference matches reported and confidence hasn't increased from an
-            # independent source like direct sensing), skip this evaluation to
-            # prevent the echo chamber where incorrect info validates itself.
+            # independent source), we can't cross-reference — use stored prior instead.
+            use_prior_as_reference = False
             if stored_prior_level is not None:
-                # Check if belief changed since we received this info
-                # If reference == reported AND confidence didn't increase significantly
-                # from an independent source, the belief is self-contaminated
+                # If belief was shifted BY this report (matches reported, differs from prior)
+                # AND no independent confirmation (confidence didn't grow beyond what
+                # the Bayesian update from this single source would give)
                 if (reference_level == reported_level and
                     reference_level != stored_prior_level and
-                    belief_conf < 0.7):
-                    # Belief was shifted by this very report and hasn't been
-                    # independently confirmed (sensing gives conf >= 0.7)
-                    # Skip — can't cross-reference against self
-                    continue
+                    belief_conf < stored_prior_conf + 0.3):
+                    # Belief is self-contaminated. Use stored prior as reference instead
+                    # of skipping entirely (which starves info feedback).
+                    use_prior_as_reference = True
+                    reference_level = stored_prior_level
+                    belief_conf = stored_prior_conf
 
-                # If belief hasn't changed at all from pre-query state AND
-                # confidence is still low, also require independent confirmation
-                if belief_conf < 0.4:
-                    continue
-            else:
-                # Legacy path: require moderate confidence
-                if belief_conf < 0.4:
-                    continue
+            # Require moderate confidence to evaluate
+            if belief_conf < 0.3:
+                continue
 
             # --- Accuracy score: reported vs current reference ---
             level_error = abs(reported_level - reference_level)
