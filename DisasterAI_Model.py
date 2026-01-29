@@ -392,6 +392,12 @@ class HumanAgent(Agent):
     def reward_belief_accuracy(self, cell, actual_level):
         """
         Accumulate belief accuracy reward for a cell (separate from source quality).
+
+        CRITICAL DISTINCTION BY AGENT TYPE:
+        - EXPLOITERS: Rewarded for accurate beliefs (validates their self-reliance)
+        - EXPLORERS: NOT rewarded for accurate beliefs about already-sensed cells
+          (that's expected baseline - they should seek NEW knowledge via external sources)
+
         This evaluates the agent's OWN assessment accuracy.
         Rewards are accumulated and applied as a single self_action Q-update
         at the end of sense_environment() to avoid inflating self_action Q
@@ -421,6 +427,15 @@ class HumanAgent(Agent):
 
         # Scale reward by confidence (more confident = higher stakes)
         belief_reward *= prior_confidence
+
+        # CRITICAL: EXPLORERS should NOT be rewarded for accurate beliefs about
+        # cells they've already sensed. They already know these areas - the value
+        # comes from LEARNING NEW INFO via external sources (AI, humans).
+        # Only penalize them for WRONG beliefs (they should still care about accuracy)
+        if self.agent_type == "exploratory" and belief_reward > 0:
+            belief_reward = 0.0  # No self_action reward for knowing sensed areas
+
+        # EXPLOITERS get full reward - they value self-reliance and confirmation
 
         # Accumulate for batch update (applied in sense_environment or flush_belief_rewards)
         if not hasattr(self, '_belief_accuracy_rewards'):
@@ -1850,20 +1865,23 @@ class HumanAgent(Agent):
                 # Update Q-table and trust - KEY CHANGE: Adjust learning rates by agent type
                 if mode == "self_action":
                     old_q = self.q_table.get("self_action", 0.0)
-                    # Explorers learn faster from self-action outcomes
-                    effective_learning_rate = self.learning_rate * (1.5 if self.agent_type == "exploratory" else 1.0)
+                    # EXPLOITERS learn faster from self-action (value self-reliance)
+                    # EXPLORERS learn SLOWER from self-action (should value external info)
+                    effective_learning_rate = self.learning_rate * (0.5 if self.agent_type == "exploratory" else 1.5)
                     new_q = old_q + effective_learning_rate * (scaled_reward - old_q)
                     self.q_table["self_action"] = new_q
 
                 elif source_ids:
                     # Update generic mode Q-value (fixes mode vs source ID mismatch)
-                    # mode is what's used in action selection (e.g., "human", "A_0")
+                    # mode is what's used in action selection (e.g., "human", "ai")
                     if mode in self.q_table:
                         old_mode_q = self.q_table[mode]
+                        # EXPLORERS learn faster from external sources (AI, humans)
+                        # EXPLOITERS learn slower from external sources (skeptical)
                         if self.agent_type == "exploratory":
                             effective_learning_rate = self.learning_rate * 1.5
                         else:
-                            effective_learning_rate = self.learning_rate
+                            effective_learning_rate = self.learning_rate * 0.8
                         new_mode_q = old_mode_q + effective_learning_rate * (scaled_reward - old_mode_q)
                         self.q_table[mode] = new_mode_q
 
