@@ -697,9 +697,19 @@ class HumanAgent(Agent):
                     reference_level = stored_prior_level
                     belief_conf = stored_prior_conf
 
-            # Require moderate confidence to evaluate
-            if belief_conf < 0.3:
-                continue
+            # For cells outside sensing range, we can't verify accuracy against ground truth.
+            # Instead, evaluate based on:
+            # 1. CONFIRMATION: Does the reported info match our prior belief?
+            # 2. For exploiters: confirmation is what matters (they want agreeing sources)
+            # 3. For explorers: they need to eventually sense to verify accuracy
+            #
+            # Lower confidence threshold to allow evaluation of remote cells
+            # but weight the update by confidence (uncertain references = weaker updates)
+            if belief_conf < 0.15:
+                continue  # Skip only if we have almost no information
+
+            # Scale learning rate by confidence - uncertain references lead to weaker updates
+            confidence_scaling = min(1.0, belief_conf / 0.5)  # Full strength at 0.5+ confidence
 
             # --- Accuracy score: reported vs current reference ---
             level_error = abs(reported_level - reference_level)
@@ -744,27 +754,31 @@ class HumanAgent(Agent):
             else:
                 mode = None
 
-            # Update mode Q-value
+            # Update mode Q-value (scaled by confidence in our reference)
             if mode and mode in self.q_table:
                 old_mode_q = self.q_table[mode]
-                info_lr = 0.25 if self.agent_type == "exploratory" else 0.12
+                base_lr = 0.25 if self.agent_type == "exploratory" else 0.12
+                info_lr = base_lr * confidence_scaling  # Weaker updates for uncertain references
                 self.q_table[mode] = old_mode_q + info_lr * (accuracy_reward - old_mode_q)
 
-            # Update specific source Q-value
+            # Update specific source Q-value (scaled by confidence)
             if source_id in self.q_table:
                 old_q = self.q_table[source_id]
-                info_lr = 0.25 if self.agent_type == "exploratory" else 0.12
+                base_lr = 0.25 if self.agent_type == "exploratory" else 0.12
+                info_lr = base_lr * confidence_scaling
                 self.q_table[source_id] = old_q + info_lr * (accuracy_reward - old_q)
 
             # Update trust with ASYMMETRIC learning: penalize bad info faster
+            # Also scale by confidence
             if source_id in self.trust:
                 old_trust = self.trust[source_id]
                 if accuracy_reward < 0:
                     trust_target = max(0.0, 0.5 + accuracy_reward)
-                    trust_lr = 0.25 if self.agent_type == "exploratory" else 0.15
+                    base_trust_lr = 0.25 if self.agent_type == "exploratory" else 0.15
                 else:
                     trust_target = min(1.0, 0.5 + 0.5 * accuracy_reward)
-                    trust_lr = 0.12 if self.agent_type == "exploratory" else 0.06
+                    base_trust_lr = 0.12 if self.agent_type == "exploratory" else 0.06
+                trust_lr = base_trust_lr * confidence_scaling
                 new_trust = max(0.0, min(1.0, old_trust + trust_lr * (trust_target - old_trust)))
                 self.trust[source_id] = new_trust
 
