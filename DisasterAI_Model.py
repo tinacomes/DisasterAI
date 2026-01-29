@@ -422,10 +422,21 @@ class HumanAgent(Agent):
         # Scale reward by confidence (more confident = higher stakes)
         belief_reward *= prior_confidence
 
-        # Accumulate for batch update (applied in sense_environment)
+        # Accumulate for batch update (applied in sense_environment or flush_belief_rewards)
         if not hasattr(self, '_belief_accuracy_rewards'):
             self._belief_accuracy_rewards = []
         self._belief_accuracy_rewards.append(belief_reward)
+
+    def flush_belief_rewards(self):
+        """Apply accumulated belief accuracy rewards to self_action Q-value.
+        Called automatically at end of sense_environment, but can also be called
+        directly for testing purposes."""
+        if hasattr(self, '_belief_accuracy_rewards') and self._belief_accuracy_rewards:
+            avg_reward = sum(self._belief_accuracy_rewards) / len(self._belief_accuracy_rewards)
+            learning_rate = 0.1 if self.agent_type == "exploratory" else 0.08
+            old_q = self.q_table.get("self_action", 0.0)
+            self.q_table["self_action"] = old_q + learning_rate * (avg_reward - old_q)
+            self._belief_accuracy_rewards = []
 
     def sense_environment(self):
         pos = self.pos
@@ -495,12 +506,7 @@ class HumanAgent(Agent):
         # Batch update self_action Q-value: ONE update per tick with average reward
         # This prevents self_action from being inflated by ~25 per-cell updates
         # while human/ai Q-values only get 0-1 updates per tick
-        if hasattr(self, '_belief_accuracy_rewards') and self._belief_accuracy_rewards:
-            avg_reward = sum(self._belief_accuracy_rewards) / len(self._belief_accuracy_rewards)
-            learning_rate = 0.1 if self.agent_type == "exploratory" else 0.08
-            old_q = self.q_table.get("self_action", 0.0)
-            self.q_table["self_action"] = old_q + learning_rate * (avg_reward - old_q)
-            self._belief_accuracy_rewards = []
+        self.flush_belief_rewards()
 
     def evaluate_information_quality(self, cell, actual_level):
         """
