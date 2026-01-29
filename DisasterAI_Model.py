@@ -704,29 +704,42 @@ class HumanAgent(Agent):
                     belief_conf = stored_prior_conf
 
             # For cells outside sensing range, we can't verify accuracy against ground truth.
-            # Instead, evaluate based on:
-            # 1. CONFIRMATION: Does the reported info match our prior belief?
-            # 2. For exploiters: confirmation is what matters (they want agreeing sources)
-            # 3. For explorers: they need to eventually sense to verify accuracy
+            # CRITICAL: Explorers should NOT penalize sources for disagreeing with their
+            # uncertain beliefs about remote cells. This would cause them to distrust
+            # truthful sources that report correct info that differs from wrong beliefs.
             #
-            # Lower confidence threshold to allow evaluation of remote cells
-            # but weight the update by confidence (uncertain references = weaker updates)
+            # EXPLOITERS: Use confirmation scoring (they want agreeing sources)
+            # EXPLORERS: For remote cells, defer accuracy eval OR use neutral score
+            #            Only evaluate accuracy for cells they can actually verify (sensed cells)
+
             if belief_conf < 0.15:
                 continue  # Skip only if we have almost no information
+
+            # Check if this is a remote cell (outside sensing range)
+            is_remote_cell = not self.is_within_sensing_range(cell)
 
             # Scale learning rate by confidence - uncertain references lead to weaker updates
             confidence_scaling = min(1.0, belief_conf / 0.5)  # Full strength at 0.5+ confidence
 
             # --- Accuracy score: reported vs current reference ---
-            level_error = abs(reported_level - reference_level)
-            if level_error == 0:
-                accuracy_score = 1.0
-            elif level_error == 1:
-                accuracy_score = 0.5
-            elif level_error == 2:
-                accuracy_score = -0.2
+            # CRITICAL FIX: For EXPLORERS querying REMOTE cells, don't penalize disagreement
+            # with uncertain beliefs. Only evaluate accuracy for sensed/verified cells.
+            if is_remote_cell and self.agent_type == "exploratory":
+                # Explorer querying remote cell: can't verify accuracy yet
+                # Use NEUTRAL accuracy score - don't penalize or reward based on unverified belief
+                # They'll get proper feedback when they eventually sense the cell
+                accuracy_score = 0.0
             else:
-                accuracy_score = -0.6
+                # For sensed cells OR exploiters: evaluate normally
+                level_error = abs(reported_level - reference_level)
+                if level_error == 0:
+                    accuracy_score = 1.0
+                elif level_error == 1:
+                    accuracy_score = 0.5
+                elif level_error == 2:
+                    accuracy_score = -0.2
+                else:
+                    accuracy_score = -0.6
 
             # --- Confirmation score: reported vs STORED prior (uncontaminated) ---
             prior_level = stored_prior_level if stored_prior_level is not None else reference_level
@@ -747,8 +760,20 @@ class HumanAgent(Agent):
                 # 95% confirmation, 5% accuracy - exploiters reward sources that agree with them
                 combined_reward = 0.95 * confirmation_score + 0.05 * accuracy_score
             else:
-                # 95% accuracy, 5% confirmation - explorers reward sources that are correct
-                combined_reward = 0.95 * accuracy_score + 0.05 * confirmation_score
+                # EXPLORERS reward sources based on accuracy for sensed cells
+                # For REMOTE cells, accuracy_score is 0 (can't verify), so give a small
+                # bonus for providing NEW information (info different from current belief)
+                if is_remote_cell:
+                    # Explorer gathering info about remote cell:
+                    # - Can't verify accuracy yet (accuracy_score = 0)
+                    # - Give small positive reward for NEW info (different from belief)
+                    # - This encourages explorers to value sources that expand their knowledge
+                    level_diff = abs(reported_level - reference_level)
+                    novelty_bonus = 0.1 if level_diff > 0 else 0.0  # Bonus for new info
+                    combined_reward = novelty_bonus  # Neutral + novelty bonus
+                else:
+                    # Sensed cell: can verify accuracy properly
+                    combined_reward = 0.95 * accuracy_score + 0.05 * confirmation_score
 
             accuracy_reward = combined_reward * 0.7 - 0.1  # Slightly larger scale
 
@@ -774,16 +799,21 @@ class HumanAgent(Agent):
                 info_lr = base_lr * confidence_scaling
                 self.q_table[source_id] = old_q + info_lr * (accuracy_reward - old_q)
 
-            # Update trust with ASYMMETRIC learning: penalize bad info faster
-            # Also scale by confidence
+            # Update trust based on accuracy_reward
+            # EXPLOITERS: Fast to punish disagreement, slow to reward agreement (defensive)
+            # EXPLORERS: More balanced - willing to trust new sources that provide value
             if source_id in self.trust:
                 old_trust = self.trust[source_id]
                 if accuracy_reward < 0:
                     trust_target = max(0.0, 0.5 + accuracy_reward)
-                    base_trust_lr = 0.25 if self.agent_type == "exploratory" else 0.15
+                    # EXPLOITERS: Fast penalty (defensive, distrust easily)
+                    # EXPLORERS: Slower penalty (give sources more chances)
+                    base_trust_lr = 0.10 if self.agent_type == "exploratory" else 0.20
                 else:
                     trust_target = min(1.0, 0.5 + 0.5 * accuracy_reward)
-                    base_trust_lr = 0.12 if self.agent_type == "exploratory" else 0.06
+                    # EXPLORERS: Faster reward (quick to trust valuable sources)
+                    # EXPLOITERS: Slow reward (suspicious of new trust)
+                    base_trust_lr = 0.15 if self.agent_type == "exploratory" else 0.06
                 trust_lr = base_trust_lr * confidence_scaling
                 new_trust = max(0.0, min(1.0, old_trust + trust_lr * (trust_target - old_trust)))
                 self.trust[source_id] = new_trust
