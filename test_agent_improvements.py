@@ -230,19 +230,25 @@ def test_belief_accuracy_reward():
         # Test A: Correct belief (believes 4, actual 4, high confidence)
         agent.beliefs[test_cell] = {'level': 4, 'confidence': 0.8}
         agent.q_table['self_action'] = 0.0  # Reset
+        agent._belief_accuracy_rewards = []  # Clear accumulated rewards
         agent.reward_belief_accuracy(test_cell, actual_level=4)
+        agent.flush_belief_rewards()  # Apply accumulated rewards
         q_after_correct = agent.q_table['self_action']
 
         # Test B: Incorrect belief (believes 0, actual 4, high confidence)
         agent.q_table['self_action'] = 0.0  # Reset
+        agent._belief_accuracy_rewards = []  # Clear accumulated rewards
         agent.beliefs[test_cell] = {'level': 0, 'confidence': 0.8}
         agent.reward_belief_accuracy(test_cell, actual_level=4)
+        agent.flush_belief_rewards()  # Apply accumulated rewards
         q_after_incorrect = agent.q_table['self_action']
 
         # Test C: Low confidence belief should NOT update (confidence < 0.3)
         agent.q_table['self_action'] = 0.0  # Reset
+        agent._belief_accuracy_rewards = []  # Clear accumulated rewards
         agent.beliefs[test_cell] = {'level': 0, 'confidence': 0.2}
         agent.reward_belief_accuracy(test_cell, actual_level=4)
+        agent.flush_belief_rewards()  # Apply accumulated rewards (should be empty)
         q_after_low_conf = agent.q_table['self_action']
 
         results[agent_type] = {
