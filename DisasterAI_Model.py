@@ -433,10 +433,95 @@ class HumanAgent(Agent):
         directly for testing purposes."""
         if hasattr(self, '_belief_accuracy_rewards') and self._belief_accuracy_rewards:
             avg_reward = sum(self._belief_accuracy_rewards) / len(self._belief_accuracy_rewards)
-            learning_rate = 0.1 if self.agent_type == "exploratory" else 0.08
+            # EXPLORERS: Lower self_action learning rate - they should value external sources
+            # EXPLOITERS: Higher self_action learning rate - they trust themselves
+            learning_rate = 0.05 if self.agent_type == "exploratory" else 0.12
             old_q = self.q_table.get("self_action", 0.0)
             self.q_table["self_action"] = old_q + learning_rate * (avg_reward - old_q)
             self._belief_accuracy_rewards = []
+
+    def reward_belief_source(self, cell, actual_level):
+        """
+        Reward the source that contributed to our belief about this cell.
+        Called when sensing verifies a cell - gives credit to sources that
+        provided accurate information, even if the info was received long ago.
+
+        This is CRITICAL for explorers to learn to trust truthful AI:
+        - Explorer queries AI about remote cell
+        - AI gives correct answer (if truthful)
+        - Explorer eventually senses that cell (maybe 50+ ticks later)
+        - AI gets rewarded for being accurate
+
+        Without this, self_action dominates because it gets verified every tick,
+        while AI only gets credit within the 15-tick pending_info window.
+        """
+        if not hasattr(self, 'belief_sources'):
+            return
+
+        attribution = self.belief_sources.get(cell)
+        if not attribution:
+            return
+
+        source_id = attribution['source_id']
+        reported_level = attribution['reported_level']
+        tick_received = attribution['tick']
+
+        # Only reward if the info isn't too stale (within 100 ticks)
+        # This prevents ancient info from still affecting current Q-values
+        ticks_elapsed = self.model.tick - tick_received
+        if ticks_elapsed > 100:
+            # Info too old, remove attribution
+            del self.belief_sources[cell]
+            return
+
+        # Calculate accuracy reward based on how close the source's report was to reality
+        level_error = abs(reported_level - actual_level)
+        if level_error == 0:
+            accuracy_reward = 0.5   # Perfect - source was exactly right
+        elif level_error == 1:
+            accuracy_reward = 0.2   # Close
+        elif level_error == 2:
+            accuracy_reward = -0.1  # Moderate error
+        else:
+            accuracy_reward = -0.3  # Large error
+
+        # Scale reward by how long ago the info was (fresher = stronger)
+        # This encourages agents to seek recent information
+        freshness = max(0.3, 1.0 - (ticks_elapsed / 100.0))
+        accuracy_reward *= freshness
+
+        # Determine mode from source_id
+        if source_id.startswith("H_"):
+            mode = "human"
+        elif source_id.startswith("A_"):
+            mode = "ai"
+        else:
+            mode = None
+
+        # Update Q-value for the mode
+        # EXPLORERS: Higher learning rate to properly value verified accurate sources
+        # This counterbalances self_action which gets updated every tick
+        if mode and mode in self.q_table:
+            old_q = self.q_table[mode]
+            lr = 0.15 if self.agent_type == "exploratory" else 0.05
+            self.q_table[mode] = old_q + lr * (accuracy_reward - old_q)
+
+        # Update trust if source is tracked
+        if source_id in self.trust:
+            old_trust = self.trust[source_id]
+            if accuracy_reward > 0:
+                # Accurate info: increase trust
+                trust_target = min(1.0, 0.5 + 0.5 * accuracy_reward)
+                trust_lr = 0.08
+            else:
+                # Inaccurate info: decrease trust
+                trust_target = max(0.0, 0.5 + accuracy_reward)
+                trust_lr = 0.12
+            new_trust = max(0.0, min(1.0, old_trust + trust_lr * (trust_target - old_trust)))
+            self.trust[source_id] = new_trust
+
+        # Remove attribution after processing (one-time reward)
+        del self.belief_sources[cell]
 
     def sense_environment(self):
         pos = self.pos
@@ -445,6 +530,11 @@ class HumanAgent(Agent):
         for cell in cells:
             if 0 <= cell[0] < self.model.width and 0 <= cell[1] < self.model.height:
                 actual = self.model.disaster_grid[cell[0], cell[1]]
+
+                # BELIEF ATTRIBUTION REWARD: If a source contributed to our belief about
+                # this cell, reward them based on how accurate their info was.
+                # This allows AI to get credit for remote cell info when finally verified.
+                self.reward_belief_source(cell, actual)
 
                 # Issue 2 FIX: Reward agent's own belief accuracy BEFORE updating belief
                 # This is separate from source quality - evaluates agent's internal model
@@ -1220,6 +1310,18 @@ class HumanAgent(Agent):
             level_change = abs(posterior_level - prior_level)
             confidence_change = abs(posterior_confidence - prior_confidence)
             significant_change = (level_change >= 1 or confidence_change >= 0.1)
+
+            # BELIEF ATTRIBUTION: Track which source contributed to this belief
+            # This allows us to reward sources when beliefs are later verified accurate
+            if source_id and significant_change:
+                if not hasattr(self, 'belief_sources'):
+                    self.belief_sources = {}
+                # Store source_id, reported_level, and tick for later verification
+                self.belief_sources[cell] = {
+                    'source_id': source_id,
+                    'reported_level': int(reported_level),
+                    'tick': self.model.tick
+                }
 
             # Track information for quality feedback
             # CRITICAL FIX: Track ALL external queries (human/AI), not just significant changes
