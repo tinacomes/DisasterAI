@@ -121,9 +121,14 @@ class HumanAgent(Agent):
 
         # --- Belief Update Parameters ---
         # These control how beliefs change when info is ACCEPTED (separate from Q-learning)
-        self.D = 2.0 if agent_type == "exploitative" else 4 # Acceptance threshold parameter
-        self.delta = 3.5 if agent_type == "exploitative" else 1.2 # Acceptance sensitivity parameter
-        self.belief_learning_rate = 0.9 if agent_type == "exploratory" else 0.4 # How much belief shifts towards accepted info
+        # Based on psychological acceptance model from: https://bpspsychub.onlinelibrary.wiley.com/doi/10.1111/bjso.12286
+        # The formula P_accept = D^delta / (d^delta + D^delta) models resistance to accepting
+        # information that conflicts with existing beliefs, where d = |reported - prior|
+        self.D = 2.0 if agent_type == "exploitative" else 4.0  # Acceptance threshold parameter
+        self.delta = 3.5 if agent_type == "exploitative" else 1.2  # Acceptance sensitivity parameter
+        self.belief_learning_rate = 0.9 if agent_type == "exploratory" else 0.4  # How much belief shifts towards accepted info
+        self.min_accept_chance = 0.05  # Minimum probability to accept info (ensures some openness)
+        self.friend_accept_boost = 2.5 if agent_type == "exploitative" else 1.0  # Exploiters more open to friend info
 
         # --- Other Parameters & Counters ---
         self.trust_update_mode = model.trust_update_mode # Affects trust increment size? Seems used in removed code? Check usage.
@@ -1174,33 +1179,51 @@ class HumanAgent(Agent):
             # Apply a minimum confidence threshold to prevent wild swings
             prior_confidence = max(0.1, prior_confidence)
 
-            # EXPLOITER REJECTION MECHANISM: Reject conflicting information
-            # Exploiters with high confidence REJECT info that conflicts with their beliefs
+            # INFORMATION ACCEPTANCE MECHANISM (based on psychology research)
+            # Models cognitive resistance to accepting conflicting information
+            # Paper: https://bpspsychub.onlinelibrary.wiley.com/doi/10.1111/bjso.12286
+            #
+            # P_accept = D^delta / (d^delta + D^delta) where d = |reported - prior|
+            # - Exploiters: D=2.0, delta=3.5 → sharp rejection of distant info
+            # - Explorers: D=4.0, delta=1.2 → gradual acceptance curve
             level_diff = abs(reported_level - prior_level)
-            if self.agent_type == "exploitative" and prior_confidence > 0.4:
-                # Higher confidence = higher rejection threshold
-                # If info differs by 2+ levels and confidence is high, likely reject
-                rejection_prob = 0.0
-                if level_diff >= 3:
-                    rejection_prob = 0.9 * prior_confidence  # Almost always reject big differences
-                elif level_diff >= 2:
-                    rejection_prob = 0.7 * prior_confidence  # Often reject moderate differences
-                elif level_diff >= 1:
-                    rejection_prob = 0.3 * prior_confidence  # Sometimes reject small differences
 
-                # Friends get a pass - lower rejection probability
-                is_friend = source_id in self.friends if source_id else False
-                if is_friend:
-                    rejection_prob *= 0.3  # Much less likely to reject friend info
+            # Calculate base acceptance probability using the D/delta formula
+            if level_diff == 0:
+                base_P_accept = 1.0  # Always accept confirming information
+            else:
+                # Sigmoid-like acceptance curve: decreases as level_diff increases
+                base_P_accept = (self.D ** self.delta) / ((level_diff ** self.delta) + (self.D ** self.delta))
 
-                if random.random() < rejection_prob:
-                    # REJECT the information - still track for feedback but don't update belief
-                    if source_id:
-                        self.pending_info_evaluations.append((
-                            self.model.tick, source_id, cell,
-                            int(reported_level), int(prior_level), float(prior_confidence)
-                        ))
-                    return False  # No belief change
+            # Friend boost: Exploiters are more accepting of friend information
+            is_friend = source_id in self.friends if source_id else False
+            if is_friend:
+                base_P_accept *= self.friend_accept_boost
+            base_P_accept = max(0.0, min(1.0, base_P_accept))  # Clip to valid probability
+
+            # Trust-weighted acceptance: lower trust = lower acceptance chance
+            source_trust_for_accept = self.trust.get(source_id, 0.5) if source_id else 0.5
+            trust_scaled_P = base_P_accept * source_trust_for_accept
+
+            # Apply minimum acceptance chance (ensures some openness to new info)
+            P_accept = self.min_accept_chance + (1.0 - self.min_accept_chance) * trust_scaled_P
+            P_accept = max(0.0, min(1.0, P_accept))
+
+            # Confidence scaling: high-confidence agents are more resistant to change
+            # This applies to BOTH agent types but more strongly to exploiters
+            if prior_confidence > 0.5:
+                confidence_resistance = 1.0 - (prior_confidence - 0.5)  # 0.5-1.0 maps to 0.5-0.0 reduction
+                P_accept *= confidence_resistance
+
+            # Roll the dice: does the agent accept this information?
+            if random.random() >= P_accept:
+                # REJECT the information - still track for feedback but don't update belief
+                if source_id:
+                    self.pending_info_evaluations.append((
+                        self.model.tick, source_id, cell,
+                        int(reported_level), int(prior_level), float(prior_confidence)
+                    ))
+                return False  # No belief change
 
             # Convert confidence to precision with agent-specific scaling
             if self.agent_type == "exploitative":
@@ -7869,6 +7892,361 @@ def plot_tipping_point_waterfall(results_dict, param_values, param_name="AI Alig
         traceback.print_exc()
 
 
+def plot_transition_timing_vs_alignment(results_dict, alignment_values, param_name="AI Alignment"):
+    """
+    Plot when (at which tick) key behavioral transitions occur during simulation,
+    showing timing vs AI alignment level for both agent types.
+
+    Transitions tracked:
+    1. AI Trust Overtakes Friend Trust
+    2. Social Echo Chamber Breaks (SECI → 0)
+    3. AI Query Ratio > 50%
+    4. System-Wide Transitions (AECI-Var → 0, Info Diversity Surge)
+
+    Args:
+        results_dict: Dictionary mapping alignment values to aggregated results
+        alignment_values: List of alignment values (sorted)
+        param_name: Name of the parameter being varied
+    """
+    print(f"\n=== Generating Transition Timing vs {param_name} ===")
+
+    try:
+        fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+        fig.suptitle(f"Transition Timing vs {param_name}\n(When do behavioral shifts occur during simulation?)",
+                     fontsize=14, fontweight='bold')
+
+        # Track transition ticks for each alignment level
+        ai_trust_overtakes_exploit = []
+        ai_trust_overtakes_explor = []
+        seci_breaks_exploit = []
+        seci_breaks_explor = []
+        ai_query_high_exploit = []
+        ai_query_high_explor = []
+        aeci_var_zero = []
+        info_div_surge = []
+
+        for align in sorted(alignment_values):
+            res = results_dict.get(align, {})
+
+            # Helper to find first tick where condition is met across runs
+            def find_first_transition(data_array, col_idx, condition_func):
+                """Find mean tick when condition first occurs across runs."""
+                if data_array is None or not isinstance(data_array, np.ndarray):
+                    return np.nan
+                if data_array.ndim < 3 or data_array.shape[1] == 0:
+                    return np.nan
+
+                transition_ticks = []
+                num_runs = data_array.shape[0]
+
+                for run_idx in range(num_runs):
+                    run_data = data_array[run_idx, :, :]
+                    for tick_idx in range(run_data.shape[0]):
+                        if condition_func(run_data, tick_idx, col_idx):
+                            transition_ticks.append(run_data[tick_idx, 0])  # Col 0 is tick
+                            break
+
+                return np.mean(transition_ticks) if transition_ticks else np.nan
+
+            # 1. AI Trust Overtakes Friend Trust
+            trust = res.get("trust_stats")
+            if trust is not None and isinstance(trust, np.ndarray) and trust.ndim >= 3:
+                def ai_beats_friend_exploit(data, t, _):
+                    return data[t, 1] > data[t, 2] if data.shape[1] > 2 else False  # AI vs Friend for exploitative
+                def ai_beats_friend_explor(data, t, _):
+                    return data[t, 4] > data[t, 5] if data.shape[1] > 5 else False  # AI vs Friend for exploratory
+                ai_trust_overtakes_exploit.append(find_first_transition(trust, 1, ai_beats_friend_exploit))
+                ai_trust_overtakes_explor.append(find_first_transition(trust, 4, ai_beats_friend_explor))
+            else:
+                ai_trust_overtakes_exploit.append(np.nan)
+                ai_trust_overtakes_explor.append(np.nan)
+
+            # 2. SECI crosses zero (social bubble breaks)
+            seci = res.get("seci")
+            if seci is not None and isinstance(seci, np.ndarray) and seci.ndim >= 3:
+                def seci_positive(data, t, col):
+                    return data[t, col] > 0 if data.shape[1] > col else False
+                seci_breaks_exploit.append(find_first_transition(seci, 1, seci_positive))
+                seci_breaks_explor.append(find_first_transition(seci, 2, seci_positive))
+            else:
+                seci_breaks_exploit.append(np.nan)
+                seci_breaks_explor.append(np.nan)
+
+            # 3. AI Query Ratio > 50%
+            aeci = res.get("aeci")
+            if aeci is not None and isinstance(aeci, np.ndarray) and aeci.ndim >= 3:
+                def ai_majority(data, t, col):
+                    return data[t, col] > 0.5 if data.shape[1] > col else False
+                ai_query_high_exploit.append(find_first_transition(aeci, 1, ai_majority))
+                ai_query_high_explor.append(find_first_transition(aeci, 2, ai_majority))
+            else:
+                ai_query_high_exploit.append(np.nan)
+                ai_query_high_explor.append(np.nan)
+
+            # 4. System-wide transitions
+            aeci_var = res.get("aeci_variance")
+            if aeci_var is not None and isinstance(aeci_var, np.ndarray) and aeci_var.ndim >= 3:
+                def aeci_near_zero(data, t, col):
+                    return abs(data[t, col]) < 0.01 if data.shape[1] > col else False
+                aeci_var_zero.append(find_first_transition(aeci_var, 1, aeci_near_zero))
+            else:
+                aeci_var_zero.append(np.nan)
+
+            info_div = res.get("info_diversity")
+            if info_div is not None and isinstance(info_div, np.ndarray) and info_div.ndim >= 3:
+                # Track first tick where diversity exceeds initial by 50%
+                def info_surge(data, t, col):
+                    if data.shape[1] <= col or t < 5:
+                        return False
+                    initial = np.mean(data[:5, col])
+                    return data[t, col] > initial * 1.5 if initial > 0 else False
+                info_div_surge.append(find_first_transition(info_div, 1, info_surge))
+            else:
+                info_div_surge.append(np.nan)
+
+        # Plot 1: AI Trust Overtakes Friend Trust
+        ax1 = axes[0, 0]
+        x_vals = np.array(alignment_values)
+        ax1.plot(x_vals, ai_trust_overtakes_exploit, 'o-', color='darkred', linewidth=2, markersize=8, label='Exploitative')
+        ax1.plot(x_vals, ai_trust_overtakes_explor, 'o-', color='salmon', linewidth=2, markersize=8, label='Exploratory')
+        ax1.set_xlabel(param_name)
+        ax1.set_ylabel("Tick (when transition occurs)")
+        ax1.set_title("AI Trust Overtakes Friend Trust")
+        ax1.legend()
+        ax1.grid(True, alpha=0.3)
+
+        # Plot 2: Social Echo Chamber Breaks
+        ax2 = axes[0, 1]
+        ax2.plot(x_vals, seci_breaks_exploit, 'o-', color='darkblue', linewidth=2, markersize=8, label='Exploitative')
+        ax2.plot(x_vals, seci_breaks_explor, 'o-', color='skyblue', linewidth=2, markersize=8, label='Exploratory')
+        ax2.set_xlabel(param_name)
+        ax2.set_ylabel("Tick (when transition occurs)")
+        ax2.set_title("Social Echo Chamber Breaks (SECI → 0)")
+        ax2.legend()
+        ax2.grid(True, alpha=0.3)
+
+        # Plot 3: AI Query Ratio > 50%
+        ax3 = axes[1, 0]
+        ax3.plot(x_vals, ai_query_high_exploit, 'o-', color='darkgreen', linewidth=2, markersize=8, label='Exploitative')
+        ax3.plot(x_vals, ai_query_high_explor, 'o-', color='lightgreen', linewidth=2, markersize=8, label='Exploratory')
+        ax3.set_xlabel(param_name)
+        ax3.set_ylabel("Tick (when transition occurs)")
+        ax3.set_title("AI Query Ratio > 50%")
+        ax3.legend()
+        ax3.grid(True, alpha=0.3)
+
+        # Plot 4: System-Wide Transitions
+        ax4 = axes[1, 1]
+        ax4.plot(x_vals, aeci_var_zero, 'o-', color='magenta', linewidth=2, markersize=8, label='AECI-Var → 0')
+        ax4.plot(x_vals, info_div_surge, 'o-', color='orange', linewidth=2, markersize=8, label='Info Div Surge')
+        ax4.set_xlabel(param_name)
+        ax4.set_ylabel("Tick (when transition occurs)")
+        ax4.set_title("System-Wide Transitions")
+        ax4.legend()
+        ax4.grid(True, alpha=0.3)
+
+        plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+        plt.savefig("agent_model_results/transition_timing_vs_alignment.png", dpi=300, bbox_inches='tight')
+        print("Transition timing plot saved successfully")
+        plt.close()
+
+    except Exception as e:
+        print(f"Error in plot_transition_timing_vs_alignment: {e}")
+        import traceback
+        traceback.print_exc()
+
+
+def plot_echo_chamber_lifecycle(results_dict, alignment_values, param_name="AI Alignment"):
+    """
+    Plot echo chamber lifecycle showing formation, peak, and dissolution over time.
+
+    Shows:
+    1. SECI time series for exploitative agents (echo chamber formation & dissolution)
+    2. SECI time series for exploratory agents
+    3. AI Belief Variance Reduction over time
+    4. Maximum Chamber Strength (peak |SECI|)
+    5. When Do Chambers Peak? (tick of peak)
+    6. How Long Do Chambers Persist? (duration with SECI < -0.1)
+
+    Args:
+        results_dict: Dictionary mapping alignment values to aggregated results
+        alignment_values: List of alignment values (sorted)
+        param_name: Name of the parameter being varied
+    """
+    print(f"\n=== Generating Echo Chamber Lifecycle ===")
+
+    try:
+        fig = plt.figure(figsize=(16, 12))
+        fig.suptitle("Echo Chamber Lifecycle: Rise and Fall\n(How filter bubbles form, peak, and dissolve)",
+                     fontsize=14, fontweight='bold')
+
+        # Create grid for subplots
+        gs = fig.add_gridspec(3, 3, hspace=0.35, wspace=0.3)
+
+        # Color map for alignment levels
+        colors = plt.cm.viridis(np.linspace(0, 1, len(alignment_values)))
+
+        # Track lifecycle metrics for bar charts
+        peak_strengths_exploit = []
+        peak_strengths_explor = []
+        peak_ticks_exploit = []
+        peak_ticks_explor = []
+        durations_exploit = []
+        durations_explor = []
+
+        # Plot 1: SECI Evolution - Exploitative (top-left, spans 2 columns)
+        ax1 = fig.add_subplot(gs[0, :2])
+        ax1.axhline(y=0, color='gray', linestyle='--', alpha=0.5, label='Neutral (SECI=0)')
+        ax1.axhline(y=-0.1, color='orange', linestyle=':', alpha=0.5, label='Chamber threshold')
+
+        for idx, align in enumerate(sorted(alignment_values)):
+            res = results_dict.get(align, {})
+            seci = res.get("seci")
+
+            if seci is not None and isinstance(seci, np.ndarray) and seci.ndim >= 3:
+                # Average across runs for this alignment level
+                mean_seci_exploit = np.mean(seci[:, :, 1], axis=0)
+                ticks = np.arange(len(mean_seci_exploit))
+
+                # Plot with shaded confidence interval
+                std_seci = np.std(seci[:, :, 1], axis=0)
+                ax1.plot(ticks, mean_seci_exploit, color=colors[idx], linewidth=2,
+                        label=f'{param_name}={align}', alpha=0.8)
+                ax1.fill_between(ticks, mean_seci_exploit - std_seci, mean_seci_exploit + std_seci,
+                               color=colors[idx], alpha=0.15)
+
+                # Calculate lifecycle metrics
+                peak_idx = np.argmin(mean_seci_exploit)  # Most negative SECI
+                peak_strengths_exploit.append(abs(np.min(mean_seci_exploit)))
+                peak_ticks_exploit.append(peak_idx)
+                durations_exploit.append(np.sum(mean_seci_exploit < -0.1))
+            else:
+                peak_strengths_exploit.append(0)
+                peak_ticks_exploit.append(0)
+                durations_exploit.append(0)
+
+        ax1.set_xlabel("Simulation Tick")
+        ax1.set_ylabel("SECI (Social Echo Chamber Index)")
+        ax1.set_title("Exploitative Agents: Echo Chamber Formation & Dissolution")
+        ax1.legend(fontsize=8, loc='lower right')
+        ax1.grid(True, alpha=0.3)
+        ax1.annotate('⬇ Negative SECI = Social homophily\n(agents prefer similar friends)',
+                    xy=(0.02, 0.98), xycoords='axes fraction', fontsize=8,
+                    verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.3))
+
+        # Plot 2: Max Chamber Strength (top-right)
+        ax2 = fig.add_subplot(gs[0, 2])
+        x = np.arange(len(alignment_values))
+        width = 0.35
+        ax2.bar(x - width/2, peak_strengths_exploit, width, label='Exploitative', color='coral')
+        ax2.bar(x + width/2, peak_strengths_explor if peak_strengths_explor else [0]*len(alignment_values),
+                width, label='Exploratory', color='lightblue')
+        ax2.set_xlabel(param_name)
+        ax2.set_ylabel("Peak Echo Chamber Strength\n|SECI|")
+        ax2.set_title("Maximum Chamber Strength")
+        ax2.set_xticks(x)
+        ax2.set_xticklabels(alignment_values)
+        ax2.legend(fontsize=8)
+        ax2.grid(True, alpha=0.3, axis='y')
+
+        # Plot 3: SECI Evolution - Exploratory (middle-left, spans 2 columns)
+        ax3 = fig.add_subplot(gs[1, :2])
+        ax3.axhline(y=0, color='gray', linestyle='--', alpha=0.5)
+        ax3.axhline(y=-0.1, color='orange', linestyle=':', alpha=0.5)
+
+        for idx, align in enumerate(sorted(alignment_values)):
+            res = results_dict.get(align, {})
+            seci = res.get("seci")
+
+            if seci is not None and isinstance(seci, np.ndarray) and seci.ndim >= 3:
+                mean_seci_explor = np.mean(seci[:, :, 2], axis=0)
+                ticks = np.arange(len(mean_seci_explor))
+
+                std_seci = np.std(seci[:, :, 2], axis=0)
+                ax3.plot(ticks, mean_seci_explor, color=colors[idx], linewidth=2,
+                        label=f'{param_name}={align}', alpha=0.8)
+                ax3.fill_between(ticks, mean_seci_explor - std_seci, mean_seci_explor + std_seci,
+                               color=colors[idx], alpha=0.15)
+
+                # Calculate lifecycle metrics for exploratory
+                peak_idx = np.argmin(mean_seci_explor)
+                peak_strengths_explor.append(abs(np.min(mean_seci_explor)))
+                peak_ticks_explor.append(peak_idx)
+                durations_explor.append(np.sum(mean_seci_explor < -0.1))
+            else:
+                peak_strengths_explor.append(0)
+                peak_ticks_explor.append(0)
+                durations_explor.append(0)
+
+        ax3.set_xlabel("Simulation Tick")
+        ax3.set_ylabel("SECI (Social Echo Chamber Index)")
+        ax3.set_title("Exploratory Agents: Echo Chamber Formation & Dissolution")
+        ax3.legend(fontsize=8, loc='lower right')
+        ax3.grid(True, alpha=0.3)
+
+        # Plot 4: When Do Chambers Peak? (middle-right)
+        ax4 = fig.add_subplot(gs[1, 2])
+        ax4.bar(x - width/2, peak_ticks_exploit, width, label='Exploitative', color='darkblue')
+        ax4.bar(x + width/2, peak_ticks_explor if peak_ticks_explor else [0]*len(alignment_values),
+                width, label='Exploratory', color='lightblue')
+        ax4.set_xlabel(param_name)
+        ax4.set_ylabel("Time to Peak (ticks)")
+        ax4.set_title("When Do Chambers Peak?")
+        ax4.set_xticks(x)
+        ax4.set_xticklabels(alignment_values)
+        ax4.legend(fontsize=8)
+        ax4.grid(True, alpha=0.3, axis='y')
+
+        # Plot 5: AI Belief Variance Reduction (bottom-left, spans 2 columns)
+        ax5 = fig.add_subplot(gs[2, :2])
+        ax5.axhline(y=0, color='gray', linestyle='--', alpha=0.5, label='Neutral')
+
+        for idx, align in enumerate(sorted(alignment_values)):
+            res = results_dict.get(align, {})
+            aeci_var = res.get("aeci_variance")
+
+            if aeci_var is not None and isinstance(aeci_var, np.ndarray) and aeci_var.ndim >= 3:
+                mean_aeci_var = np.mean(aeci_var[:, :, 1], axis=0)
+                ticks = np.arange(len(mean_aeci_var))
+
+                std_aeci = np.std(aeci_var[:, :, 1], axis=0)
+                ax5.plot(ticks, mean_aeci_var, color=colors[idx], linewidth=2,
+                        label=f'{param_name}={align}', alpha=0.8)
+                ax5.fill_between(ticks, mean_aeci_var - std_aeci, mean_aeci_var + std_aeci,
+                               color=colors[idx], alpha=0.15)
+
+        ax5.set_xlabel("Simulation Tick")
+        ax5.set_ylabel("AECI-Var (AI Echo Chamber Index)")
+        ax5.set_title("AI Belief Variance Reduction Over Time")
+        ax5.legend(fontsize=8, loc='lower right')
+        ax5.grid(True, alpha=0.3)
+        ax5.annotate('⬇ Negative = AI-reliant agents have\nlower belief variance (convergence)',
+                    xy=(0.02, 0.98), xycoords='axes fraction', fontsize=8,
+                    verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.3))
+
+        # Plot 6: How Long Do Chambers Persist? (bottom-right)
+        ax6 = fig.add_subplot(gs[2, 2])
+        ax6.bar(x - width/2, durations_exploit, width, label='Exploitative', color='darkgreen')
+        ax6.bar(x + width/2, durations_explor if durations_explor else [0]*len(alignment_values),
+                width, label='Exploratory', color='lightgreen')
+        ax6.set_xlabel(param_name)
+        ax6.set_ylabel("Duration (ticks with SECI<-0.1)")
+        ax6.set_title("How Long Do Chambers Persist?")
+        ax6.set_xticks(x)
+        ax6.set_xticklabels(alignment_values)
+        ax6.legend(fontsize=8)
+        ax6.grid(True, alpha=0.3, axis='y')
+
+        plt.savefig("agent_model_results/echo_chamber_lifecycle.png", dpi=300, bbox_inches='tight')
+        print("Echo chamber lifecycle plot saved successfully")
+        plt.close()
+
+    except Exception as e:
+        print(f"Error in plot_echo_chamber_lifecycle: {e}")
+        import traceback
+        traceback.print_exc()
+
+
 def debug_aeci_variance_data(results_dict, title_suffix=""):
     """Inspects and prints detailed AECI variance data structure"""
     print(f"\n=== AECI Variance Data Inspection for {title_suffix} ===")
@@ -7967,7 +8345,7 @@ if __name__ == "__main__":
     ##############################################
     # Experiment A: Vary share_exploitative
     ##############################################
-    share_values = [0.2, 0,5, 0.8]
+    share_values = [0.2, 0.5, 0.8]
     file_a_pkl = os.path.join(save_dir, "results_experiment_A.pkl")
     file_a_csv = os.path.join(save_dir, "results_experiment_A.csv")
 
@@ -8035,6 +8413,11 @@ if __name__ == "__main__":
         print(f"\n--- Plotting Advanced Bubble Mechanics for {param_name_b} ---")
         plot_phase_diagram_bubbles(results_b, all_alignment_values, param_name="AI Alignment")
         plot_tipping_point_waterfall(results_b, all_alignment_values, param_name="AI Alignment")
+
+        # NEW: Temporal transition and lifecycle visualizations
+        print(f"\n--- Plotting Temporal Transition & Lifecycle for {param_name_b} ---")
+        plot_transition_timing_vs_alignment(results_b, all_alignment_values, param_name="AI Alignment")
+        plot_echo_chamber_lifecycle(results_b, all_alignment_values, param_name="AI Alignment")
 
     ##############################################
     # Experiment C: Vary Disaster Dynamics and Shock Magnitude
