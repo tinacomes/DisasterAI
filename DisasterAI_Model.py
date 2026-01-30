@@ -542,6 +542,10 @@ class HumanAgent(Agent):
                 continue
 
             # Within window: evaluate information quality
+            # Determine source type for differentiated evaluation
+            is_ai_source = source_id.startswith("A_")
+            is_human_source = source_id.startswith("H_")
+
             # Calculate ACCURACY score: how close was reported level to actual ground truth
             level_error = abs(reported_level - actual_level)
             if level_error == 0:
@@ -570,7 +574,39 @@ class HumanAgent(Agent):
             else:
                 confirmation_score = -0.6  # Strongly contradicts prior
 
-            # Weighted combination by agent type:
+            # SOURCE KNOWLEDGE CONFIDENCE: How likely did the source KNOW the truth?
+            # This scales the learning rate (signal strength), not the reward itself.
+            # - AI: Broad sensing radius → high confidence they knew truth
+            # - Human on remote cell: Limited radius → may not have known (weaker signal)
+            # - Human on nearby cell: Could have sensed it → stronger signal
+            # - Friends: For exploiters, friend info is more trusted (authentic shared beliefs)
+            #
+            # The Q-learning then naturally learns to trust sources based on actual outcomes,
+            # but with appropriate signal strength based on source knowledge.
+
+            # Determine if this cell was likely within the source's sensing range
+            # For humans, sensing radius is 2. For AI, effectively unlimited.
+            # We use the querying agent's distance as a proxy (if remote for us, likely remote for human too)
+            cell_was_remote = not self.is_within_sensing_range(cell)
+
+            # Calculate source knowledge confidence
+            if is_ai_source:
+                # AI has broad knowledge - high confidence they knew the truth
+                source_knowledge_conf = 1.0
+            elif is_human_source:
+                if cell_was_remote:
+                    # Human likely didn't directly sense this cell - weaker signal
+                    source_knowledge_conf = 0.5
+                else:
+                    # Human could have sensed this cell - stronger signal
+                    source_knowledge_conf = 0.9
+                # Friends get slight boost for exploiters (authentic shared beliefs)
+                if self.agent_type == "exploitative" and source_id in self.friends:
+                    source_knowledge_conf = min(1.0, source_knowledge_conf * 1.2)
+            else:
+                source_knowledge_conf = 0.7  # Unknown source type
+
+            # Weighted combination by agent type (no hardcoded biases based on source type)
             # Exploiters value CONFIRMATION over accuracy (0.8/0.2)
             # Explorers value ACCURACY over confirmation (0.8/0.2)
             if self.agent_type == "exploitative":
@@ -582,19 +618,21 @@ class HumanAgent(Agent):
             accuracy_reward = combined_reward * 0.6 - 0.1
 
             # Determine mode from source_id (map to high-level modes)
-            if source_id.startswith("H_"):
+            if is_human_source:
                 mode = "human"
-            elif source_id.startswith("A_"):
+            elif is_ai_source:
                 mode = "ai"  # Generic AI mode (not individual AI)
             else:
                 mode = None
 
             # Update mode Q-value (what's used in action selection)
+            # SCALE BY SOURCE KNOWLEDGE: stronger signal when source likely knew the truth
             if mode and mode in self.q_table:
                 old_mode_q = self.q_table[mode]
-                # Info quality feedback should be FAST and STRONG
-                # Use higher learning rate for exploratory agents to learn quickly from info
-                info_learning_rate = 0.25 if self.agent_type == "exploratory" else 0.12
+                # Base learning rate by agent type
+                base_lr = 0.25 if self.agent_type == "exploratory" else 0.12
+                # Scale by source knowledge confidence
+                info_learning_rate = base_lr * source_knowledge_conf
                 # Use standard Q-learning update: Q += lr * (reward - Q)
                 new_mode_q = old_mode_q + info_learning_rate * (accuracy_reward - old_mode_q)
                 self.q_table[mode] = new_mode_q
@@ -602,12 +640,14 @@ class HumanAgent(Agent):
             # Also update specific source Q-value (for tracking individuals)
             if source_id in self.q_table:
                 old_q = self.q_table[source_id]
-                info_learning_rate = 0.25 if self.agent_type == "exploratory" else 0.12
+                base_lr = 0.25 if self.agent_type == "exploratory" else 0.12
+                info_learning_rate = base_lr * source_knowledge_conf
                 # Use standard Q-learning update: Q += lr * (reward - Q)
                 new_q = old_q + info_learning_rate * (accuracy_reward - old_q)
                 self.q_table[source_id] = new_q
 
             # Update trust with ASYMMETRIC learning: penalize bad info faster
+            # SCALE BY SOURCE KNOWLEDGE: weaker updates when source may not have known
             if source_id in self.trust:
                 old_trust = self.trust[source_id]
                 # More aggressive trust target: bad info → low trust, good info → high trust
@@ -615,11 +655,13 @@ class HumanAgent(Agent):
                 if accuracy_reward < 0:
                     # Bad info: aggressive penalty, target drops to 0 for worst case
                     trust_target = max(0.0, 0.5 + accuracy_reward)  # -0.7→0, 0→0.5
-                    trust_lr = 0.25 if self.agent_type == "exploratory" else 0.15  # FAST penalty
+                    base_trust_lr = 0.25 if self.agent_type == "exploratory" else 0.15
                 else:
                     # Good info: moderate reward
                     trust_target = min(1.0, 0.5 + 0.5 * accuracy_reward)  # 0→0.5, +0.5→0.75
-                    trust_lr = 0.12 if self.agent_type == "exploratory" else 0.06  # Slower reward
+                    base_trust_lr = 0.12 if self.agent_type == "exploratory" else 0.06
+                # Scale trust update by source knowledge confidence
+                trust_lr = base_trust_lr * source_knowledge_conf
                 new_trust = max(0.0, min(1.0, old_trust + trust_lr * (trust_target - old_trust)))
                 self.trust[source_id] = new_trust
 
@@ -668,13 +710,24 @@ class HumanAgent(Agent):
 
             ticks_elapsed = current_tick - tick_received
 
-            # Too old — expire without evaluation
-            if ticks_elapsed > 15:
-                evaluated.append(item)
-                continue
-
             # Too soon — wait for beliefs to stabilize
             if ticks_elapsed < 3:
+                continue
+
+            # Check if this is a remote cell (outside sensing range)
+            is_remote_cell = not self.is_within_sensing_range(cell)
+
+            # CRITICAL FIX: Remote cells for EXPLORERS get extended expiry window (30 ticks)
+            # They need time to move and sense the cell for ground truth verification.
+            # Non-remote cells and exploiters use normal 15-tick window.
+            if self.agent_type == "exploratory" and is_remote_cell:
+                expiry_window = 30  # Extended window for explorers to reach and sense remote cells
+            else:
+                expiry_window = 15  # Normal window
+
+            # Too old — expire without evaluation
+            if ticks_elapsed > expiry_window:
+                evaluated.append(item)
                 continue
 
             # Within evaluation window: use current belief as reference
@@ -709,14 +762,11 @@ class HumanAgent(Agent):
             # truthful sources that report correct info that differs from wrong beliefs.
             #
             # EXPLOITERS: Use confirmation scoring (they want agreeing sources)
-            # EXPLORERS: For remote cells, defer accuracy eval OR use neutral score
+            # EXPLORERS: For remote cells, defer to evaluate_information_quality when sensed
             #            Only evaluate accuracy for cells they can actually verify (sensed cells)
 
             if belief_conf < 0.15:
                 continue  # Skip only if we have almost no information
-
-            # Check if this is a remote cell (outside sensing range)
-            is_remote_cell = not self.is_within_sensing_range(cell)
 
             # Scale learning rate by confidence - uncertain references lead to weaker updates
             confidence_scaling = min(1.0, belief_conf / 0.5)  # Full strength at 0.5+ confidence
@@ -753,6 +803,28 @@ class HumanAgent(Agent):
             else:
                 confirmation_score = -0.8  # Exploiters strongly penalize large disagreement
 
+            # Determine source type from source_id
+            is_ai_source = source_id.startswith("A_")
+            is_human_source = source_id.startswith("H_")
+
+            # SOURCE KNOWLEDGE CONFIDENCE: How likely did the source KNOW the truth?
+            # This scales the learning rate - stronger signal when source likely knew.
+            # - AI: Broad sensing → high confidence they knew truth
+            # - Human on remote cell: Limited radius → may not have known (weaker signal)
+            # - Friends: For exploiters, friend info is more meaningful (authentic shared beliefs)
+            if is_ai_source:
+                source_knowledge_conf = 1.0  # AI has broad knowledge
+            elif is_human_source:
+                if is_remote_cell:
+                    source_knowledge_conf = 0.5  # Human likely didn't sense this cell
+                else:
+                    source_knowledge_conf = 0.9  # Human could have sensed it
+                # Friends are more meaningful for exploiters (authentic shared beliefs)
+                if self.agent_type == "exploitative" and source_id in self.friends:
+                    source_knowledge_conf = min(1.0, source_knowledge_conf * 1.2)
+            else:
+                source_knowledge_conf = 0.7  # Unknown source type
+
             # Weighted combination by agent type
             # EXPLOITERS: Almost entirely driven by confirmation (they want to hear what they believe)
             # EXPLORERS: Almost entirely driven by accuracy (they want correct information)
@@ -761,16 +833,14 @@ class HumanAgent(Agent):
                 combined_reward = 0.95 * confirmation_score + 0.05 * accuracy_score
             else:
                 # EXPLORERS reward sources based on accuracy for sensed cells
-                # For REMOTE cells, accuracy_score is 0 (can't verify), so give a small
-                # bonus for providing NEW information (info different from current belief)
+                # CRITICAL FIX: For REMOTE cells, DON'T evaluate yet - defer until sensed
+                # This prevents confirming AI from getting free pass with neutral score
                 if is_remote_cell:
-                    # Explorer gathering info about remote cell:
-                    # - Can't verify accuracy yet (accuracy_score = 0)
-                    # - Give small positive reward for NEW info (different from belief)
-                    # - This encourages explorers to value sources that expand their knowledge
-                    level_diff = abs(reported_level - reference_level)
-                    novelty_bonus = 0.1 if level_diff > 0 else 0.0  # Bonus for new info
-                    combined_reward = novelty_bonus  # Neutral + novelty bonus
+                    # Explorer querying remote cell: DEFER evaluation until sensed
+                    # Don't give neutral score - wait for ground truth verification
+                    # Item will be evaluated by evaluate_information_quality when sensed,
+                    # or expire after extended window (30 ticks for remote cells)
+                    continue  # Skip this item, keep it pending
                 else:
                     # Sensed cell: can verify accuracy properly
                     combined_reward = 0.95 * accuracy_score + 0.05 * confirmation_score
@@ -778,30 +848,32 @@ class HumanAgent(Agent):
             accuracy_reward = combined_reward * 0.7 - 0.1  # Slightly larger scale
 
             # Determine mode from source_id
-            if source_id.startswith("H_"):
+            if is_human_source:
                 mode = "human"
-            elif source_id.startswith("A_"):
+            elif is_ai_source:
                 mode = "ai"
             else:
                 mode = None
 
-            # Update mode Q-value (scaled by confidence in our reference)
+            # Update mode Q-value (scaled by confidence AND source knowledge)
             if mode and mode in self.q_table:
                 old_mode_q = self.q_table[mode]
                 base_lr = 0.25 if self.agent_type == "exploratory" else 0.12
-                info_lr = base_lr * confidence_scaling  # Weaker updates for uncertain references
+                # Scale by BOTH reference confidence and source knowledge
+                info_lr = base_lr * confidence_scaling * source_knowledge_conf
                 self.q_table[mode] = old_mode_q + info_lr * (accuracy_reward - old_mode_q)
 
-            # Update specific source Q-value (scaled by confidence)
+            # Update specific source Q-value (scaled by confidence AND source knowledge)
             if source_id in self.q_table:
                 old_q = self.q_table[source_id]
                 base_lr = 0.25 if self.agent_type == "exploratory" else 0.12
-                info_lr = base_lr * confidence_scaling
+                info_lr = base_lr * confidence_scaling * source_knowledge_conf
                 self.q_table[source_id] = old_q + info_lr * (accuracy_reward - old_q)
 
             # Update trust based on accuracy_reward
             # EXPLOITERS: Fast to punish disagreement, slow to reward agreement (defensive)
             # EXPLORERS: More balanced - willing to trust new sources that provide value
+            # SCALE BY SOURCE KNOWLEDGE: weaker updates when source may not have known
             if source_id in self.trust:
                 old_trust = self.trust[source_id]
                 if accuracy_reward < 0:
@@ -814,7 +886,8 @@ class HumanAgent(Agent):
                     # EXPLORERS: Faster reward (quick to trust valuable sources)
                     # EXPLOITERS: Slow reward (suspicious of new trust)
                     base_trust_lr = 0.15 if self.agent_type == "exploratory" else 0.06
-                trust_lr = base_trust_lr * confidence_scaling
+                # Scale by BOTH reference confidence and source knowledge
+                trust_lr = base_trust_lr * confidence_scaling * source_knowledge_conf
                 new_trust = max(0.0, min(1.0, old_trust + trust_lr * (trust_target - old_trust)))
                 self.trust[source_id] = new_trust
 
