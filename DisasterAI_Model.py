@@ -1552,18 +1552,38 @@ class HumanAgent(Agent):
 
             elif chosen_mode == "human":
                 # Select specific human source within "human" mode
+                # DIFFERENTIATED BY AGENT TYPE:
+                # - Exploiters: Strongly prefer highest-trust friend (stay in social bubble)
+                # - Explorers: More diverse - consider all humans, weight by Q-value not just trust
                 valid_sources = [h for h in self.model.humans if h != self.unique_id]
                 if not valid_sources:
                     return
-                if not self.friends:
-                    source_id = random.choice(valid_sources)
-                else:
-                    # Get friend with highest trust
-                    friend_trust_pairs = [(fid, self.trust.get(fid, 0.1)) for fid in self.friends]
-                    if friend_trust_pairs:
+
+                if self.agent_type == "exploitative":
+                    # EXPLOITERS: Prefer friends, especially highest-trust friend
+                    if self.friends:
+                        friend_trust_pairs = [(fid, self.trust.get(fid, 0.1)) for fid in self.friends]
                         source_id = max(friend_trust_pairs, key=lambda x: x[1])[0]
                     else:
                         source_id = random.choice(valid_sources)
+                else:
+                    # EXPLORERS: More diverse - consider all sources, weight by Q-value
+                    # This encourages exploring different information sources
+                    if random.random() < 0.3:
+                        # 30% chance: try a random source (explore)
+                        source_id = random.choice(valid_sources)
+                    else:
+                        # 70% chance: pick source with best individual Q-value
+                        # (which tracks info quality, not social relationship)
+                        source_q_pairs = [(sid, self.q_table.get(sid, 0.0)) for sid in valid_sources
+                                          if sid in self.q_table]
+                        if source_q_pairs:
+                            source_id = max(source_q_pairs, key=lambda x: x[1])[0]
+                        elif self.friends:
+                            # Fallback to friends if no Q-data
+                            source_id = random.choice(list(self.friends))
+                        else:
+                            source_id = random.choice(valid_sources)
 
                 source_agent = self.model.humans.get(source_id)
                 if source_agent:
