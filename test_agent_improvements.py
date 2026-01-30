@@ -274,6 +274,165 @@ def test_belief_accuracy_reward():
 
 
 # ============================================================================
+# Test: Explorer AI Confirmation Bias Detection
+# ============================================================================
+
+def test_explorer_ai_confirmation_bias():
+    """
+    Test that explorers correctly penalize AI that confirms wrong beliefs
+    and reward AI that truthfully disagrees.
+
+    Scenario:
+    1. Explorer has wrong belief about a remote cell (believes level=2, actual=4)
+    2. Confirming AI reports level=2 (confirms wrong belief)
+    3. Truthful AI reports level=4 (disagrees with belief but correct)
+    4. Human reports level=2 (confirms wrong belief but limited knowledge)
+
+    Expected:
+    - Remote cell queries should be DEFERRED (not evaluated immediately)
+    - When explorer senses the cell, confirming AI should get heavy penalty
+    - Truthful AI should get bonus for correct disagreement
+    - Human should get moderate penalty (lenient due to limited radius)
+    """
+    print("\n--- Test: Explorer AI Confirmation Bias Detection ---")
+
+    params = base_params.copy()
+    params['ai_alignment_level'] = 0.9  # Confirming AI
+    params['ticks'] = 5
+    model = DisasterModel(**params)
+
+    # Find an explorer agent
+    explorer = None
+    for a in model.agent_list:
+        if isinstance(a, HumanAgent) and a.agent_type == "exploratory":
+            explorer = a
+            break
+
+    if not explorer:
+        print("  ERROR: No exploratory agent found")
+        return {'passed': False}
+
+    # Setup: Create a remote cell (outside sensing range)
+    explorer_pos = explorer.pos
+    remote_cell = (explorer_pos[0] + 5, explorer_pos[1] + 5)  # Outside radius=2
+
+    # Ensure cell is within grid bounds
+    if remote_cell[0] >= model.width or remote_cell[1] >= model.height:
+        remote_cell = (min(explorer_pos[0] + 5, model.width - 1),
+                       min(explorer_pos[1] + 5, model.height - 1))
+
+    # Verify it's a remote cell
+    is_remote = not explorer.is_within_sensing_range(remote_cell)
+    print(f"  Explorer at {explorer_pos}, test cell at {remote_cell}, is_remote={is_remote}")
+
+    # Set ground truth for the cell
+    actual_level = 4
+    model.disaster_grid[remote_cell[0], remote_cell[1]] = actual_level
+
+    # Set explorer's wrong belief about the cell
+    wrong_belief = 2
+    explorer.beliefs[remote_cell] = {'level': wrong_belief, 'confidence': 0.6}
+
+    # Create sources with initial trust
+    confirming_ai_id = "A_confirming"
+    truthful_ai_id = "A_truthful"
+    human_id = "H_limited"
+
+    explorer.trust[confirming_ai_id] = 0.5
+    explorer.trust[truthful_ai_id] = 0.5
+    explorer.trust[human_id] = 0.5
+    explorer.q_table[confirming_ai_id] = 0.0
+    explorer.q_table[truthful_ai_id] = 0.0
+    explorer.q_table[human_id] = 0.0
+
+    # Add pending evaluations for each source
+    current_tick = model.tick
+    prior_level = wrong_belief
+    prior_conf = 0.6
+
+    # Confirming AI reports wrong belief (level=2)
+    explorer.pending_info_evaluations.append(
+        (current_tick, confirming_ai_id, remote_cell, wrong_belief, prior_level, prior_conf)
+    )
+    # Truthful AI reports correct level (level=4)
+    explorer.pending_info_evaluations.append(
+        (current_tick, truthful_ai_id, remote_cell, actual_level, prior_level, prior_conf)
+    )
+    # Human reports wrong belief (level=2)
+    explorer.pending_info_evaluations.append(
+        (current_tick, human_id, remote_cell, wrong_belief, prior_level, prior_conf)
+    )
+
+    initial_pending_count = len(explorer.pending_info_evaluations)
+    print(f"  Initial pending evaluations: {initial_pending_count}")
+
+    # Step 1: Run evaluate_pending_info - remote cell items should be DEFERRED
+    # Wait for 3+ ticks so items are in evaluation window
+    model.tick += 4
+    explorer.evaluate_pending_info()
+
+    # Remote cell items for explorers should NOT be evaluated (should still be pending)
+    pending_after_eval = len(explorer.pending_info_evaluations)
+    print(f"  After evaluate_pending_info: {pending_after_eval} pending (expect: {initial_pending_count})")
+    deferred_correctly = pending_after_eval == initial_pending_count
+
+    # Step 2: Now simulate explorer sensing the cell (evaluate_information_quality)
+    # This is what happens when explorer actually moves to sense the cell
+    trust_before = {
+        'confirming_ai': explorer.trust[confirming_ai_id],
+        'truthful_ai': explorer.trust[truthful_ai_id],
+        'human': explorer.trust[human_id],
+    }
+    print(f"  Trust before sensing: confirming_ai={trust_before['confirming_ai']:.3f}, "
+          f"truthful_ai={trust_before['truthful_ai']:.3f}, human={trust_before['human']:.3f}")
+
+    # Evaluate against ground truth (simulating sensing)
+    explorer.evaluate_information_quality(remote_cell, actual_level)
+
+    trust_after = {
+        'confirming_ai': explorer.trust[confirming_ai_id],
+        'truthful_ai': explorer.trust[truthful_ai_id],
+        'human': explorer.trust[human_id],
+    }
+    print(f"  Trust after sensing: confirming_ai={trust_after['confirming_ai']:.3f}, "
+          f"truthful_ai={trust_after['truthful_ai']:.3f}, human={trust_after['human']:.3f}")
+
+    # Calculate trust changes
+    confirming_ai_change = trust_after['confirming_ai'] - trust_before['confirming_ai']
+    truthful_ai_change = trust_after['truthful_ai'] - trust_before['truthful_ai']
+    human_change = trust_after['human'] - trust_before['human']
+
+    print(f"  Trust changes: confirming_ai={confirming_ai_change:+.3f}, "
+          f"truthful_ai={truthful_ai_change:+.3f}, human={human_change:+.3f}")
+
+    # Verify expected outcomes:
+    # 1. Confirming AI (wrong info that confirmed belief) should get heavy penalty
+    confirming_ai_penalized = confirming_ai_change < -0.05
+    # 2. Truthful AI (correct info that disagreed) should get bonus
+    truthful_ai_rewarded = truthful_ai_change > 0.01
+    # 3. Human (wrong info) should get moderate penalty (less than AI)
+    human_moderate_penalty = human_change < 0 and human_change > confirming_ai_change
+
+    print(f"\n  PASS deferred correctly: {deferred_correctly}")
+    print(f"  PASS confirming AI penalized (change < -0.05): {confirming_ai_penalized} ({confirming_ai_change:+.3f})")
+    print(f"  PASS truthful AI rewarded (change > 0.01): {truthful_ai_rewarded} ({truthful_ai_change:+.3f})")
+    print(f"  PASS human moderate penalty: {human_moderate_penalty} ({human_change:+.3f})")
+
+    all_passed = deferred_correctly and confirming_ai_penalized and truthful_ai_rewarded and human_moderate_penalty
+
+    return {
+        'passed': all_passed,
+        'deferred_correctly': deferred_correctly,
+        'confirming_ai_penalized': confirming_ai_penalized,
+        'truthful_ai_rewarded': truthful_ai_rewarded,
+        'human_moderate_penalty': human_moderate_penalty,
+        'confirming_ai_change': confirming_ai_change,
+        'truthful_ai_change': truthful_ai_change,
+        'human_change': human_change,
+    }
+
+
+# ============================================================================
 # Test 4: Phase Structure (Issue 3)
 # ============================================================================
 
@@ -479,6 +638,7 @@ if __name__ == "__main__":
     # Unit tests
     test_weighted_q_reward()           # Issue 5
     test_belief_accuracy_reward()      # Issue 2
+    test_explorer_ai_confirmation_bias()  # AI confirmation bias fix
     test_phase_structure()             # Issue 3
 
     # Issue 4 needs a warmed-up model (run a few ticks first)

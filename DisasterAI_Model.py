@@ -542,6 +542,10 @@ class HumanAgent(Agent):
                 continue
 
             # Within window: evaluate information quality
+            # Determine source type for differentiated evaluation
+            is_ai_source = source_id.startswith("A_")
+            is_human_source = source_id.startswith("H_")
+
             # Calculate ACCURACY score: how close was reported level to actual ground truth
             level_error = abs(reported_level - actual_level)
             if level_error == 0:
@@ -570,21 +574,61 @@ class HumanAgent(Agent):
             else:
                 confirmation_score = -0.6  # Strongly contradicts prior
 
+            # CRITICAL: Human vs AI differentiation for EXPLORERS
+            # AI has wider knowledge radius - if AI confirms beliefs but is WRONG, it's likely
+            # intentional confirmation bias and should be penalized heavily.
+            # Humans have limited radius - they may genuinely not know better.
+            #
+            # Scenarios for explorers:
+            # 1. AI confirmed beliefs (confirmation_score > 0) AND was WRONG (accuracy_score < 0)
+            #    → STRONG penalty (confirmation bias detected)
+            # 2. AI disagreed with beliefs AND was RIGHT → STRONG bonus (truthful AI rewarded)
+            # 3. Human wrong info → moderate penalty (limited knowledge)
+            # 4. Human right info → moderate bonus
+
+            was_confirming = confirmation_score > 0  # Source agreed with prior beliefs
+            was_accurate = accuracy_score > 0  # Source gave correct info
+
             # Weighted combination by agent type:
             # Exploiters value CONFIRMATION over accuracy (0.8/0.2)
-            # Explorers value ACCURACY over confirmation (0.8/0.2)
+            # Explorers value ACCURACY over confirmation, with human/AI differentiation
             if self.agent_type == "exploitative":
                 combined_reward = 0.8 * confirmation_score + 0.2 * accuracy_score
             else:
-                combined_reward = 0.8 * accuracy_score + 0.2 * confirmation_score
+                # EXPLORERS: Base on accuracy, but differentiate humans vs AI
+                if is_ai_source:
+                    # AI has broader knowledge - hold them to higher standard
+                    if was_confirming and not was_accurate:
+                        # AI CONFIRMED WRONG BELIEFS - confirmation bias penalty
+                        # This is the key case: AI told explorer what they wanted to hear, but lied
+                        combined_reward = accuracy_score * 1.5  # Amplify penalty (e.g., -0.6 → -0.9)
+                    elif not was_confirming and was_accurate:
+                        # AI DISAGREED but was RIGHT - truthful AI bonus
+                        # Explorer should learn to trust AI that challenges incorrect beliefs
+                        combined_reward = accuracy_score * 1.3  # Bonus for truthful disagreement
+                    else:
+                        # Normal case: AI confirmed and was right, or disagreed and was wrong
+                        combined_reward = 0.95 * accuracy_score + 0.05 * confirmation_score
+                elif is_human_source:
+                    # Humans have limited sensing radius - more lenient evaluation
+                    # They may genuinely not know better about remote cells
+                    if not was_accurate:
+                        # Human gave wrong info - moderate penalty (benefit of doubt)
+                        combined_reward = accuracy_score * 0.7  # Reduced penalty
+                    else:
+                        # Human gave right info - normal reward
+                        combined_reward = 0.8 * accuracy_score + 0.2 * confirmation_score
+                else:
+                    # Fallback for unknown source type
+                    combined_reward = 0.8 * accuracy_score + 0.2 * confirmation_score
 
             # Scale to [-0.7, +0.5] range to match existing Q-update expectations
             accuracy_reward = combined_reward * 0.6 - 0.1
 
             # Determine mode from source_id (map to high-level modes)
-            if source_id.startswith("H_"):
+            if is_human_source:
                 mode = "human"
-            elif source_id.startswith("A_"):
+            elif is_ai_source:
                 mode = "ai"  # Generic AI mode (not individual AI)
             else:
                 mode = None
@@ -668,13 +712,24 @@ class HumanAgent(Agent):
 
             ticks_elapsed = current_tick - tick_received
 
-            # Too old — expire without evaluation
-            if ticks_elapsed > 15:
-                evaluated.append(item)
-                continue
-
             # Too soon — wait for beliefs to stabilize
             if ticks_elapsed < 3:
+                continue
+
+            # Check if this is a remote cell (outside sensing range)
+            is_remote_cell = not self.is_within_sensing_range(cell)
+
+            # CRITICAL FIX: Remote cells for EXPLORERS get extended expiry window (30 ticks)
+            # They need time to move and sense the cell for ground truth verification.
+            # Non-remote cells and exploiters use normal 15-tick window.
+            if self.agent_type == "exploratory" and is_remote_cell:
+                expiry_window = 30  # Extended window for explorers to reach and sense remote cells
+            else:
+                expiry_window = 15  # Normal window
+
+            # Too old — expire without evaluation
+            if ticks_elapsed > expiry_window:
+                evaluated.append(item)
                 continue
 
             # Within evaluation window: use current belief as reference
@@ -709,14 +764,11 @@ class HumanAgent(Agent):
             # truthful sources that report correct info that differs from wrong beliefs.
             #
             # EXPLOITERS: Use confirmation scoring (they want agreeing sources)
-            # EXPLORERS: For remote cells, defer accuracy eval OR use neutral score
+            # EXPLORERS: For remote cells, defer to evaluate_information_quality when sensed
             #            Only evaluate accuracy for cells they can actually verify (sensed cells)
 
             if belief_conf < 0.15:
                 continue  # Skip only if we have almost no information
-
-            # Check if this is a remote cell (outside sensing range)
-            is_remote_cell = not self.is_within_sensing_range(cell)
 
             # Scale learning rate by confidence - uncertain references lead to weaker updates
             confidence_scaling = min(1.0, belief_conf / 0.5)  # Full strength at 0.5+ confidence
@@ -753,6 +805,10 @@ class HumanAgent(Agent):
             else:
                 confirmation_score = -0.8  # Exploiters strongly penalize large disagreement
 
+            # Determine source type from source_id
+            is_ai_source = source_id.startswith("A_")
+            is_human_source = source_id.startswith("H_")
+
             # Weighted combination by agent type
             # EXPLOITERS: Almost entirely driven by confirmation (they want to hear what they believe)
             # EXPLORERS: Almost entirely driven by accuracy (they want correct information)
@@ -761,16 +817,14 @@ class HumanAgent(Agent):
                 combined_reward = 0.95 * confirmation_score + 0.05 * accuracy_score
             else:
                 # EXPLORERS reward sources based on accuracy for sensed cells
-                # For REMOTE cells, accuracy_score is 0 (can't verify), so give a small
-                # bonus for providing NEW information (info different from current belief)
+                # CRITICAL FIX: For REMOTE cells, DON'T evaluate yet - defer until sensed
+                # This prevents confirming AI from getting free pass with neutral score
                 if is_remote_cell:
-                    # Explorer gathering info about remote cell:
-                    # - Can't verify accuracy yet (accuracy_score = 0)
-                    # - Give small positive reward for NEW info (different from belief)
-                    # - This encourages explorers to value sources that expand their knowledge
-                    level_diff = abs(reported_level - reference_level)
-                    novelty_bonus = 0.1 if level_diff > 0 else 0.0  # Bonus for new info
-                    combined_reward = novelty_bonus  # Neutral + novelty bonus
+                    # Explorer querying remote cell: DEFER evaluation until sensed
+                    # Don't give neutral score - wait for ground truth verification
+                    # Item will be evaluated by evaluate_information_quality when sensed,
+                    # or expire after extended window (30 ticks for remote cells)
+                    continue  # Skip this item, keep it pending
                 else:
                     # Sensed cell: can verify accuracy properly
                     combined_reward = 0.95 * accuracy_score + 0.05 * confirmation_score
@@ -778,9 +832,9 @@ class HumanAgent(Agent):
             accuracy_reward = combined_reward * 0.7 - 0.1  # Slightly larger scale
 
             # Determine mode from source_id
-            if source_id.startswith("H_"):
+            if is_human_source:
                 mode = "human"
-            elif source_id.startswith("A_"):
+            elif is_ai_source:
                 mode = "ai"
             else:
                 mode = None
