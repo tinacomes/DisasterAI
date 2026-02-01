@@ -119,11 +119,17 @@ class HumanAgent(Agent):
         for k in range(model.num_ai):
             self.q_table[f"A_{k}"] = 0.0
 
-        # --- Belief Update Parameters ---
-        # These control how beliefs change when info is ACCEPTED (separate from Q-learning)
-        self.D = 2.0 if agent_type == "exploitative" else 4 # Acceptance threshold parameter
-        self.delta = 3.5 if agent_type == "exploitative" else 1.2 # Acceptance sensitivity parameter
-        self.belief_learning_rate = 0.9 if agent_type == "exploratory" else 0.4 # How much belief shifts towards accepted info
+        # --- Belief Update Parameters (D/δ from Geschke et al. 2019) ---
+        # D = latitude of acceptance (on 0-5 scale for disaster levels)
+        # δ = sharpness (higher = more binary acceptance)
+        # Formula: P(accept) = D^δ / (d^δ + D^δ) where d = |reported - prior|
+        self.D = 1.5 if agent_type == "exploitative" else 3.0  # Exploiters: strict, Explorers: lenient
+        self.delta = 20 if agent_type == "exploitative" else 8  # Exploiters: sharp cutoff, Explorers: gradual
+
+        # --- Memory-Based Belief Storage ---
+        # Each cell stores recent info-bits, belief is derived from memory
+        self.belief_memory = {}  # {cell: [{'level', 'confidence', 'source_id', 'tick', 'source_trust'}, ...]}
+        self.memory_size = 3 if agent_type == "exploitative" else 7  # Exploiters filter more, remember less
 
         # --- Other Parameters & Counters ---
         self.trust_update_mode = model.trust_update_mode # Affects trust increment size? Seems used in removed code? Check usage.
@@ -507,6 +513,215 @@ class HumanAgent(Agent):
         # This prevents self_action from being inflated by ~25 per-cell updates
         # while human/ai Q-values only get 0-1 updates per tick
         self.flush_belief_rewards()
+
+    # =========================================================================
+    # MEMORY-BASED BELIEF SYSTEM (Geschke et al. 2019 inspired)
+    # =========================================================================
+
+    def add_to_memory(self, cell, level, source_confidence, source_id):
+        """
+        Add info-bit to memory for a cell, forget oldest if full.
+        Memory stores recent reports, belief is derived from memory contents.
+        """
+        if cell not in self.belief_memory:
+            self.belief_memory[cell] = []
+
+        # Get source trust at time of receiving info
+        source_trust = self.trust.get(source_id, 0.1) if source_id else 0.5
+
+        # Add new info with metadata
+        self.belief_memory[cell].append({
+            'level': level,
+            'confidence': source_confidence,
+            'source_id': source_id,
+            'tick': self.model.tick,
+            'source_trust': source_trust,
+        })
+
+        # Enforce memory limit (FIFO - forget oldest)
+        if len(self.belief_memory[cell]) > self.memory_size:
+            self.belief_memory[cell].pop(0)
+
+        # Update derived belief from memory
+        self._update_belief_from_memory(cell)
+
+    def _update_belief_from_memory(self, cell):
+        """
+        Compute belief as weighted average of memory contents.
+        Weights based on: source trust, source confidence, recency.
+        """
+        if cell not in self.belief_memory or not self.belief_memory[cell]:
+            return
+
+        memory = self.belief_memory[cell]
+
+        # Calculate weighted average
+        total_weight = 0
+        weighted_sum = 0
+
+        for m in memory:
+            # Recency weight: newer info gets more weight
+            ticks_ago = self.model.tick - m['tick']
+            recency = max(0.1, 1.0 - (ticks_ago / 100.0))  # Decay over 100 ticks
+
+            # Combined weight: trust × confidence × recency
+            weight = m['source_trust'] * m['confidence'] * recency
+            weighted_sum += m['level'] * weight
+            total_weight += weight
+
+        if total_weight > 0:
+            new_level = int(round(weighted_sum / total_weight))
+        else:
+            # Fallback to simple mean if weights are zero
+            new_level = int(round(np.mean([m['level'] for m in memory])))
+
+        # Confidence based on:
+        # 1. Memory fullness (more info = more confidence)
+        # 2. Agreement between sources (low std = high confidence)
+        memory_fullness = len(memory) / self.memory_size
+        levels = [m['level'] for m in memory]
+        if len(levels) > 1:
+            agreement = 1.0 - (np.std(levels) / 2.5)  # Normalize by max possible std
+            agreement = max(0, min(1, agreement))
+        else:
+            agreement = 0.5
+
+        new_confidence = 0.3 * memory_fullness + 0.7 * agreement
+        new_confidence = max(0.1, min(0.95, new_confidence))
+
+        self.beliefs[cell] = {
+            'level': max(0, min(5, new_level)),
+            'confidence': new_confidence,
+        }
+
+    def calculate_source_precision(self, report_metadata, source_id):
+        """
+        Calculate precision based on source-specific factors.
+
+        Factors:
+        1. Receiver's trust in source (learned over time)
+        2. Source's confidence in their report
+        3. Whether source directly sensed vs guessed
+        4. Source's agent type (explorers typically more accurate)
+        """
+        # Base trust from receiver's perspective
+        base_trust = self.trust.get(source_id, 0.1)
+
+        # Factor 1: Source's own confidence in the report
+        source_confidence = report_metadata.get('confidence', 0.5)
+
+        # Factor 2: Sensed vs guessed (direct observation is more reliable)
+        is_sensed = report_metadata.get('is_sensed', False)
+        sensing_multiplier = 1.5 if is_sensed else 0.7
+
+        # Factor 3: Source agent type
+        source_type = report_metadata.get('source_type', 'unknown')
+        if source_type == 'exploratory':
+            type_multiplier = 1.2  # Explorers tend to be more accurate
+        elif source_type == 'exploitative':
+            type_multiplier = 0.9  # Exploiters might confirm biases
+        else:
+            type_multiplier = 1.0  # AI or unknown
+
+        # Factor 4: Friend modifier (social trust for exploiters)
+        is_friend = source_id in self.friends if source_id else False
+        if self.agent_type == "exploitative" and is_friend:
+            friend_multiplier = 1.3  # Exploiters trust friends more
+        else:
+            friend_multiplier = 1.0
+
+        # Combined precision
+        raw_precision = (
+            base_trust *
+            source_confidence *
+            sensing_multiplier *
+            type_multiplier *
+            friend_multiplier
+        )
+
+        # Convert to precision scale (0 to ~10)
+        # Using logistic-like transform to prevent extreme values
+        precision = 5.0 * raw_precision / (1 - raw_precision + 0.1)
+
+        # Cap based on receiver's agent type
+        if self.agent_type == "exploitative":
+            precision = min(precision, 6.0)  # More skeptical
+        else:
+            precision = min(precision, 10.0)  # More accepting
+
+        return max(0.1, precision)
+
+    def integrate_information(self, cell, report_metadata, source_id):
+        """
+        Full information integration pipeline:
+        1. Calculate acceptance probability using D/δ formula (Geschke et al. 2019)
+        2. If accepted, add to memory
+        3. Memory automatically updates derived belief
+
+        Returns: True if accepted, False if rejected
+        """
+        reported_level = report_metadata.get('level', 0)
+        source_confidence = report_metadata.get('confidence', 0.5)
+
+        # Get current belief (derived from memory)
+        current_belief = self.beliefs.get(cell, {'level': 0, 'confidence': 0.1})
+        prior_level = current_belief['level']
+        prior_confidence = current_belief['confidence']
+
+        # ===== STEP 1: Acceptance Decision using D/δ formula =====
+        d = abs(reported_level - prior_level)
+        d_normalized = d / 5.0  # Normalize to [0, 1] scale
+
+        if d_normalized > 0:
+            D_normalized = self.D / 5.0  # Normalize D to same scale
+            delta = self.delta
+
+            # Paper formula: P(accept) = D^δ / (d^δ + D^δ)
+            # When d = D, P = 0.5
+            # When d < D, P > 0.5 (likely accept)
+            # When d > D, P < 0.5 (likely reject)
+            try:
+                p_accept = (D_normalized ** delta) / (d_normalized ** delta + D_normalized ** delta)
+            except (OverflowError, ZeroDivisionError):
+                # Handle numerical issues with large delta
+                p_accept = 1.0 if d_normalized < D_normalized else 0.0
+
+            # Modify acceptance by source precision
+            source_precision = self.calculate_source_precision(report_metadata, source_id)
+            precision_modifier = min(1.5, 0.5 + source_precision / 10.0)
+            p_accept *= precision_modifier
+
+            # Friend modifier for exploiters
+            is_friend = source_id in self.friends if source_id else False
+            if self.agent_type == "exploitative" and is_friend:
+                p_accept = min(1.0, p_accept * 1.3)
+
+            # Confidence penalty for exploiters (high confidence = resist change)
+            if self.agent_type == "exploitative" and prior_confidence > 0.5:
+                confidence_penalty = 1.0 - 0.4 * prior_confidence
+                p_accept *= confidence_penalty
+
+            # Make acceptance decision
+            if random.random() >= p_accept:
+                # REJECT - track for feedback but don't update memory/belief
+                if source_id:
+                    self.pending_info_evaluations.append((
+                        self.model.tick, source_id, cell,
+                        int(reported_level), int(prior_level), float(prior_confidence)
+                    ))
+                return False  # Rejected
+
+        # ===== STEP 2: Add to Memory (if accepted) =====
+        self.add_to_memory(cell, reported_level, source_confidence, source_id)
+
+        # Track for feedback evaluation
+        if source_id:
+            self.pending_info_evaluations.append((
+                self.model.tick, source_id, cell,
+                int(reported_level), int(prior_level), float(prior_confidence)
+            ))
+
+        return True  # Accepted
 
     def evaluate_information_quality(self, cell, actual_level):
         """
@@ -903,7 +1118,10 @@ class HumanAgent(Agent):
         ]
 
     def report_beliefs(self, interest_point, query_radius):
-        """Reports human agent's beliefs about cells within query_radius of the interest_point."""
+        """
+        Reports human agent's beliefs about cells WITH METADATA.
+        Returns dict: {cell: {'level', 'confidence', 'source_type', 'is_sensed', 'is_guess'}}
+        """
         report = {}
 
         # Check if agent can report (e.g., not in high disaster zone)
@@ -923,14 +1141,6 @@ class HumanAgent(Agent):
             include_center=True
         )
 
-        # Debug info similar to AI agent
-        # if hasattr(self.model, 'debug_mode') and self.model.debug_mode and random.random() < 0.05:
-            #print(f"DEBUG: Human {self.unique_id} asked to report on {len(cells_to_report_on)} cells around {interest_point}")
-
-        # Track how many cells had direct beliefs vs guesses
-        known_cells = 0
-        guessed_cells = 0
-
         for cell in cells_to_report_on:
             # Check if cell is valid
             if 0 <= cell[0] < self.model.width and 0 <= cell[1] < self.model.height:
@@ -938,25 +1148,35 @@ class HumanAgent(Agent):
                 has_belief = cell in self.beliefs and isinstance(self.beliefs[cell], dict)
 
                 if has_belief:
-                    # Report own belief about the cell
+                    # Report own belief about the cell WITH METADATA
                     belief_info = self.beliefs[cell]
                     current_level = belief_info.get('level', 0)
                     current_conf = belief_info.get('confidence', 0.1)
 
                     # Apply a small chance of reporting noise
                     if random.random() < 0.05:
-                        noisy_level = max(0, min(5, current_level + random.choice([-1, 1])))
-                        report[cell] = noisy_level
+                        reported_level = max(0, min(5, current_level + random.choice([-1, 1])))
                     else:
-                        report[cell] = current_level
+                        reported_level = current_level
 
-                    known_cells += 1
+                    # Check if this cell is within sensing range (direct observation)
+                    is_sensed = self.is_within_sensing_range(cell)
+
+                    report[cell] = {
+                        'level': reported_level,
+                        'confidence': current_conf,
+                        'source_type': self.agent_type,  # 'exploitative' or 'exploratory'
+                        'is_sensed': is_sensed,
+                        'is_guess': False,
+                    }
+
                 else:
                     # HUMAN GUESSING MECHANISM - similar to AI but less sophisticated
                     # Humans guess less than AI (50% vs 75% for AI)
                     if random.random() < 0.5:
                         # Look at surrounding cells with beliefs
                         nearby_values = []
+                        nearby_confs = []
 
                         for dx in range(-1, 2):
                             for dy in range(-1, 2):
@@ -964,20 +1184,22 @@ class HumanAgent(Agent):
                                 if (nearby in self.beliefs and
                                     isinstance(self.beliefs[nearby], dict)):
                                     nearby_values.append(self.beliefs[nearby].get('level', 0))
+                                    nearby_confs.append(self.beliefs[nearby].get('confidence', 0.1))
 
                         if nearby_values:
                             # Simple average with random noise
                             avg_value = sum(nearby_values) / len(nearby_values)
+                            avg_conf = sum(nearby_confs) / len(nearby_confs)
                             noise = random.choice([-1, 0, 0, 1])
                             guessed_value = max(0, min(5, int(round(avg_value + noise))))
-                            report[cell] = guessed_value
-                            guessed_cells += 1
 
-        # Debug output for comparison with AI
-        #if hasattr(self.model, 'debug_mode') and self.model.debug_mode and random.random() < 0.05:
-           # total_reported = len(report)
-            #print(f"DEBUG: Human {self.unique_id} reported on {total_reported} cells "
-                  #f"({known_cells} known, {guessed_cells} guessed)")
+                            report[cell] = {
+                                'level': guessed_value,
+                                'confidence': avg_conf * 0.5,  # Reduce confidence for guesses
+                                'source_type': self.agent_type,
+                                'is_sensed': False,
+                                'is_guess': True,
+                            }
 
         return report
 
@@ -1586,12 +1808,8 @@ class HumanAgent(Agent):
                         self.ai_info_sources = {}
 
                     # Track which cells got info from which AI
-                    for cell, reported_value in reports.items():
+                    for cell in reports.keys():
                         self.ai_info_sources[cell] = source_id
-
-                    # DEBUG PRINT to track AI source queries
-                    #if self.model.debug_mode and random.random() < 0.1:  # 10% of the time
-                        #print(f"DEBUG: Agent {self.unique_id} queried AI {source_id} for {len(reports)} cells")
 
                     self.accum_calls_ai += 1
                     self.accum_calls_total += 1
@@ -1600,21 +1818,32 @@ class HumanAgent(Agent):
                     source_id = None
 
 
-            # Process reports and update beliefs
+            # Process reports and update beliefs using new memory-based system
             belief_updates = 0
-            source_trust = self.trust.get(source_id, 0.1) if source_id else 0.1
 
-            for cell, reported_value in reports.items():
+            for cell, report_data in reports.items():
+                # Handle both old format (just a number) and new format (dict with metadata)
+                if isinstance(report_data, dict):
+                    # New format with metadata
+                    report_metadata = report_data
+                else:
+                    # Old format (backward compatibility) - wrap in metadata
+                    report_metadata = {
+                        'level': int(round(report_data)),
+                        'confidence': 0.5,  # Default confidence
+                        'source_type': 'unknown',
+                        'is_sensed': False,
+                        'is_guess': False,
+                    }
+
+                # Initialize belief for cell if not present
                 if cell not in self.beliefs:
-                    continue
+                    self.beliefs[cell] = {'level': 0, 'confidence': 0.1}
 
-                # Convert to integer level if it's not already
-                reported_level = int(round(reported_value))
+                # Use the new memory-based integration with D/δ acceptance
+                accepted = self.integrate_information(cell, report_metadata, source_id)
 
-                # Use the Bayesian update function
-                significant_update = self.update_belief_bayesian(cell, reported_level, source_trust, source_id)
-                # Track if this was a significant belief update
-                if significant_update:
+                if accepted:
                     belief_updates += 1
 
                     # Track source acceptance (for metrics)
@@ -1624,12 +1853,12 @@ class HumanAgent(Agent):
                             if source_id in self.friends:
                                 self.accepted_friend += 1
                         elif source_id.startswith("A_"):
-                            # INCREMENT AI ACCEPTANCE COUNTER HERE
                             self.accepted_ai += 1
 
-                            # DEBUG PRINT to track AI info acceptance
-                            #if self.model.debug_mode and random.random() < 0.05:  # 5% of the time
-                                #print(f"DEBUG: Agent {self.unique_id} accepted info from AI {source_id} for cell {cell}")
+                            # Track AI info sources for later trust updates
+                            if not hasattr(self, 'ai_info_sources'):
+                                self.ai_info_sources = {}
+                            self.ai_info_sources[cell] = source_id
 
         except Exception as e:
             print(f"ERROR in Agent {self.unique_id} seek_information at tick {self.model.tick}: {e}")
@@ -2228,9 +2457,33 @@ class AIAgent(Agent):
             corrected = np.round(sensed_vals + adjustments)
             corrected = np.clip(corrected, 0, 5)  # Keep values in valid range
 
-        # Build the report dictionary with aligned values
+        # Build the report dictionary with aligned values AND METADATA
+        # Track which cells were directly sensed vs guessed
         for i, cell in enumerate(valid_cells_in_query):
-            report[cell] = int(corrected[i])
+            is_directly_sensed = cell in directly_sensed_cells
+
+            # Calculate confidence based on sensing status and alignment
+            if is_directly_sensed:
+                # High confidence for directly sensed cells
+                base_confidence = 0.85
+            else:
+                # Lower confidence for guessed cells
+                base_confidence = 0.4
+
+            # Reduce confidence if alignment adjusted the value significantly
+            original_value = sensed_vals_list[i]
+            aligned_value = int(corrected[i])
+            if abs(aligned_value - original_value) > 0:
+                # Alignment changed the value - reduce confidence
+                base_confidence *= 0.7
+
+            report[cell] = {
+                'level': aligned_value,
+                'confidence': base_confidence,
+                'source_type': 'ai',  # AI source
+                'is_sensed': is_directly_sensed,
+                'is_guess': not is_directly_sensed,
+            }
 
         return report
 
