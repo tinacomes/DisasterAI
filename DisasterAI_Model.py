@@ -59,7 +59,10 @@ class HumanAgent(Agent):
                  exploit_trust_lr=0.03, # Low trust Learning Rate for exploiters
                  explor_trust_lr=0.06,  # Higher trust Learning Rate for explorers
                  exploit_friend_bias=0.1,     # Action Selection: Bias added to 'human' score (exploiter) (tune)
-                 exploit_self_bias=0.1):
+                 exploit_self_bias=0.1,
+                 # --- Belief Update Parameters (D/δ) ---
+                 exploit_D=1.5, exploit_delta=20,  # Exploiter defaults
+                 explore_D=3.0, explore_delta=8):  # Explorer defaults
                  #exploiter_trust_lr=0.1):
                  #exploit_reward_weight=0.2,  # Reward weight for exploitative agents
                  #onfirmation_weight=0.2):     # Action Selection: Bias added to 'self_action' score (exploiter) (tune)
@@ -123,8 +126,8 @@ class HumanAgent(Agent):
         # D = latitude of acceptance (on 0-5 scale for disaster levels)
         # δ = sharpness (higher = more binary acceptance)
         # Formula: P(accept) = D^δ / (d^δ + D^δ) where d = |reported - prior|
-        self.D = 1.5 if agent_type == "exploitative" else 3.0  # Exploiters: strict, Explorers: lenient
-        self.delta = 20 if agent_type == "exploitative" else 8  # Exploiters: sharp cutoff, Explorers: gradual
+        self.D = exploit_D if agent_type == "exploitative" else explore_D
+        self.delta = exploit_delta if agent_type == "exploitative" else explore_delta
 
         # --- Memory-Based Belief Storage ---
         # Each cell stores recent info-bits, belief is derived from memory
@@ -2519,7 +2522,10 @@ class DisasterModel(Model):
                  exploit_trust_lr=0.03, # Default value matching base_params
                  explor_trust_lr=0.05,
                  exploit_friend_bias=0.1, # Default value matching base_params
-                 exploit_self_bias=0.1  # Default value matching base_params
+                 exploit_self_bias=0.1,  # Default value matching base_params
+                 # --- D/δ Parameters for Belief Acceptance ---
+                 exploit_D=1.5, exploit_delta=20,  # Exploiter acceptance params
+                 explore_D=3.0, explore_delta=8    # Explorer acceptance params
                  ):
         super(DisasterModel, self).__init__()
         self.share_exploitative = share_exploitative
@@ -2548,6 +2554,12 @@ class DisasterModel(Model):
         self.explor_trust_lr = explor_trust_lr
         self.exploit_friend_bias = exploit_friend_bias
         self.exploit_self_bias = exploit_self_bias
+
+        # D/δ parameters for belief acceptance
+        self.exploit_D = exploit_D
+        self.exploit_delta = exploit_delta
+        self.explore_D = explore_D
+        self.explore_delta = explore_delta
 
         self.grid = MultiGrid(width, height, torus=False)
         self.tick = 0
@@ -2622,7 +2634,10 @@ class DisasterModel(Model):
                              # pass trust rates and biases
                              trust_learning_rate=current_trust_lr,
                              exploit_friend_bias=self.exploit_friend_bias, # From model
-                             exploit_self_bias=self.exploit_self_bias     # From model
+                             exploit_self_bias=self.exploit_self_bias,     # From model
+                             # D/δ parameters for belief acceptance
+                             exploit_D=self.exploit_D, exploit_delta=self.exploit_delta,
+                             explore_D=self.explore_D, explore_delta=self.explore_delta
                              )
             self.humans[f"H_{i}"] = agent
             self.agent_list.append(agent)
