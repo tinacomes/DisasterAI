@@ -62,7 +62,9 @@ class HumanAgent(Agent):
                  exploit_self_bias=0.1,
                  # --- Belief Update Parameters (D/δ) ---
                  exploit_D=1.5, exploit_delta=20,  # Exploiter defaults
-                 explore_D=3.0, explore_delta=8):  # Explorer defaults
+                 explore_D=3.0, explore_delta=8,   # Explorer defaults
+                 # --- Memory Size Parameters ---
+                 memory_exploit=3, memory_explore=7):  # Memory sizes
                  #exploiter_trust_lr=0.1):
                  #exploit_reward_weight=0.2,  # Reward weight for exploitative agents
                  #onfirmation_weight=0.2):     # Action Selection: Bias added to 'self_action' score (exploiter) (tune)
@@ -132,7 +134,7 @@ class HumanAgent(Agent):
         # --- Memory-Based Belief Storage ---
         # Each cell stores recent info-bits, belief is derived from memory
         self.belief_memory = {}  # {cell: [{'level', 'confidence', 'source_id', 'tick', 'source_trust'}, ...]}
-        self.memory_size = 3 if agent_type == "exploitative" else 7  # Exploiters filter more, remember less
+        self.memory_size = memory_exploit if agent_type == "exploitative" else memory_explore
 
         # --- Other Parameters & Counters ---
         self.trust_update_mode = model.trust_update_mode # Affects trust increment size? Seems used in removed code? Check usage.
@@ -2525,7 +2527,9 @@ class DisasterModel(Model):
                  exploit_self_bias=0.1,  # Default value matching base_params
                  # --- D/δ Parameters for Belief Acceptance ---
                  exploit_D=1.5, exploit_delta=20,  # Exploiter acceptance params
-                 explore_D=3.0, explore_delta=8    # Explorer acceptance params
+                 explore_D=3.0, explore_delta=8,   # Explorer acceptance params
+                 # --- Memory Size Parameters ---
+                 memory_exploit=3, memory_explore=7  # Memory sizes by agent type
                  ):
         super(DisasterModel, self).__init__()
         self.share_exploitative = share_exploitative
@@ -2560,6 +2564,10 @@ class DisasterModel(Model):
         self.exploit_delta = exploit_delta
         self.explore_D = explore_D
         self.explore_delta = explore_delta
+
+        # Memory size parameters
+        self.memory_exploit = memory_exploit
+        self.memory_explore = memory_explore
 
         self.grid = MultiGrid(width, height, torus=False)
         self.tick = 0
@@ -2637,7 +2645,9 @@ class DisasterModel(Model):
                              exploit_self_bias=self.exploit_self_bias,     # From model
                              # D/δ parameters for belief acceptance
                              exploit_D=self.exploit_D, exploit_delta=self.exploit_delta,
-                             explore_D=self.explore_D, explore_delta=self.explore_delta
+                             explore_D=self.explore_D, explore_delta=self.explore_delta,
+                             # Memory size parameters
+                             memory_exploit=self.memory_exploit, memory_explore=self.memory_explore
                              )
             self.humans[f"H_{i}"] = agent
             self.agent_list.append(agent)
