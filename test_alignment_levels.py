@@ -52,7 +52,8 @@ def run_simulation(params, seed=None):
         errors = []
         for agent in agents:
             for cell, belief in agent.beliefs.items():
-                actual = model.grid_levels.get(cell, 0)
+                x, y = cell
+                actual = model.disaster_grid[x, y]
                 errors.append(abs(belief['level'] - actual))
         return np.mean(errors) if errors else 0
 
