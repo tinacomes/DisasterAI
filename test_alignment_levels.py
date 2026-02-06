@@ -103,9 +103,19 @@ def main():
                 results.append(metrics)
                 print(f"  Rep {rep+1}: MAE_exploit={metrics['mae_exploit']:.4f}, MAE_explore={metrics['mae_explore']:.4f}")
             except Exception as e:
+                import traceback
                 print(f"  Rep {rep+1}: ERROR - {e}")
+                traceback.print_exc()
 
     df = pd.DataFrame(results)
+
+    if len(df) == 0:
+        print("\nERROR: No successful simulations! Check error messages above.")
+        return
+
+    print(f"\nSuccessful runs: {len(df)}")
+    print(f"Columns: {list(df.columns)}")
+
     df.to_csv('calibration_results/alignment_test.csv', index=False)
 
     # Summary
