@@ -21,16 +21,19 @@ def analyze_phase2():
     print("PHASE 2: D/δ CALIBRATION ANALYSIS")
     print("="*60)
 
-    # Separate exploiter and explorer results
-    exploit_df = df[df['agent_type'] == 'exploiter']
-    explore_df = df[df['agent_type'] == 'explorer']
+    print(f"\nData columns: {list(df.columns)}")
+    print(f"Agent types found: {df['agent_type'].unique()}")
 
-    print("\n📊 EXPLOITER Results:")
+    # Separate exploiter and explorer results (using actual column values)
+    exploit_df = df[df['agent_type'] == 'exploitative']
+    explore_df = df[df['agent_type'] == 'exploratory']
+
+    print("\n📊 EXPLOITATIVE Agent Results:")
     print("-" * 40)
     if len(exploit_df) > 0:
         # Group by D and delta, show key metrics
         summary = exploit_df.groupby(['D', 'delta']).agg({
-            'accept_rate': 'mean',
+            'acceptance_rate': 'mean',
             'final_mae': 'mean',
             'final_seci': 'mean'
         }).round(4)
@@ -38,47 +41,52 @@ def analyze_phase2():
 
         # Best config
         best_idx = exploit_df.groupby(['D', 'delta'])['final_mae'].mean().idxmin()
-        print(f"\n✓ Best exploiter config (lowest MAE): D={best_idx[0]}, δ={best_idx[1]}")
+        print(f"\n✓ Best exploitative config (lowest MAE): D={best_idx[0]}, δ={best_idx[1]}")
 
-    print("\n📊 EXPLORER Results:")
+    print("\n📊 EXPLORATORY Agent Results:")
     print("-" * 40)
     if len(explore_df) > 0:
         summary = explore_df.groupby(['D', 'delta']).agg({
-            'accept_rate': 'mean',
+            'acceptance_rate': 'mean',
             'final_mae': 'mean',
             'final_seci': 'mean'
         }).round(4)
         print(summary)
 
         best_idx = explore_df.groupby(['D', 'delta'])['final_mae'].mean().idxmin()
-        print(f"\n✓ Best explorer config (lowest MAE): D={best_idx[0]}, δ={best_idx[1]}")
+        print(f"\n✓ Best exploratory config (lowest MAE): D={best_idx[0]}, δ={best_idx[1]}")
 
     # Create visualization
     fig, axes = plt.subplots(2, 2, figsize=(12, 10))
 
-    for idx, (agent_type, agent_df) in enumerate([('exploiter', exploit_df), ('explorer', explore_df)]):
+    for idx, (agent_type, agent_df, label) in enumerate([
+        ('exploitative', exploit_df, 'Exploitative'),
+        ('exploratory', explore_df, 'Exploratory')
+    ]):
         if len(agent_df) == 0:
+            axes[idx, 0].text(0.5, 0.5, f'No {label} data', ha='center', va='center')
+            axes[idx, 1].text(0.5, 0.5, f'No {label} data', ha='center', va='center')
             continue
 
         # Acceptance rate by D
         ax = axes[idx, 0]
-        for delta in agent_df['delta'].unique():
-            subset = agent_df[agent_df['delta'] == delta].groupby('D')['accept_rate'].mean()
+        for delta in sorted(agent_df['delta'].unique()):
+            subset = agent_df[agent_df['delta'] == delta].groupby('D')['acceptance_rate'].mean()
             ax.plot(subset.index, subset.values, marker='o', label=f'δ={delta}')
         ax.set_xlabel('D (latitude of acceptance)')
         ax.set_ylabel('Acceptance Rate')
-        ax.set_title(f'{agent_type.title()}: Acceptance Rate by D')
+        ax.set_title(f'{label}: Acceptance Rate by D')
         ax.legend()
         ax.grid(True, alpha=0.3)
 
         # MAE by D
         ax = axes[idx, 1]
-        for delta in agent_df['delta'].unique():
+        for delta in sorted(agent_df['delta'].unique()):
             subset = agent_df[agent_df['delta'] == delta].groupby('D')['final_mae'].mean()
             ax.plot(subset.index, subset.values, marker='s', label=f'δ={delta}')
         ax.set_xlabel('D (latitude of acceptance)')
         ax.set_ylabel('Mean Absolute Error')
-        ax.set_title(f'{agent_type.title()}: Belief Error by D')
+        ax.set_title(f'{label}: Belief Error by D')
         ax.legend()
         ax.grid(True, alpha=0.3)
 
