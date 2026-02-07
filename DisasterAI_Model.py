@@ -933,35 +933,43 @@ class HumanAgent(Agent):
                     combined_reward += 0.1
 
             else:  # EXPLORATORY
-                # EXPLORER REWARD: "Did I learn something new and true?"
-                # Key: redundant info is BAD, novel accurate info is GOOD
+                # EXPLORER REWARD: "Did I reduce uncertainty and learn something true?"
+                # Key: info that INCREASES CONFIDENCE is valuable, even if same level
 
-                # Calculate belief change (did I learn something new?)
-                belief_changed = (prior_error >= 1)  # Info differed from prior by 1+ levels
-
-                if belief_changed and info_was_accurate:
-                    # Learned something NEW and TRUE - excellent!
-                    combined_reward = 0.8  # Strong positive
-                elif belief_changed and not info_was_accurate:
-                    # Learned something NEW but FALSE - bad
-                    combined_reward = -0.4  # Negative (learned wrong info)
-                elif not belief_changed and info_was_accurate:
-                    # Redundant but accurate - wasted opportunity
-                    combined_reward = -0.1  # Slight negative (didn't learn anything)
-                else:
-                    # Redundant AND inaccurate - very bad (reinforced wrong belief)
-                    combined_reward = -0.5  # Strong negative
-
-                # Bonus for confidence increase (uncertainty reduction)
-                current_belief = self.beliefs.get(eval_cell, {})
-                current_conf = current_belief.get('confidence', 0.5) if isinstance(current_belief, dict) else 0.5
+                # Get stored prior confidence
                 if len(item) == 6:
                     prior_conf_stored = item[5]
                 else:
                     prior_conf_stored = 0.5
+
+                # Calculate belief change
+                belief_changed = (prior_error >= 1)  # Info differed from prior by 1+ levels
+
+                # Explorers value info that reduces uncertainty (low prior conf → useful)
+                was_uncertain = (prior_conf_stored < 0.5)
+
+                if belief_changed and info_was_accurate:
+                    # Learned something NEW and TRUE - excellent!
+                    combined_reward = 0.8
+                elif belief_changed and not info_was_accurate:
+                    # Learned something NEW but FALSE - bad
+                    combined_reward = -0.4
+                elif not belief_changed and was_uncertain and info_was_accurate:
+                    # Same level but CONFIRMED when uncertain - valuable!
+                    combined_reward = 0.5  # Good: reduced uncertainty
+                elif not belief_changed and not was_uncertain and info_was_accurate:
+                    # Same level AND was already confident - truly redundant
+                    combined_reward = 0.0  # Neutral (accurate but no learning)
+                elif not belief_changed and not info_was_accurate:
+                    # Same level but info was WRONG - bad source
+                    combined_reward = -0.3
+
+                # Bonus for confidence increase (uncertainty reduction)
+                current_belief = self.beliefs.get(eval_cell, {})
+                current_conf = current_belief.get('confidence', 0.5) if isinstance(current_belief, dict) else 0.5
                 conf_change = current_conf - prior_conf_stored
-                if conf_change > 0.1:
-                    combined_reward += 0.15  # Bonus for reducing uncertainty
+                if conf_change > 0.15:
+                    combined_reward += 0.25  # Larger bonus for reducing uncertainty
 
             # Scale to match Q-update expectations
             accuracy_reward = combined_reward * 0.5
@@ -1185,11 +1193,19 @@ class HumanAgent(Agent):
                 # CRITICAL FIX: For REMOTE cells, DON'T evaluate yet - defer until sensed
                 # This prevents confirming AI from getting free pass with neutral score
                 if is_remote_cell:
-                    # Explorer querying remote cell: DEFER evaluation until sensed
-                    # Don't give neutral score - wait for ground truth verification
-                    # Item will be evaluated by evaluate_information_quality when sensed,
-                    # or expire after extended window (30 ticks for remote cells)
-                    continue  # Skip this item, keep it pending
+                    # Explorer querying remote cell: Can't verify accuracy against ground truth
+                    # INSTEAD: Reward based on whether info IMPROVED CONFIDENCE (reduced uncertainty)
+                    # This gives explorers feedback for seeking useful information
+                    conf_improvement = belief_conf - (stored_prior_conf if stored_prior_conf else 0.1)
+                    if conf_improvement > 0.1:
+                        # Source helped reduce uncertainty - positive!
+                        combined_reward = 0.5 + conf_improvement
+                    elif conf_improvement > 0:
+                        # Small improvement
+                        combined_reward = 0.2
+                    else:
+                        # No improvement or got worse - neutral to slight negative
+                        combined_reward = -0.1
                 else:
                     # Sensed cell: can verify accuracy properly
                     combined_reward = 0.95 * accuracy_score + 0.05 * confirmation_score
