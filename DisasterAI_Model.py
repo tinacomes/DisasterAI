@@ -107,6 +107,7 @@ class HumanAgent(Agent):
         self.friends = set() # Use set for efficient checking ('H_j' format)
         self.pending_rewards = [] # [(tick_due, mode, [(cell, belief_level), ...]), ...]
         self.pending_info_evaluations = [] # [(tick_received, source_id, cell, reported_level), ...] for information quality feedback
+        self.pending_self_action_evals = [] # [(tick, cell, prior_level, prior_conf, reported_level)] for self-action Q-feedback
         self.tokens_this_tick = {} # Tracks mode choice leading to send_relief THIS tick
         self.last_queried_source_ids = [] # Temp store for source IDs
         self.last_belief_update = {}  # Tracks when each cell was last updated
@@ -449,6 +450,81 @@ class HumanAgent(Agent):
             self.q_table["self_action"] = old_q + learning_rate * (avg_reward - old_q)
             self._belief_accuracy_rewards = []
 
+    def evaluate_self_action(self, cell, actual_level):
+        """
+        Evaluate self-action queries for Q-learning feedback.
+        Different logic for exploiters vs explorers:
+
+        EXPLOITERS: Reward when "I trusted my own belief AND I was right"
+        - High reward: prior was accurate (self-reliance justified)
+        - Low reward: prior was wrong (should have sought external info)
+
+        EXPLORERS: Penalize self-action (they should seek NEW info)
+        - Penalty: using self-action means no new learning opportunity
+        - Small reward only if self-action somehow improved accuracy
+        """
+        current_tick = self.model.tick
+        evaluated = []
+        rewards = []
+
+        for item in getattr(self, 'pending_self_action_evals', []):
+            tick, eval_cell, prior_level, prior_conf, reported_level = item
+
+            if eval_cell != cell:
+                continue
+
+            ticks_elapsed = current_tick - tick
+            if ticks_elapsed > 15:
+                evaluated.append(item)
+                continue
+            if ticks_elapsed < 3:
+                continue
+
+            # Calculate accuracy: how close was prior to actual ground truth
+            level_error = abs(prior_level - actual_level)
+
+            if self.agent_type == "exploitative":
+                # EXPLOITER: Reward self-reliance when correct
+                # "I trusted my belief, was I right?"
+                if level_error == 0:
+                    reward = 0.6 * prior_conf  # Perfect! Confidence-weighted reward
+                elif level_error == 1:
+                    reward = 0.2 * prior_conf  # Close enough
+                elif level_error == 2:
+                    reward = -0.2  # Wrong - should have sought info
+                else:
+                    reward = -0.4  # Very wrong - self-reliance was bad
+            else:
+                # EXPLORER: Penalize self-action (missed learning opportunity)
+                # Self-action = no new info = bad for explorers
+                if level_error == 0:
+                    reward = 0.1  # Belief was correct, but still didn't LEARN anything
+                elif level_error == 1:
+                    reward = -0.1  # Slightly wrong, should have sought info
+                else:
+                    reward = -0.3  # Wrong AND didn't try to learn - bad
+
+                # Extra penalty for high confidence (overconfident explorer)
+                if prior_conf > 0.6 and level_error > 0:
+                    reward -= 0.1  # Penalty for confident but wrong
+
+            rewards.append(reward)
+            evaluated.append(item)
+
+        # Update Q(self_action) with average reward
+        if rewards:
+            avg_reward = sum(rewards) / len(rewards)
+            lr = 0.15 if self.agent_type == "exploitative" else 0.20
+            old_q = self.q_table.get("self_action", 0.0)
+            self.q_table["self_action"] = old_q + lr * (avg_reward - old_q)
+
+        # Remove evaluated items
+        if hasattr(self, 'pending_self_action_evals'):
+            self.pending_self_action_evals = [
+                item for item in self.pending_self_action_evals
+                if item not in evaluated
+            ]
+
     def sense_environment(self):
         pos = self.pos
         radius = 2  # Same for both agent types - behavioral differences should be in information-seeking, not perception
@@ -513,6 +589,8 @@ class HumanAgent(Agent):
 
                 # Evaluate information quality feedback for this sensed cell
                 self.evaluate_information_quality(cell, actual)
+                # Also evaluate self-action feedback
+                self.evaluate_self_action(cell, actual)
 
         # Batch update self_action Q-value: ONE update per tick with average reward
         # This prevents self_action from being inflated by ~25 per-cell updates
@@ -826,16 +904,67 @@ class HumanAgent(Agent):
             else:
                 source_knowledge_conf = 0.7  # Unknown source type
 
-            # Weighted combination by agent type (no hardcoded biases based on source type)
-            # Exploiters value CONFIRMATION over accuracy (0.8/0.2)
-            # Explorers value ACCURACY over confirmation (0.8/0.2)
-            if self.agent_type == "exploitative":
-                combined_reward = 0.8 * confirmation_score + 0.2 * accuracy_score
-            else:
-                combined_reward = 0.8 * accuracy_score + 0.2 * confirmation_score
+            # =================================================================
+            # CORRECTED REWARD LOGIC - Links confirmation/change to accuracy
+            # =================================================================
 
-            # Scale to [-0.7, +0.5] range to match existing Q-update expectations
-            accuracy_reward = combined_reward * 0.6 - 0.1
+            # Determine if info was confirming (matched prior) or novel (changed belief)
+            info_confirmed = (prior_error <= 1)  # Within 1 level of prior
+            info_was_accurate = (level_error <= 1)  # Within 1 level of truth
+
+            if self.agent_type == "exploitative":
+                # EXPLOITER REWARD: "Did I benefit from trusting this source?"
+                # Key: confirmation is GOOD if it leads to accurate beliefs
+                if info_confirmed and info_was_accurate:
+                    # Confirmed my belief AND was accurate - excellent source!
+                    combined_reward = 0.8  # Strong positive
+                elif info_confirmed and not info_was_accurate:
+                    # Confirmed my belief BUT was wrong - mixed (felt good, bad outcome)
+                    combined_reward = 0.1  # Slight positive (confirmation value)
+                elif not info_confirmed and info_was_accurate:
+                    # Contradicted me BUT was accurate - I should have listened!
+                    combined_reward = 0.3  # Moderate positive (learned despite resistance)
+                else:
+                    # Contradicted me AND was wrong - I was right to resist!
+                    combined_reward = -0.3  # Negative (don't trust contradicting wrong sources)
+
+                # Bonus for friends (social trust)
+                if source_id in self.friends:
+                    combined_reward += 0.1
+
+            else:  # EXPLORATORY
+                # EXPLORER REWARD: "Did I learn something new and true?"
+                # Key: redundant info is BAD, novel accurate info is GOOD
+
+                # Calculate belief change (did I learn something new?)
+                belief_changed = (prior_error >= 1)  # Info differed from prior by 1+ levels
+
+                if belief_changed and info_was_accurate:
+                    # Learned something NEW and TRUE - excellent!
+                    combined_reward = 0.8  # Strong positive
+                elif belief_changed and not info_was_accurate:
+                    # Learned something NEW but FALSE - bad
+                    combined_reward = -0.4  # Negative (learned wrong info)
+                elif not belief_changed and info_was_accurate:
+                    # Redundant but accurate - wasted opportunity
+                    combined_reward = -0.1  # Slight negative (didn't learn anything)
+                else:
+                    # Redundant AND inaccurate - very bad (reinforced wrong belief)
+                    combined_reward = -0.5  # Strong negative
+
+                # Bonus for confidence increase (uncertainty reduction)
+                current_belief = self.beliefs.get(eval_cell, {})
+                current_conf = current_belief.get('confidence', 0.5) if isinstance(current_belief, dict) else 0.5
+                if len(item) == 6:
+                    prior_conf_stored = item[5]
+                else:
+                    prior_conf_stored = 0.5
+                conf_change = current_conf - prior_conf_stored
+                if conf_change > 0.1:
+                    combined_reward += 0.15  # Bonus for reducing uncertainty
+
+            # Scale to match Q-update expectations
+            accuracy_reward = combined_reward * 0.5
 
             # Determine mode from source_id (map to high-level modes)
             if is_human_source:
@@ -1768,6 +1897,18 @@ class HumanAgent(Agent):
             # Query source based on chosen mode
 
             if chosen_mode == "self_action":
+                # Track prior beliefs BEFORE self-action for Q-learning feedback
+                cells_in_query = self.model.grid.get_neighborhood(
+                    interest_point, moore=True, radius=query_radius, include_center=True
+                )
+                for cell in cells_in_query:
+                    if cell in self.beliefs:
+                        prior = self.beliefs[cell]
+                        self.pending_self_action_evals.append((
+                            self.model.tick, cell,
+                            prior.get('level', 0), prior.get('confidence', 0.1),
+                            prior.get('level', 0)  # For self-action, "reported" = current belief
+                        ))
                 reports = self.report_beliefs(interest_point, query_radius)
                 source_id = None  # No external source used
 
