@@ -59,7 +59,12 @@ class HumanAgent(Agent):
                  exploit_trust_lr=0.03, # Low trust Learning Rate for exploiters
                  explor_trust_lr=0.06,  # Higher trust Learning Rate for explorers
                  exploit_friend_bias=0.1,     # Action Selection: Bias added to 'human' score (exploiter) (tune)
-                 exploit_self_bias=0.1):
+                 exploit_self_bias=0.1,
+                 # --- Belief Update Parameters (D/δ) ---
+                 exploit_D=1.5, exploit_delta=20,  # Exploiter defaults
+                 explore_D=3.0, explore_delta=8,   # Explorer defaults
+                 # --- Memory Size Parameters ---
+                 memory_exploit=3, memory_explore=7):  # Memory sizes
                  #exploiter_trust_lr=0.1):
                  #exploit_reward_weight=0.2,  # Reward weight for exploitative agents
                  #onfirmation_weight=0.2):     # Action Selection: Bias added to 'self_action' score (exploiter) (tune)
@@ -102,6 +107,7 @@ class HumanAgent(Agent):
         self.friends = set() # Use set for efficient checking ('H_j' format)
         self.pending_rewards = [] # [(tick_due, mode, [(cell, belief_level), ...]), ...]
         self.pending_info_evaluations = [] # [(tick_received, source_id, cell, reported_level), ...] for information quality feedback
+        self.pending_self_action_evals = [] # [(tick, cell, prior_level, prior_conf, reported_level)] for self-action Q-feedback
         self.tokens_this_tick = {} # Tracks mode choice leading to send_relief THIS tick
         self.last_queried_source_ids = [] # Temp store for source IDs
         self.last_belief_update = {}  # Tracks when each cell was last updated
@@ -119,11 +125,17 @@ class HumanAgent(Agent):
         for k in range(model.num_ai):
             self.q_table[f"A_{k}"] = 0.0
 
-        # --- Belief Update Parameters ---
-        # These control how beliefs change when info is ACCEPTED (separate from Q-learning)
-        self.D = 2.0 if agent_type == "exploitative" else 4 # Acceptance threshold parameter
-        self.delta = 3.5 if agent_type == "exploitative" else 1.2 # Acceptance sensitivity parameter
-        self.belief_learning_rate = 0.9 if agent_type == "exploratory" else 0.4 # How much belief shifts towards accepted info
+        # --- Belief Update Parameters (D/δ from Geschke et al. 2019) ---
+        # D = latitude of acceptance (on 0-5 scale for disaster levels)
+        # δ = sharpness (higher = more binary acceptance)
+        # Formula: P(accept) = D^δ / (d^δ + D^δ) where d = |reported - prior|
+        self.D = exploit_D if agent_type == "exploitative" else explore_D
+        self.delta = exploit_delta if agent_type == "exploitative" else explore_delta
+
+        # --- Memory-Based Belief Storage ---
+        # Each cell stores recent info-bits, belief is derived from memory
+        self.belief_memory = {}  # {cell: [{'level', 'confidence', 'source_id', 'tick', 'source_trust'}, ...]}
+        self.memory_size = memory_exploit if agent_type == "exploitative" else memory_explore
 
         # --- Other Parameters & Counters ---
         self.trust_update_mode = model.trust_update_mode # Affects trust increment size? Seems used in removed code? Check usage.
@@ -438,6 +450,81 @@ class HumanAgent(Agent):
             self.q_table["self_action"] = old_q + learning_rate * (avg_reward - old_q)
             self._belief_accuracy_rewards = []
 
+    def evaluate_self_action(self, cell, actual_level):
+        """
+        Evaluate self-action queries for Q-learning feedback.
+        Different logic for exploiters vs explorers:
+
+        EXPLOITERS: Reward when "I trusted my own belief AND I was right"
+        - High reward: prior was accurate (self-reliance justified)
+        - Low reward: prior was wrong (should have sought external info)
+
+        EXPLORERS: Penalize self-action (they should seek NEW info)
+        - Penalty: using self-action means no new learning opportunity
+        - Small reward only if self-action somehow improved accuracy
+        """
+        current_tick = self.model.tick
+        evaluated = []
+        rewards = []
+
+        for item in getattr(self, 'pending_self_action_evals', []):
+            tick, eval_cell, prior_level, prior_conf, reported_level = item
+
+            if eval_cell != cell:
+                continue
+
+            ticks_elapsed = current_tick - tick
+            if ticks_elapsed > 15:
+                evaluated.append(item)
+                continue
+            if ticks_elapsed < 3:
+                continue
+
+            # Calculate accuracy: how close was prior to actual ground truth
+            level_error = abs(prior_level - actual_level)
+
+            if self.agent_type == "exploitative":
+                # EXPLOITER: Reward self-reliance when correct
+                # "I trusted my belief, was I right?"
+                if level_error == 0:
+                    reward = 0.6 * prior_conf  # Perfect! Confidence-weighted reward
+                elif level_error == 1:
+                    reward = 0.2 * prior_conf  # Close enough
+                elif level_error == 2:
+                    reward = -0.2  # Wrong - should have sought info
+                else:
+                    reward = -0.4  # Very wrong - self-reliance was bad
+            else:
+                # EXPLORER: Penalize self-action (missed learning opportunity)
+                # Self-action = no new info = bad for explorers
+                if level_error == 0:
+                    reward = 0.1  # Belief was correct, but still didn't LEARN anything
+                elif level_error == 1:
+                    reward = -0.1  # Slightly wrong, should have sought info
+                else:
+                    reward = -0.3  # Wrong AND didn't try to learn - bad
+
+                # Extra penalty for high confidence (overconfident explorer)
+                if prior_conf > 0.6 and level_error > 0:
+                    reward -= 0.1  # Penalty for confident but wrong
+
+            rewards.append(reward)
+            evaluated.append(item)
+
+        # Update Q(self_action) with average reward
+        if rewards:
+            avg_reward = sum(rewards) / len(rewards)
+            lr = 0.15 if self.agent_type == "exploitative" else 0.20
+            old_q = self.q_table.get("self_action", 0.0)
+            self.q_table["self_action"] = old_q + lr * (avg_reward - old_q)
+
+        # Remove evaluated items
+        if hasattr(self, 'pending_self_action_evals'):
+            self.pending_self_action_evals = [
+                item for item in self.pending_self_action_evals
+                if item not in evaluated
+            ]
+
     def sense_environment(self):
         pos = self.pos
         radius = 2  # Same for both agent types - behavioral differences should be in information-seeking, not perception
@@ -502,11 +589,222 @@ class HumanAgent(Agent):
 
                 # Evaluate information quality feedback for this sensed cell
                 self.evaluate_information_quality(cell, actual)
+                # Also evaluate self-action feedback
+                self.evaluate_self_action(cell, actual)
 
         # Batch update self_action Q-value: ONE update per tick with average reward
         # This prevents self_action from being inflated by ~25 per-cell updates
         # while human/ai Q-values only get 0-1 updates per tick
         self.flush_belief_rewards()
+
+    # =========================================================================
+    # MEMORY-BASED BELIEF SYSTEM (Geschke et al. 2019 inspired)
+    # =========================================================================
+
+    def add_to_memory(self, cell, level, source_confidence, source_id):
+        """
+        Add info-bit to memory for a cell, forget oldest if full.
+        Memory stores recent reports, belief is derived from memory contents.
+        """
+        if cell not in self.belief_memory:
+            self.belief_memory[cell] = []
+
+        # Get source trust at time of receiving info
+        source_trust = self.trust.get(source_id, 0.1) if source_id else 0.5
+
+        # Add new info with metadata
+        self.belief_memory[cell].append({
+            'level': level,
+            'confidence': source_confidence,
+            'source_id': source_id,
+            'tick': self.model.tick,
+            'source_trust': source_trust,
+        })
+
+        # Enforce memory limit (FIFO - forget oldest)
+        if len(self.belief_memory[cell]) > self.memory_size:
+            self.belief_memory[cell].pop(0)
+
+        # Update derived belief from memory
+        self._update_belief_from_memory(cell)
+
+    def _update_belief_from_memory(self, cell):
+        """
+        Compute belief as weighted average of memory contents.
+        Weights based on: source trust, source confidence, recency.
+        """
+        if cell not in self.belief_memory or not self.belief_memory[cell]:
+            return
+
+        memory = self.belief_memory[cell]
+
+        # Calculate weighted average
+        total_weight = 0
+        weighted_sum = 0
+
+        for m in memory:
+            # Recency weight: newer info gets more weight
+            ticks_ago = self.model.tick - m['tick']
+            recency = max(0.1, 1.0 - (ticks_ago / 100.0))  # Decay over 100 ticks
+
+            # Combined weight: trust × confidence × recency
+            weight = m['source_trust'] * m['confidence'] * recency
+            weighted_sum += m['level'] * weight
+            total_weight += weight
+
+        if total_weight > 0:
+            new_level = int(round(weighted_sum / total_weight))
+        else:
+            # Fallback to simple mean if weights are zero
+            new_level = int(round(np.mean([m['level'] for m in memory])))
+
+        # Confidence based on:
+        # 1. Memory fullness (more info = more confidence)
+        # 2. Agreement between sources (low std = high confidence)
+        memory_fullness = len(memory) / self.memory_size
+        levels = [m['level'] for m in memory]
+        if len(levels) > 1:
+            agreement = 1.0 - (np.std(levels) / 2.5)  # Normalize by max possible std
+            agreement = max(0, min(1, agreement))
+        else:
+            agreement = 0.5
+
+        new_confidence = 0.3 * memory_fullness + 0.7 * agreement
+        new_confidence = max(0.1, min(0.95, new_confidence))
+
+        self.beliefs[cell] = {
+            'level': max(0, min(5, new_level)),
+            'confidence': new_confidence,
+        }
+
+    def calculate_source_precision(self, report_metadata, source_id):
+        """
+        Calculate precision based on source-specific factors.
+
+        Factors:
+        1. Receiver's trust in source (learned over time)
+        2. Source's confidence in their report
+        3. Whether source directly sensed vs guessed
+        4. Source's agent type (explorers typically more accurate)
+        """
+        # Base trust from receiver's perspective
+        base_trust = self.trust.get(source_id, 0.1)
+
+        # Factor 1: Source's own confidence in the report
+        source_confidence = report_metadata.get('confidence', 0.5)
+
+        # Factor 2: Sensed vs guessed (direct observation is more reliable)
+        is_sensed = report_metadata.get('is_sensed', False)
+        sensing_multiplier = 1.5 if is_sensed else 0.7
+
+        # Factor 3: Source agent type
+        source_type = report_metadata.get('source_type', 'unknown')
+        if source_type == 'exploratory':
+            type_multiplier = 1.2  # Explorers tend to be more accurate
+        elif source_type == 'exploitative':
+            type_multiplier = 0.9  # Exploiters might confirm biases
+        else:
+            type_multiplier = 1.0  # AI or unknown
+
+        # Factor 4: Friend modifier (social trust for exploiters)
+        is_friend = source_id in self.friends if source_id else False
+        if self.agent_type == "exploitative" and is_friend:
+            friend_multiplier = 1.3  # Exploiters trust friends more
+        else:
+            friend_multiplier = 1.0
+
+        # Combined precision
+        raw_precision = (
+            base_trust *
+            source_confidence *
+            sensing_multiplier *
+            type_multiplier *
+            friend_multiplier
+        )
+
+        # Convert to precision scale (0 to ~10)
+        # Using logistic-like transform to prevent extreme values
+        precision = 5.0 * raw_precision / (1 - raw_precision + 0.1)
+
+        # Cap based on receiver's agent type
+        if self.agent_type == "exploitative":
+            precision = min(precision, 6.0)  # More skeptical
+        else:
+            precision = min(precision, 10.0)  # More accepting
+
+        return max(0.1, precision)
+
+    def integrate_information(self, cell, report_metadata, source_id):
+        """
+        Full information integration pipeline:
+        1. Calculate acceptance probability using D/δ formula (Geschke et al. 2019)
+        2. If accepted, add to memory
+        3. Memory automatically updates derived belief
+
+        Returns: True if accepted, False if rejected
+        """
+        reported_level = report_metadata.get('level', 0)
+        source_confidence = report_metadata.get('confidence', 0.5)
+
+        # Get current belief (derived from memory)
+        current_belief = self.beliefs.get(cell, {'level': 0, 'confidence': 0.1})
+        prior_level = current_belief['level']
+        prior_confidence = current_belief['confidence']
+
+        # ===== STEP 1: Acceptance Decision using D/δ formula =====
+        d = abs(reported_level - prior_level)
+        d_normalized = d / 5.0  # Normalize to [0, 1] scale
+
+        if d_normalized > 0:
+            D_normalized = self.D / 5.0  # Normalize D to same scale
+            delta = self.delta
+
+            # Paper formula: P(accept) = D^δ / (d^δ + D^δ)
+            # When d = D, P = 0.5
+            # When d < D, P > 0.5 (likely accept)
+            # When d > D, P < 0.5 (likely reject)
+            try:
+                p_accept = (D_normalized ** delta) / (d_normalized ** delta + D_normalized ** delta)
+            except (OverflowError, ZeroDivisionError):
+                # Handle numerical issues with large delta
+                p_accept = 1.0 if d_normalized < D_normalized else 0.0
+
+            # Modify acceptance by source precision
+            source_precision = self.calculate_source_precision(report_metadata, source_id)
+            precision_modifier = min(1.5, 0.5 + source_precision / 10.0)
+            p_accept *= precision_modifier
+
+            # Friend modifier for exploiters
+            is_friend = source_id in self.friends if source_id else False
+            if self.agent_type == "exploitative" and is_friend:
+                p_accept = min(1.0, p_accept * 1.3)
+
+            # Confidence penalty for exploiters (high confidence = resist change)
+            if self.agent_type == "exploitative" and prior_confidence > 0.5:
+                confidence_penalty = 1.0 - 0.4 * prior_confidence
+                p_accept *= confidence_penalty
+
+            # Make acceptance decision
+            if random.random() >= p_accept:
+                # REJECT - track for feedback but don't update memory/belief
+                if source_id:
+                    self.pending_info_evaluations.append((
+                        self.model.tick, source_id, cell,
+                        int(reported_level), int(prior_level), float(prior_confidence)
+                    ))
+                return False  # Rejected
+
+        # ===== STEP 2: Add to Memory (if accepted) =====
+        self.add_to_memory(cell, reported_level, source_confidence, source_id)
+
+        # Track for feedback evaluation
+        if source_id:
+            self.pending_info_evaluations.append((
+                self.model.tick, source_id, cell,
+                int(reported_level), int(prior_level), float(prior_confidence)
+            ))
+
+        return True  # Accepted
 
     def evaluate_information_quality(self, cell, actual_level):
         """
@@ -606,16 +904,75 @@ class HumanAgent(Agent):
             else:
                 source_knowledge_conf = 0.7  # Unknown source type
 
-            # Weighted combination by agent type (no hardcoded biases based on source type)
-            # Exploiters value CONFIRMATION over accuracy (0.8/0.2)
-            # Explorers value ACCURACY over confirmation (0.8/0.2)
-            if self.agent_type == "exploitative":
-                combined_reward = 0.8 * confirmation_score + 0.2 * accuracy_score
-            else:
-                combined_reward = 0.8 * accuracy_score + 0.2 * confirmation_score
+            # =================================================================
+            # CORRECTED REWARD LOGIC - Links confirmation/change to accuracy
+            # =================================================================
 
-            # Scale to [-0.7, +0.5] range to match existing Q-update expectations
-            accuracy_reward = combined_reward * 0.6 - 0.1
+            # Determine if info was confirming (matched prior) or novel (changed belief)
+            info_confirmed = (prior_error <= 1)  # Within 1 level of prior
+            info_was_accurate = (level_error <= 1)  # Within 1 level of truth
+
+            if self.agent_type == "exploitative":
+                # EXPLOITER REWARD: "Did I benefit from trusting this source?"
+                # Key: confirmation is GOOD if it leads to accurate beliefs
+                if info_confirmed and info_was_accurate:
+                    # Confirmed my belief AND was accurate - excellent source!
+                    combined_reward = 0.8  # Strong positive
+                elif info_confirmed and not info_was_accurate:
+                    # Confirmed my belief BUT was wrong - mixed (felt good, bad outcome)
+                    combined_reward = 0.1  # Slight positive (confirmation value)
+                elif not info_confirmed and info_was_accurate:
+                    # Contradicted me BUT was accurate - I should have listened!
+                    combined_reward = 0.3  # Moderate positive (learned despite resistance)
+                else:
+                    # Contradicted me AND was wrong - I was right to resist!
+                    combined_reward = -0.3  # Negative (don't trust contradicting wrong sources)
+
+                # Bonus for friends (social trust)
+                if source_id in self.friends:
+                    combined_reward += 0.1
+
+            else:  # EXPLORATORY
+                # EXPLORER REWARD: "Did I reduce uncertainty and learn something true?"
+                # Key: info that INCREASES CONFIDENCE is valuable, even if same level
+
+                # Get stored prior confidence
+                if len(item) == 6:
+                    prior_conf_stored = item[5]
+                else:
+                    prior_conf_stored = 0.5
+
+                # Calculate belief change
+                belief_changed = (prior_error >= 1)  # Info differed from prior by 1+ levels
+
+                # Explorers value info that reduces uncertainty (low prior conf → useful)
+                was_uncertain = (prior_conf_stored < 0.5)
+
+                if belief_changed and info_was_accurate:
+                    # Learned something NEW and TRUE - excellent!
+                    combined_reward = 0.8
+                elif belief_changed and not info_was_accurate:
+                    # Learned something NEW but FALSE - bad
+                    combined_reward = -0.4
+                elif not belief_changed and was_uncertain and info_was_accurate:
+                    # Same level but CONFIRMED when uncertain - valuable!
+                    combined_reward = 0.5  # Good: reduced uncertainty
+                elif not belief_changed and not was_uncertain and info_was_accurate:
+                    # Same level AND was already confident - truly redundant
+                    combined_reward = 0.0  # Neutral (accurate but no learning)
+                elif not belief_changed and not info_was_accurate:
+                    # Same level but info was WRONG - bad source
+                    combined_reward = -0.3
+
+                # Bonus for confidence increase (uncertainty reduction)
+                current_belief = self.beliefs.get(eval_cell, {})
+                current_conf = current_belief.get('confidence', 0.5) if isinstance(current_belief, dict) else 0.5
+                conf_change = current_conf - prior_conf_stored
+                if conf_change > 0.15:
+                    combined_reward += 0.25  # Larger bonus for reducing uncertainty
+
+            # Scale to match Q-update expectations
+            accuracy_reward = combined_reward * 0.5
 
             # Determine mode from source_id (map to high-level modes)
             if is_human_source:
@@ -836,11 +1193,19 @@ class HumanAgent(Agent):
                 # CRITICAL FIX: For REMOTE cells, DON'T evaluate yet - defer until sensed
                 # This prevents confirming AI from getting free pass with neutral score
                 if is_remote_cell:
-                    # Explorer querying remote cell: DEFER evaluation until sensed
-                    # Don't give neutral score - wait for ground truth verification
-                    # Item will be evaluated by evaluate_information_quality when sensed,
-                    # or expire after extended window (30 ticks for remote cells)
-                    continue  # Skip this item, keep it pending
+                    # Explorer querying remote cell: Can't verify accuracy against ground truth
+                    # INSTEAD: Reward based on whether info IMPROVED CONFIDENCE (reduced uncertainty)
+                    # This gives explorers feedback for seeking useful information
+                    conf_improvement = belief_conf - (stored_prior_conf if stored_prior_conf else 0.1)
+                    if conf_improvement > 0.1:
+                        # Source helped reduce uncertainty - positive!
+                        combined_reward = 0.5 + conf_improvement
+                    elif conf_improvement > 0:
+                        # Small improvement
+                        combined_reward = 0.2
+                    else:
+                        # No improvement or got worse - neutral to slight negative
+                        combined_reward = -0.1
                 else:
                     # Sensed cell: can verify accuracy properly
                     combined_reward = 0.95 * accuracy_score + 0.05 * confirmation_score
@@ -903,7 +1268,10 @@ class HumanAgent(Agent):
         ]
 
     def report_beliefs(self, interest_point, query_radius):
-        """Reports human agent's beliefs about cells within query_radius of the interest_point."""
+        """
+        Reports human agent's beliefs about cells WITH METADATA.
+        Returns dict: {cell: {'level', 'confidence', 'source_type', 'is_sensed', 'is_guess'}}
+        """
         report = {}
 
         # Check if agent can report (e.g., not in high disaster zone)
@@ -923,14 +1291,6 @@ class HumanAgent(Agent):
             include_center=True
         )
 
-        # Debug info similar to AI agent
-        # if hasattr(self.model, 'debug_mode') and self.model.debug_mode and random.random() < 0.05:
-            #print(f"DEBUG: Human {self.unique_id} asked to report on {len(cells_to_report_on)} cells around {interest_point}")
-
-        # Track how many cells had direct beliefs vs guesses
-        known_cells = 0
-        guessed_cells = 0
-
         for cell in cells_to_report_on:
             # Check if cell is valid
             if 0 <= cell[0] < self.model.width and 0 <= cell[1] < self.model.height:
@@ -938,25 +1298,35 @@ class HumanAgent(Agent):
                 has_belief = cell in self.beliefs and isinstance(self.beliefs[cell], dict)
 
                 if has_belief:
-                    # Report own belief about the cell
+                    # Report own belief about the cell WITH METADATA
                     belief_info = self.beliefs[cell]
                     current_level = belief_info.get('level', 0)
                     current_conf = belief_info.get('confidence', 0.1)
 
                     # Apply a small chance of reporting noise
                     if random.random() < 0.05:
-                        noisy_level = max(0, min(5, current_level + random.choice([-1, 1])))
-                        report[cell] = noisy_level
+                        reported_level = max(0, min(5, current_level + random.choice([-1, 1])))
                     else:
-                        report[cell] = current_level
+                        reported_level = current_level
 
-                    known_cells += 1
+                    # Check if this cell is within sensing range (direct observation)
+                    is_sensed = self.is_within_sensing_range(cell)
+
+                    report[cell] = {
+                        'level': reported_level,
+                        'confidence': current_conf,
+                        'source_type': self.agent_type,  # 'exploitative' or 'exploratory'
+                        'is_sensed': is_sensed,
+                        'is_guess': False,
+                    }
+
                 else:
                     # HUMAN GUESSING MECHANISM - similar to AI but less sophisticated
                     # Humans guess less than AI (50% vs 75% for AI)
                     if random.random() < 0.5:
                         # Look at surrounding cells with beliefs
                         nearby_values = []
+                        nearby_confs = []
 
                         for dx in range(-1, 2):
                             for dy in range(-1, 2):
@@ -964,20 +1334,22 @@ class HumanAgent(Agent):
                                 if (nearby in self.beliefs and
                                     isinstance(self.beliefs[nearby], dict)):
                                     nearby_values.append(self.beliefs[nearby].get('level', 0))
+                                    nearby_confs.append(self.beliefs[nearby].get('confidence', 0.1))
 
                         if nearby_values:
                             # Simple average with random noise
                             avg_value = sum(nearby_values) / len(nearby_values)
+                            avg_conf = sum(nearby_confs) / len(nearby_confs)
                             noise = random.choice([-1, 0, 0, 1])
                             guessed_value = max(0, min(5, int(round(avg_value + noise))))
-                            report[cell] = guessed_value
-                            guessed_cells += 1
 
-        # Debug output for comparison with AI
-        #if hasattr(self.model, 'debug_mode') and self.model.debug_mode and random.random() < 0.05:
-           # total_reported = len(report)
-            #print(f"DEBUG: Human {self.unique_id} reported on {total_reported} cells "
-                  #f"({known_cells} known, {guessed_cells} guessed)")
+                            report[cell] = {
+                                'level': guessed_value,
+                                'confidence': avg_conf * 0.5,  # Reduce confidence for guesses
+                                'source_type': self.agent_type,
+                                'is_sensed': False,
+                                'is_guess': True,
+                            }
 
         return report
 
@@ -1541,6 +1913,18 @@ class HumanAgent(Agent):
             # Query source based on chosen mode
 
             if chosen_mode == "self_action":
+                # Track prior beliefs BEFORE self-action for Q-learning feedback
+                cells_in_query = self.model.grid.get_neighborhood(
+                    interest_point, moore=True, radius=query_radius, include_center=True
+                )
+                for cell in cells_in_query:
+                    if cell in self.beliefs:
+                        prior = self.beliefs[cell]
+                        self.pending_self_action_evals.append((
+                            self.model.tick, cell,
+                            prior.get('level', 0), prior.get('confidence', 0.1),
+                            prior.get('level', 0)  # For self-action, "reported" = current belief
+                        ))
                 reports = self.report_beliefs(interest_point, query_radius)
                 source_id = None  # No external source used
 
@@ -1586,12 +1970,8 @@ class HumanAgent(Agent):
                         self.ai_info_sources = {}
 
                     # Track which cells got info from which AI
-                    for cell, reported_value in reports.items():
+                    for cell in reports.keys():
                         self.ai_info_sources[cell] = source_id
-
-                    # DEBUG PRINT to track AI source queries
-                    #if self.model.debug_mode and random.random() < 0.1:  # 10% of the time
-                        #print(f"DEBUG: Agent {self.unique_id} queried AI {source_id} for {len(reports)} cells")
 
                     self.accum_calls_ai += 1
                     self.accum_calls_total += 1
@@ -1600,21 +1980,32 @@ class HumanAgent(Agent):
                     source_id = None
 
 
-            # Process reports and update beliefs
+            # Process reports and update beliefs using new memory-based system
             belief_updates = 0
-            source_trust = self.trust.get(source_id, 0.1) if source_id else 0.1
 
-            for cell, reported_value in reports.items():
+            for cell, report_data in reports.items():
+                # Handle both old format (just a number) and new format (dict with metadata)
+                if isinstance(report_data, dict):
+                    # New format with metadata
+                    report_metadata = report_data
+                else:
+                    # Old format (backward compatibility) - wrap in metadata
+                    report_metadata = {
+                        'level': int(round(report_data)),
+                        'confidence': 0.5,  # Default confidence
+                        'source_type': 'unknown',
+                        'is_sensed': False,
+                        'is_guess': False,
+                    }
+
+                # Initialize belief for cell if not present
                 if cell not in self.beliefs:
-                    continue
+                    self.beliefs[cell] = {'level': 0, 'confidence': 0.1}
 
-                # Convert to integer level if it's not already
-                reported_level = int(round(reported_value))
+                # Use the new memory-based integration with D/δ acceptance
+                accepted = self.integrate_information(cell, report_metadata, source_id)
 
-                # Use the Bayesian update function
-                significant_update = self.update_belief_bayesian(cell, reported_level, source_trust, source_id)
-                # Track if this was a significant belief update
-                if significant_update:
+                if accepted:
                     belief_updates += 1
 
                     # Track source acceptance (for metrics)
@@ -1624,12 +2015,12 @@ class HumanAgent(Agent):
                             if source_id in self.friends:
                                 self.accepted_friend += 1
                         elif source_id.startswith("A_"):
-                            # INCREMENT AI ACCEPTANCE COUNTER HERE
                             self.accepted_ai += 1
 
-                            # DEBUG PRINT to track AI info acceptance
-                            #if self.model.debug_mode and random.random() < 0.05:  # 5% of the time
-                                #print(f"DEBUG: Agent {self.unique_id} accepted info from AI {source_id} for cell {cell}")
+                            # Track AI info sources for later trust updates
+                            if not hasattr(self, 'ai_info_sources'):
+                                self.ai_info_sources = {}
+                            self.ai_info_sources[cell] = source_id
 
         except Exception as e:
             print(f"ERROR in Agent {self.unique_id} seek_information at tick {self.model.tick}: {e}")
@@ -2228,9 +2619,33 @@ class AIAgent(Agent):
             corrected = np.round(sensed_vals + adjustments)
             corrected = np.clip(corrected, 0, 5)  # Keep values in valid range
 
-        # Build the report dictionary with aligned values
+        # Build the report dictionary with aligned values AND METADATA
+        # Track which cells were directly sensed vs guessed
         for i, cell in enumerate(valid_cells_in_query):
-            report[cell] = int(corrected[i])
+            is_directly_sensed = cell in directly_sensed_cells
+
+            # Calculate confidence based on sensing status and alignment
+            if is_directly_sensed:
+                # High confidence for directly sensed cells
+                base_confidence = 0.85
+            else:
+                # Lower confidence for guessed cells
+                base_confidence = 0.4
+
+            # Reduce confidence if alignment adjusted the value significantly
+            original_value = sensed_vals_list[i]
+            aligned_value = int(corrected[i])
+            if abs(aligned_value - original_value) > 0:
+                # Alignment changed the value - reduce confidence
+                base_confidence *= 0.7
+
+            report[cell] = {
+                'level': aligned_value,
+                'confidence': base_confidence,
+                'source_type': 'ai',  # AI source
+                'is_sensed': is_directly_sensed,
+                'is_guess': not is_directly_sensed,
+            }
 
         return report
 
@@ -2266,7 +2681,12 @@ class DisasterModel(Model):
                  exploit_trust_lr=0.03, # Default value matching base_params
                  explor_trust_lr=0.05,
                  exploit_friend_bias=0.1, # Default value matching base_params
-                 exploit_self_bias=0.1  # Default value matching base_params
+                 exploit_self_bias=0.1,  # Default value matching base_params
+                 # --- D/δ Parameters for Belief Acceptance ---
+                 exploit_D=1.5, exploit_delta=20,  # Exploiter acceptance params
+                 explore_D=3.0, explore_delta=8,   # Explorer acceptance params
+                 # --- Memory Size Parameters ---
+                 memory_exploit=3, memory_explore=7  # Memory sizes by agent type
                  ):
         super(DisasterModel, self).__init__()
         self.share_exploitative = share_exploitative
@@ -2295,6 +2715,16 @@ class DisasterModel(Model):
         self.explor_trust_lr = explor_trust_lr
         self.exploit_friend_bias = exploit_friend_bias
         self.exploit_self_bias = exploit_self_bias
+
+        # D/δ parameters for belief acceptance
+        self.exploit_D = exploit_D
+        self.exploit_delta = exploit_delta
+        self.explore_D = explore_D
+        self.explore_delta = explore_delta
+
+        # Memory size parameters
+        self.memory_exploit = memory_exploit
+        self.memory_explore = memory_explore
 
         self.grid = MultiGrid(width, height, torus=False)
         self.tick = 0
@@ -2369,7 +2799,12 @@ class DisasterModel(Model):
                              # pass trust rates and biases
                              trust_learning_rate=current_trust_lr,
                              exploit_friend_bias=self.exploit_friend_bias, # From model
-                             exploit_self_bias=self.exploit_self_bias     # From model
+                             exploit_self_bias=self.exploit_self_bias,     # From model
+                             # D/δ parameters for belief acceptance
+                             exploit_D=self.exploit_D, exploit_delta=self.exploit_delta,
+                             explore_D=self.explore_D, explore_delta=self.explore_delta,
+                             # Memory size parameters
+                             memory_exploit=self.memory_exploit, memory_explore=self.memory_explore
                              )
             self.humans[f"H_{i}"] = agent
             self.agent_list.append(agent)
@@ -2393,7 +2828,6 @@ class DisasterModel(Model):
         # Find connected components in the social network
         # Note: This assumes node IDs 0..N-1 correspond to agent indices
         components = list(nx.connected_components(self.social_network))
-        print(f"Found {len(components)} network components.") # Debug print
 
         for i, component_nodes in enumerate(components):
             # Decide if this component gets a rumor
@@ -2495,8 +2929,6 @@ class DisasterModel(Model):
 
     def calculate_aeci_variance(self):
         """Calculate AI Echo Chamber Index variance on a [-1, +1] scale."""
-        print(f"\nDEBUG: Starting AECI variance calculation at tick {self.tick}")
-        
         aeci_variance = 0.0  # Default neutral value
         
         # Define AI-reliant agents with adjusted threshold for observed behavior
@@ -2518,9 +2950,6 @@ class DisasterModel(Model):
             if total_calls >= min_calls_threshold and ai_ratio >= min_ai_ratio:
                 ai_reliant_agents.append(agent)
         
-        # Debug print
-        print(f"  Found {len(ai_reliant_agents)}/{len(self.humans)} AI-reliant agents")
-        
         # Get global belief variance
         all_beliefs = []
         for agent in self.humans.values():
@@ -2533,10 +2962,8 @@ class DisasterModel(Model):
         # Calculate global variance with safety check
         if len(all_beliefs) > 1:
             global_var = np.var(all_beliefs)
-            print(f"  Global belief variance: {global_var:.4f}")
         else:
             global_var = 0.0
-            print("  WARNING: Not enough global beliefs to calculate variance")
             
         # Only proceed if we have a valid global variance and AI-reliant agents
         if global_var > 0 and ai_reliant_agents:
@@ -2552,13 +2979,12 @@ class DisasterModel(Model):
             # Calculate AI-reliant variance with safety check
             if len(ai_reliant_beliefs) > 1:
                 ai_reliant_var = np.var(ai_reliant_beliefs)
-                print(f"  AI-reliant beliefs variance: {ai_reliant_var:.4f}")
-                
+
                 # Calculate variance effect
                 # Negative means AI reduces variance (echo chamber)
                 # Positive means AI increases variance (diversification)
                 var_diff = ai_reliant_var - global_var
-                
+
                 # Normalize to [-1, +1] range
                 if var_diff < 0:  # Variance reduction (echo chamber)
                     aeci_variance = max(-1, var_diff / global_var)  # Normalize by global variance
@@ -2566,30 +2992,19 @@ class DisasterModel(Model):
                     # Find a reasonable upper bound for normalization
                     max_possible_var = 5.0  # Given belief levels are 0-5, max variance is around 5
                     aeci_variance = min(1, var_diff / (max_possible_var - global_var))
-                
-                print(f"  AECI variance effect: {aeci_variance:.4f}")
-            else:
-                print("  WARNING: Not enough AI-reliant beliefs to calculate variance")
-        else:
-            print(f"  WARNING: Invalid global variance ({global_var}) or no AI-reliant agents")
         
         # Create a CORRECTLY formatted tuple
         aeci_variance_tuple = (self.tick, aeci_variance)
-        print(f"  Returning AECI variance tuple: {aeci_variance_tuple}")
-        
+
         # Update metrics dictionary with consistent format
         self._last_metrics['aeci_variance'] = {
             'tick': self.tick,
             'value': aeci_variance
         }
-        
+
         # Store in the array with consistent format
         self.aeci_variance_data.append(aeci_variance_tuple)
-        
-        # Debug: print all values in the array
-        print(f"  Current aeci_variance_data length: {len(self.aeci_variance_data)}")
-        print(f"  Last 3 entries: {self.aeci_variance_data[-3:] if len(self.aeci_variance_data) >= 3 else self.aeci_variance_data}")
-        
+
         return aeci_variance_tuple
 
     def calculate_info_diversity(self):
@@ -2646,8 +3061,6 @@ class DisasterModel(Model):
         num_exploitative = int(self.num_humans * self.share_exploitative)
         num_exploratory = self.num_humans - num_exploitative
 
-        print(f"Initializing social network with {num_exploitative} exploitative and {num_exploratory} exploratory agents")
-
         # Create an empty graph
         self.social_network = nx.Graph()
 
@@ -2657,7 +3070,6 @@ class DisasterModel(Model):
 
         # Determine number of communities (2-3 for typical agent counts)
         num_communities = min(3, max(2, self.num_humans // 15))
-        print(f"Creating {num_communities} substantial communities")
 
         # Divide agents into communities
         # Ensure each community has at least 5 agents (or appropriate minimum)
@@ -2723,18 +3135,10 @@ class DisasterModel(Model):
                                 other_comm.remove(agent_to_move)
                                 break
 
-        # Report community compositions
-        print(f"Created {len(communities)} communities:")
-        for i, community in enumerate(communities):
-            exploit_count = sum(1 for a in community if a < num_exploitative)
-            explor_count = len(community) - exploit_count
-            print(f"  Community {i}: {len(community)} agents ({exploit_count} exploit, {explor_count} explor)")
-
         # Create dense connections WITHIN communities
         p_within = 0.7  # 70% connection probability within community
 
         for comm_idx, community in enumerate(communities):
-            print(f"  Adding within-community edges for community {comm_idx} (size {len(community)})")
             for i in range(len(community)):
                 for j in range(i+1, len(community)):
                     if random.random() < p_within:
@@ -2742,38 +3146,22 @@ class DisasterModel(Model):
 
         # NO connections BETWEEN communities to ensure separate components
 
-        # Final verification
+        # Final verification - fix too-small components
         components = list(nx.connected_components(self.social_network))
-        print(f"Final network: {len(components)} connected components")
         for i, comp in enumerate(components):
             comp_size = len(comp)
-            comp_exploit_count = sum(1 for a in comp if a < num_exploitative)
-            comp_explor_count = comp_size - comp_exploit_count
-            print(f"  Component {i}: {comp_size} agents ({comp_exploit_count} exploit, {comp_explor_count} explor)")
-
             # Check for too-small components
             if comp_size < 3:
-                print(f"    WARNING: Component {i} is too small ({comp_size} agents)")
-
                 # Find the largest component
                 largest_comp = max(components, key=len)
-
                 # Connect this small component to the largest one
                 if comp != largest_comp:
                     small_node = random.choice(list(comp))
                     large_node = random.choice(list(largest_comp))
                     self.social_network.add_edge(small_node, large_node)
-                    print(f"    Connected small component node {small_node} to large component node {large_node}")
 
-        # Final check after fixes
+        # Return final components
         components = list(nx.connected_components(self.social_network))
-        print(f"Final network after fixes: {len(components)} connected components")
-        for i, comp in enumerate(components):
-            comp_size = len(comp)
-            comp_exploit_count = sum(1 for a in comp if a < num_exploitative)
-            comp_explor_count = comp_size - comp_exploit_count
-            print(f"  Component {i}: {comp_size} agents ({comp_exploit_count} exploit, {comp_explor_count} explor)")
-
         return components
 
     def initialize_ai_knowledge_maps(self):
@@ -4122,25 +4510,15 @@ def run_simulation(params):
 def safe_convert_to_array(data_list):
     """Safely convert data to numpy array, handling mixed types."""
     if not data_list:
-        print("WARNING: Empty data_list in safe_convert_to_array")
         return np.array([])
-    
-    # Print first few items in data_list for debugging
-    print(f"DEBUG: First few items in data_list:")
-    for i, item in enumerate(data_list[:3]):
-        print(f"  Item {i}: type={type(item)}, value={item}")
-    
+
     # Case 1: Check if all elements are tuple with length 2 (AECI variance format)
     if all(isinstance(item, tuple) and len(item) == 2 for item in data_list):
-        print(f"DEBUG: Converting tuple list to structured array")
-        # Convert to structured array with named fields
         result = np.array(data_list, dtype=[('tick', 'i4'), ('value', 'f4')])
-        print(f"DEBUG: Result shape: {result.shape}, dtype: {result.dtype}")
         return result
-    
+
     # Case 2: Convert dict data to tuples
     if all(isinstance(item, dict) for item in data_list):
-        print(f"DEBUG: Converting dict list to array")
         converted = []
         for item in data_list:
             if 'tick' in item and 'value' in item:
@@ -4150,11 +4528,9 @@ def safe_convert_to_array(data_list):
             else:
                 # Handle unknown dict format
                 converted.append((item.get('tick', 0), sum(v for k, v in item.items() if k != 'tick')))
-        print(f"DEBUG: Converted dicts to {len(converted)} tuples")
         return np.array(converted)
-    
+
     # Case 3: Mixed types or unknown format
-    print(f"DEBUG: Using object array for mixed types")
     return np.array(data_list, dtype=object)
 
 def simulation_generator(num_runs, base_params):
@@ -4556,26 +4932,16 @@ def debug_aeci_variance_data(results_dict, title_suffix=""):
 def safe_stack(data_list):
     """Safely stacks a list of numpy arrays, handling empty lists/arrays and AECI variance data."""
     if not data_list:
-        print("WARNING: Empty data_list in safe_stack")
         return np.array([])
-    
-    # Check first few arrays for debugging
-    print(f"DEBUG: Examining first few arrays to stack:")
-    for i, item in enumerate(data_list[:3]):
-        if isinstance(item, np.ndarray):
-            print(f"  Array {i}: shape={item.shape}, dtype={item.dtype}")
-        else:
-            print(f"  Item {i}: type={type(item)}")
-    
+
     # Special handling for AECI variance data (arrays with special dtype)
-    if any(isinstance(item, np.ndarray) and hasattr(item, 'dtype') and 
-           item.dtype.names is not None and 'tick' in item.dtype.names and 
+    if any(isinstance(item, np.ndarray) and hasattr(item, 'dtype') and
+           item.dtype.names is not None and 'tick' in item.dtype.names and
            'value' in item.dtype.names for item in data_list):
-        print("DEBUG: Detected AECI variance format with named fields")
         # Convert structured arrays to 3D arrays with shape (runs, ticks, 2)
         max_ticks = max(arr.shape[0] for arr in data_list if isinstance(arr, np.ndarray) and arr.ndim >= 1)
         result = np.zeros((len(data_list), max_ticks, 2))
-        
+
         for i, arr in enumerate(data_list):
             if isinstance(arr, np.ndarray) and hasattr(arr, 'dtype') and arr.dtype.names is not None:
                 # Extract tick and value columns
@@ -4584,42 +4950,31 @@ def safe_stack(data_list):
                 # Fill the result array
                 result[i, :len(ticks), 0] = ticks
                 result[i, :len(values), 1] = values
-            else:
-                print(f"  WARNING: Item {i} is not a structured array with named fields")
-        
-        print(f"DEBUG: Converted AECI variance data to shape {result.shape}")
+
         return result
-    
+
     # Handle regular arrays
     valid_arrays = [item for item in data_list if isinstance(item, np.ndarray) and item.size > 0]
     if not valid_arrays:
-        print("WARNING: No valid arrays to stack")
         return np.array([])
-    
+
     try:
         # Find expected shape from first valid array
         expected_ndim = valid_arrays[0].ndim
-        expected_shape_after_tick_col = valid_arrays[0].shape[1:] # Shape excluding the tick dimension
-        
-        print(f"DEBUG: Expected shape for stacking: ndim={expected_ndim}, shape[1:]={expected_shape_after_tick_col}")
-        
+        expected_shape_after_tick_col = valid_arrays[0].shape[1:]  # Shape excluding the tick dimension
+
         processed_list = []
         for i, item in enumerate(valid_arrays):
             # Only include arrays matching expected dimensions
             if item.ndim == expected_ndim and item.shape[1:] == expected_shape_after_tick_col:
                 processed_list.append(item)
-            else:
-                print(f"WARNING: Skipping array with shape {item.shape} during stacking (expected ndim={expected_ndim}, shape[1:]={expected_shape_after_tick_col})")
-        
+
         if not processed_list:
-            print("WARNING: No arrays with matching shapes to stack")
             return np.array([])
-        
+
         result = np.stack(processed_list, axis=0)
-        print(f"DEBUG: Successfully stacked arrays to shape {result.shape}")
         return result
-    except ValueError as e:
-        print(f"ERROR during stacking: {e}")
+    except ValueError:
         return np.array([])
 
 def calculate_metric_stats(data_list):
