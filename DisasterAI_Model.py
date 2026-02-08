@@ -2828,7 +2828,6 @@ class DisasterModel(Model):
         # Find connected components in the social network
         # Note: This assumes node IDs 0..N-1 correspond to agent indices
         components = list(nx.connected_components(self.social_network))
-        print(f"Found {len(components)} network components.") # Debug print
 
         for i, component_nodes in enumerate(components):
             # Decide if this component gets a rumor
@@ -2930,8 +2929,6 @@ class DisasterModel(Model):
 
     def calculate_aeci_variance(self):
         """Calculate AI Echo Chamber Index variance on a [-1, +1] scale."""
-        print(f"\nDEBUG: Starting AECI variance calculation at tick {self.tick}")
-        
         aeci_variance = 0.0  # Default neutral value
         
         # Define AI-reliant agents with adjusted threshold for observed behavior
@@ -2953,9 +2950,6 @@ class DisasterModel(Model):
             if total_calls >= min_calls_threshold and ai_ratio >= min_ai_ratio:
                 ai_reliant_agents.append(agent)
         
-        # Debug print
-        print(f"  Found {len(ai_reliant_agents)}/{len(self.humans)} AI-reliant agents")
-        
         # Get global belief variance
         all_beliefs = []
         for agent in self.humans.values():
@@ -2968,10 +2962,8 @@ class DisasterModel(Model):
         # Calculate global variance with safety check
         if len(all_beliefs) > 1:
             global_var = np.var(all_beliefs)
-            print(f"  Global belief variance: {global_var:.4f}")
         else:
             global_var = 0.0
-            print("  WARNING: Not enough global beliefs to calculate variance")
             
         # Only proceed if we have a valid global variance and AI-reliant agents
         if global_var > 0 and ai_reliant_agents:
@@ -2987,13 +2979,12 @@ class DisasterModel(Model):
             # Calculate AI-reliant variance with safety check
             if len(ai_reliant_beliefs) > 1:
                 ai_reliant_var = np.var(ai_reliant_beliefs)
-                print(f"  AI-reliant beliefs variance: {ai_reliant_var:.4f}")
-                
+
                 # Calculate variance effect
                 # Negative means AI reduces variance (echo chamber)
                 # Positive means AI increases variance (diversification)
                 var_diff = ai_reliant_var - global_var
-                
+
                 # Normalize to [-1, +1] range
                 if var_diff < 0:  # Variance reduction (echo chamber)
                     aeci_variance = max(-1, var_diff / global_var)  # Normalize by global variance
@@ -3001,30 +2992,19 @@ class DisasterModel(Model):
                     # Find a reasonable upper bound for normalization
                     max_possible_var = 5.0  # Given belief levels are 0-5, max variance is around 5
                     aeci_variance = min(1, var_diff / (max_possible_var - global_var))
-                
-                print(f"  AECI variance effect: {aeci_variance:.4f}")
-            else:
-                print("  WARNING: Not enough AI-reliant beliefs to calculate variance")
-        else:
-            print(f"  WARNING: Invalid global variance ({global_var}) or no AI-reliant agents")
         
         # Create a CORRECTLY formatted tuple
         aeci_variance_tuple = (self.tick, aeci_variance)
-        print(f"  Returning AECI variance tuple: {aeci_variance_tuple}")
-        
+
         # Update metrics dictionary with consistent format
         self._last_metrics['aeci_variance'] = {
             'tick': self.tick,
             'value': aeci_variance
         }
-        
+
         # Store in the array with consistent format
         self.aeci_variance_data.append(aeci_variance_tuple)
-        
-        # Debug: print all values in the array
-        print(f"  Current aeci_variance_data length: {len(self.aeci_variance_data)}")
-        print(f"  Last 3 entries: {self.aeci_variance_data[-3:] if len(self.aeci_variance_data) >= 3 else self.aeci_variance_data}")
-        
+
         return aeci_variance_tuple
 
     def calculate_info_diversity(self):
@@ -3081,8 +3061,6 @@ class DisasterModel(Model):
         num_exploitative = int(self.num_humans * self.share_exploitative)
         num_exploratory = self.num_humans - num_exploitative
 
-        print(f"Initializing social network with {num_exploitative} exploitative and {num_exploratory} exploratory agents")
-
         # Create an empty graph
         self.social_network = nx.Graph()
 
@@ -3092,7 +3070,6 @@ class DisasterModel(Model):
 
         # Determine number of communities (2-3 for typical agent counts)
         num_communities = min(3, max(2, self.num_humans // 15))
-        print(f"Creating {num_communities} substantial communities")
 
         # Divide agents into communities
         # Ensure each community has at least 5 agents (or appropriate minimum)
@@ -3158,18 +3135,10 @@ class DisasterModel(Model):
                                 other_comm.remove(agent_to_move)
                                 break
 
-        # Report community compositions
-        print(f"Created {len(communities)} communities:")
-        for i, community in enumerate(communities):
-            exploit_count = sum(1 for a in community if a < num_exploitative)
-            explor_count = len(community) - exploit_count
-            print(f"  Community {i}: {len(community)} agents ({exploit_count} exploit, {explor_count} explor)")
-
         # Create dense connections WITHIN communities
         p_within = 0.7  # 70% connection probability within community
 
         for comm_idx, community in enumerate(communities):
-            print(f"  Adding within-community edges for community {comm_idx} (size {len(community)})")
             for i in range(len(community)):
                 for j in range(i+1, len(community)):
                     if random.random() < p_within:
@@ -3177,38 +3146,22 @@ class DisasterModel(Model):
 
         # NO connections BETWEEN communities to ensure separate components
 
-        # Final verification
+        # Final verification - fix too-small components
         components = list(nx.connected_components(self.social_network))
-        print(f"Final network: {len(components)} connected components")
         for i, comp in enumerate(components):
             comp_size = len(comp)
-            comp_exploit_count = sum(1 for a in comp if a < num_exploitative)
-            comp_explor_count = comp_size - comp_exploit_count
-            print(f"  Component {i}: {comp_size} agents ({comp_exploit_count} exploit, {comp_explor_count} explor)")
-
             # Check for too-small components
             if comp_size < 3:
-                print(f"    WARNING: Component {i} is too small ({comp_size} agents)")
-
                 # Find the largest component
                 largest_comp = max(components, key=len)
-
                 # Connect this small component to the largest one
                 if comp != largest_comp:
                     small_node = random.choice(list(comp))
                     large_node = random.choice(list(largest_comp))
                     self.social_network.add_edge(small_node, large_node)
-                    print(f"    Connected small component node {small_node} to large component node {large_node}")
 
-        # Final check after fixes
+        # Return final components
         components = list(nx.connected_components(self.social_network))
-        print(f"Final network after fixes: {len(components)} connected components")
-        for i, comp in enumerate(components):
-            comp_size = len(comp)
-            comp_exploit_count = sum(1 for a in comp if a < num_exploitative)
-            comp_explor_count = comp_size - comp_exploit_count
-            print(f"  Component {i}: {comp_size} agents ({comp_exploit_count} exploit, {comp_explor_count} explor)")
-
         return components
 
     def initialize_ai_knowledge_maps(self):
@@ -4557,25 +4510,15 @@ def run_simulation(params):
 def safe_convert_to_array(data_list):
     """Safely convert data to numpy array, handling mixed types."""
     if not data_list:
-        print("WARNING: Empty data_list in safe_convert_to_array")
         return np.array([])
-    
-    # Print first few items in data_list for debugging
-    print(f"DEBUG: First few items in data_list:")
-    for i, item in enumerate(data_list[:3]):
-        print(f"  Item {i}: type={type(item)}, value={item}")
-    
+
     # Case 1: Check if all elements are tuple with length 2 (AECI variance format)
     if all(isinstance(item, tuple) and len(item) == 2 for item in data_list):
-        print(f"DEBUG: Converting tuple list to structured array")
-        # Convert to structured array with named fields
         result = np.array(data_list, dtype=[('tick', 'i4'), ('value', 'f4')])
-        print(f"DEBUG: Result shape: {result.shape}, dtype: {result.dtype}")
         return result
-    
+
     # Case 2: Convert dict data to tuples
     if all(isinstance(item, dict) for item in data_list):
-        print(f"DEBUG: Converting dict list to array")
         converted = []
         for item in data_list:
             if 'tick' in item and 'value' in item:
@@ -4585,11 +4528,9 @@ def safe_convert_to_array(data_list):
             else:
                 # Handle unknown dict format
                 converted.append((item.get('tick', 0), sum(v for k, v in item.items() if k != 'tick')))
-        print(f"DEBUG: Converted dicts to {len(converted)} tuples")
         return np.array(converted)
-    
+
     # Case 3: Mixed types or unknown format
-    print(f"DEBUG: Using object array for mixed types")
     return np.array(data_list, dtype=object)
 
 def simulation_generator(num_runs, base_params):
@@ -4991,26 +4932,16 @@ def debug_aeci_variance_data(results_dict, title_suffix=""):
 def safe_stack(data_list):
     """Safely stacks a list of numpy arrays, handling empty lists/arrays and AECI variance data."""
     if not data_list:
-        print("WARNING: Empty data_list in safe_stack")
         return np.array([])
-    
-    # Check first few arrays for debugging
-    print(f"DEBUG: Examining first few arrays to stack:")
-    for i, item in enumerate(data_list[:3]):
-        if isinstance(item, np.ndarray):
-            print(f"  Array {i}: shape={item.shape}, dtype={item.dtype}")
-        else:
-            print(f"  Item {i}: type={type(item)}")
-    
+
     # Special handling for AECI variance data (arrays with special dtype)
-    if any(isinstance(item, np.ndarray) and hasattr(item, 'dtype') and 
-           item.dtype.names is not None and 'tick' in item.dtype.names and 
+    if any(isinstance(item, np.ndarray) and hasattr(item, 'dtype') and
+           item.dtype.names is not None and 'tick' in item.dtype.names and
            'value' in item.dtype.names for item in data_list):
-        print("DEBUG: Detected AECI variance format with named fields")
         # Convert structured arrays to 3D arrays with shape (runs, ticks, 2)
         max_ticks = max(arr.shape[0] for arr in data_list if isinstance(arr, np.ndarray) and arr.ndim >= 1)
         result = np.zeros((len(data_list), max_ticks, 2))
-        
+
         for i, arr in enumerate(data_list):
             if isinstance(arr, np.ndarray) and hasattr(arr, 'dtype') and arr.dtype.names is not None:
                 # Extract tick and value columns
@@ -5019,42 +4950,31 @@ def safe_stack(data_list):
                 # Fill the result array
                 result[i, :len(ticks), 0] = ticks
                 result[i, :len(values), 1] = values
-            else:
-                print(f"  WARNING: Item {i} is not a structured array with named fields")
-        
-        print(f"DEBUG: Converted AECI variance data to shape {result.shape}")
+
         return result
-    
+
     # Handle regular arrays
     valid_arrays = [item for item in data_list if isinstance(item, np.ndarray) and item.size > 0]
     if not valid_arrays:
-        print("WARNING: No valid arrays to stack")
         return np.array([])
-    
+
     try:
         # Find expected shape from first valid array
         expected_ndim = valid_arrays[0].ndim
-        expected_shape_after_tick_col = valid_arrays[0].shape[1:] # Shape excluding the tick dimension
-        
-        print(f"DEBUG: Expected shape for stacking: ndim={expected_ndim}, shape[1:]={expected_shape_after_tick_col}")
-        
+        expected_shape_after_tick_col = valid_arrays[0].shape[1:]  # Shape excluding the tick dimension
+
         processed_list = []
         for i, item in enumerate(valid_arrays):
             # Only include arrays matching expected dimensions
             if item.ndim == expected_ndim and item.shape[1:] == expected_shape_after_tick_col:
                 processed_list.append(item)
-            else:
-                print(f"WARNING: Skipping array with shape {item.shape} during stacking (expected ndim={expected_ndim}, shape[1:]={expected_shape_after_tick_col})")
-        
+
         if not processed_list:
-            print("WARNING: No arrays with matching shapes to stack")
             return np.array([])
-        
+
         result = np.stack(processed_list, axis=0)
-        print(f"DEBUG: Successfully stacked arrays to shape {result.shape}")
         return result
-    except ValueError as e:
-        print(f"ERROR during stacking: {e}")
+    except ValueError:
         return np.array([])
 
 def calculate_metric_stats(data_list):
