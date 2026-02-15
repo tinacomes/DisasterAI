@@ -38,13 +38,6 @@ print(f"✓ Results will be saved to: {save_dir}")
 # Helper Classes and Agent Definitions
 #########################################
 
-class Candidate:
-    def __init__(self, cell):
-        self.cell = cell
-
-    def __repr__(self):
-        return f"Candidate({self.cell})"
-
 class HumanAgent(Agent):
     def __init__(self, unique_id, model, id_num, agent_type, share_confirming,
                  learning_rate=0.1, epsilon=0.3,
@@ -1531,183 +1524,6 @@ class HumanAgent(Agent):
                 elif old_trust < neutral_trust:
                     self.trust[source_id] = min(neutral_trust, old_trust + decay_rate)
 
-    def update_belief_bayesian(self, cell, reported_level, source_trust, source_id=None):
-        """Update agent's belief about a cell using Bayesian principles."""
-        try:
-            # Get current belief
-            if cell not in self.beliefs:
-                # Initialize if not present
-                self.beliefs[cell] = {'level': 0, 'confidence': 0.1}
-
-            current_belief = self.beliefs[cell]
-            prior_level = current_belief.get('level', 0)
-            prior_confidence = current_belief.get('confidence', 0.1)
-
-            # Apply a minimum confidence threshold to prevent wild swings
-            prior_confidence = max(0.1, prior_confidence)
-
-            # EXPLOITER REJECTION MECHANISM: Reject conflicting information
-            # Exploiters with high confidence REJECT info that conflicts with their beliefs
-            level_diff = abs(reported_level - prior_level)
-            if self.agent_type == "exploitative" and prior_confidence > 0.4:
-                # Higher confidence = higher rejection threshold
-                # If info differs by 2+ levels and confidence is high, likely reject
-                rejection_prob = 0.0
-                if level_diff >= 3:
-                    rejection_prob = 0.9 * prior_confidence  # Almost always reject big differences
-                elif level_diff >= 2:
-                    rejection_prob = 0.7 * prior_confidence  # Often reject moderate differences
-                elif level_diff >= 1:
-                    rejection_prob = 0.3 * prior_confidence  # Sometimes reject small differences
-
-                # Friends get a pass - lower rejection probability
-                is_friend = source_id in self.friends if source_id else False
-                if is_friend:
-                    rejection_prob *= 0.3  # Much less likely to reject friend info
-
-                if random.random() < rejection_prob:
-                    # REJECT the information - still track for feedback but don't update belief
-                    if source_id:
-                        self.pending_info_evaluations.append((
-                            self.model.tick, source_id, cell,
-                            int(reported_level), int(prior_level), float(prior_confidence)
-                        ))
-                    return False  # No belief change
-
-            # Convert confidence to precision with agent-specific scaling
-            if self.agent_type == "exploitative":
-                # Exploiters have higher prior precision (stronger resistance to change)
-                prior_precision = 2.5 * prior_confidence / (1 - prior_confidence + 1e-6)
-            else:
-                # Explorers have lower prior precision (more open to new information)
-                prior_precision = 0.6 * prior_confidence / (1 - prior_confidence + 1e-6)
-
-            # Source precision calculation - Agent-type dependent
-            if self.agent_type == "exploitative":
-                # Exploiters highly value trusted sources (trust has more impact)
-                source_precision_base = 4.0 * source_trust / (1 - source_trust + 1e-6)
-            else:
-                # Explorers more moderately weigh trust
-                source_precision_base = 2.5 * source_trust / (1 - source_trust + 1e-6)
-
-            source_precision = source_precision_base
-
-            # Apply conditional adjustments to source_precision
-
-            is_ai_source = hasattr(self, 'ai_info_sources') and cell in self.ai_info_sources
-
-            if source_trust < 0.3:
-                # Smoother transition for low trust
-                trust_factor = (source_trust / 0.3) ** 0.5  # Square root for smoother curve
-                source_precision = source_precision_base * trust_factor
-
-            # Lower threshold for ignoring extremely low trust sources
-            if source_trust < 0.03:
-                source_precision *= 0.05  # Almost entirely ignore
-
-            # No special AI bonus - trust should capture source quality through feedback
-            # AI sources are treated the same as human sources based on learned trust
-
-            # Apply a maximum to source precision to prevent overwhelming prior
-            # Different maximums by agent type
-            if self.agent_type == "exploitative":
-                source_precision = min(source_precision, 8.0)  # Lower cap (more resistant)
-            else:
-                source_precision = min(source_precision, 12.0)  # Higher cap (more adaptive)
-
-            # Combine information using precision weighting
-            posterior_precision = prior_precision + source_precision
-
-            # Calculate the weighted update of belief level
-            posterior_level = (prior_precision * prior_level + source_precision * reported_level) / posterior_precision
-
-            # Convert precision back to confidence [0,1]
-            posterior_confidence = posterior_precision / (1 + posterior_precision)
-
-            # Constrain to valid ranges
-            posterior_level = max(0, min(5, round(posterior_level)))
-            posterior_confidence = max(0.1, min(0.98, posterior_confidence))
-
-            # Agent-type-specific adjustments
-            if self.agent_type == "exploitative":
-                # Exploitative agents give more weight to consistent information
-                if abs(posterior_level - prior_level) <= 1:
-                    # Information confirms existing belief - stronger boost
-                    confirmation_boost = min(0.3, 0.35 * prior_confidence)
-                    posterior_confidence = min(0.98, posterior_confidence + confirmation_boost)
-            else:  # exploratory
-                # Exploratory agents are more accepting of new information
-                if abs(posterior_level - prior_level) >= 2:
-                    # Information significantly differs from prior
-                    # Don't reduce confidence as much - they value the new information
-                    posterior_confidence = max(0.2, posterior_confidence * 0.95)
-
-                # Explorers gain extra confidence when source is trusted and reported level is high
-                if source_trust > 0.6 and reported_level >= 3:
-                    info_value_boost = min(0.3, 0.4 * source_trust)
-                    posterior_confidence = min(0.97, posterior_confidence + info_value_boost)
-
-            # Apply a smoothing factor to reduce large jumps in level for both agent types
-            if abs(posterior_level - prior_level) >= 2:
-                # Apply 20% smoothing for large changes (weighted average)
-                smoothing_factor = 0.2
-                smoothed_level = int(round((1-smoothing_factor) * posterior_level + smoothing_factor * prior_level))
-                posterior_level = smoothed_level
-
-            # Update the belief
-            self.beliefs[cell] = {
-                'level': int(posterior_level),
-                'confidence': posterior_confidence
-            }
-
-            # Determine if this was a significant belief change
-            # FIXED: More nuanced threshold - count if level OR confidence changes significantly
-            level_change = abs(posterior_level - prior_level)
-            confidence_change = abs(posterior_confidence - prior_confidence)
-            significant_change = (level_change >= 1 or confidence_change >= 0.1)
-
-            # Track information for quality feedback
-            # CRITICAL FIX: Track ALL external queries (human/AI), not just significant changes
-            # This ensures exploratory agents get feedback even when querying about
-            # cells they've already sensed with high confidence
-            if source_id:  # source_id is None for self_action
-                self.pending_info_evaluations.append((
-                    self.model.tick,
-                    source_id,
-                    cell,
-                    int(reported_level),  # The level reported by the source (NOT posterior)
-                    int(prior_level),     # Prior belief BEFORE this update (for uncontaminated cross-ref)
-                    float(prior_confidence)  # Prior confidence BEFORE this update
-                ))
-                # DEBUG: Track pending info evaluations
-                if self.model.debug_mode and hasattr(self, 'id_num') and (self.id_num < 2 or (50 <= self.id_num < 52)):
-                    print(f"[DEBUG] Agent {self.unique_id} ({self.agent_type}) added pending info eval: tick={self.model.tick}, source={source_id}, cell={cell}, reported={reported_level}")
-
-                # NOTE: Cross-reference evaluation moved to evaluate_pending_info()
-                # which runs as a dedicated pass each tick after both sense and query.
-                # Previously this was called here on the same tick, but
-                # evaluate_information_quality requires ticks_elapsed >= 3, so
-                # same-tick cross-reference never actually worked.
-
-            # Track AI source information for later trust updates
-            is_ai_source = hasattr(self, 'ai_info_sources') and cell in self.ai_info_sources
-            if is_ai_source and significant_change:
-                if not hasattr(self, 'ai_acceptances'):
-                    self.ai_acceptances = {}
-                self.ai_acceptances[cell] = self.model.tick
-
-            # BUG FIX: Removed duplicate acceptance tracking from here
-            # Acceptance is now ONLY tracked in seek_information() (lines ~1070-1077)
-            # to avoid double-counting. Previously this incremented counters,
-            # then seek_information incremented them again = 2x inflation!
-
-            # Return whether this update caused a significant belief change
-            return significant_change
-
-        except Exception as e:
-            print(f"ERROR in Agent {self.unique_id} update_belief_bayesian: {e}")
-            return False
-
     def seek_information(self):
         """
         Queries a single source for information about an interest point, processes the report,
@@ -1966,13 +1782,6 @@ class HumanAgent(Agent):
                     # track AI source
                     self.last_queried_source_ids = [source_id]
 
-                    if not hasattr(self, 'ai_info_sources'):
-                        self.ai_info_sources = {}
-
-                    # Track which cells got info from which AI
-                    for cell in reports.keys():
-                        self.ai_info_sources[cell] = source_id
-
                     self.accum_calls_ai += 1
                     self.accum_calls_total += 1
                 else:
@@ -2016,11 +1825,6 @@ class HumanAgent(Agent):
                                 self.accepted_friend += 1
                         elif source_id.startswith("A_"):
                             self.accepted_ai += 1
-
-                            # Track AI info sources for later trust updates
-                            if not hasattr(self, 'ai_info_sources'):
-                                self.ai_info_sources = {}
-                            self.ai_info_sources[cell] = source_id
 
         except Exception as e:
             print(f"ERROR in Agent {self.unique_id} seek_information at tick {self.model.tick}: {e}")
@@ -2311,8 +2115,7 @@ class HumanAgent(Agent):
         # Process delayed feedback from previous relief decisions
         reward = self.process_reward()
 
-        # Maintenance: update trust and apply decay
-        self.update_trust_for_accuracy()
+        # Maintenance: apply trust and confidence decay
         self.apply_trust_decay()
         self.apply_confidence_decay()
         #confidence_decay_rate = 0.005 # Start very small and tune
@@ -2325,74 +2128,6 @@ class HumanAgent(Agent):
            #   min_conf_floor = 0.05
             #  self.beliefs[cell]['confidence'] = max(min_conf_floor, current_conf - confidence_decay_rate)
         return reward
-
-    def smooth_friend_trust(self):
-
-        if self.friends:
-          # --- Trust Smoothing (Keep, maybe reduce weight) ---
-            friend_ids = [f for f in self.friends if f in self.trust] # Ensure friend exists
-            if not friend_ids: return
-
-            friend_values = [self.trust.get(f, 0) for f in self.friends]
-            avg_friend = sum(friend_values) / len(friend_values)
-            smoothing_factor = 0.1
-            for friend in self.friends:
-                self.trust[friend] = (1-smoothing_factor) * self.trust[friend] + smoothing_factor * avg_friend
-
-
-    def decay_trust(self, candidate):
-        decay_rate = 0.01 if candidate not in self.friends else 0.002
-        self.trust[candidate] = max(0, self.trust[candidate] - decay_rate)
-        if "ai" not in self.tokens_this_tick:
-            self.trust["ai"] = max(0, self.trust["ai"] - 0.005)
-
-    def update_trust_for_accuracy(self):
-        """Directly updates trust based on observed accuracy of previous information."""
-        # Skip if we don't have both tracking measures
-        if not hasattr(self, 'ai_acceptances') or not hasattr(self, 'ai_info_sources'):
-            return
-
-        # Check each cell where we accepted AI information
-        for cell, tick in list(self.ai_acceptances.items()):
-            # Only process recently accepted information (past 5 ticks)
-            if self.model.tick - tick > 5:
-                # Remove old entries to prevent dict from growing too large
-                self.ai_acceptances.pop(cell, None)
-                continue
-
-            # Get the AI source that provided this information
-            ai_source = self.ai_info_sources.get(cell)
-            if not ai_source:
-                continue
-
-            # Get the AI's reported value and the actual value
-            if cell in self.beliefs and isinstance(self.beliefs[cell], dict):
-                believed_level = self.beliefs[cell].get('level', 0)
-
-                # Get actual disaster level
-                actual_level = None
-                try:
-                    if 0 <= cell[0] < self.model.width and 0 <= cell[1] < self.model.height:
-                        actual_level = self.model.disaster_grid[cell[0], cell[1]]
-                except (IndexError, TypeError):
-                    continue
-
-                if actual_level is not None:
-                    # Calculate accuracy (how close belief is to reality)
-                    accuracy = 1.0 - (abs(believed_level - actual_level) / 5.0)
-
-                    # Apply direct trust update based on accuracy (SYMMETRIC: both boost AND penalty)
-                    if ai_source in self.trust:
-                        old_trust = self.trust[ai_source]
-                        if accuracy > 0.8:  # High accuracy: small boost
-                            trust_change = 0.03
-                        elif accuracy < 0.4:  # Low accuracy: penalty (LARGER than boost)
-                            trust_change = -0.08
-                        else:
-                            trust_change = 0.0  # Neutral range
-                        new_trust = max(0.0, min(1.0, old_trust + trust_change))
-                        self.trust[ai_source] = new_trust
-
 
 class AIAgent(Agent):
     def __init__(self, unique_id, model):
