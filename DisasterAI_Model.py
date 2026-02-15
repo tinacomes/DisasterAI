@@ -690,29 +690,13 @@ class HumanAgent(Agent):
         is_sensed = report_metadata.get('is_sensed', False)
         sensing_multiplier = 1.5 if is_sensed else 0.7
 
-        # Factor 3: Source agent type
-        source_type = report_metadata.get('source_type', 'unknown')
-        if source_type == 'exploratory':
-            type_multiplier = 1.2  # Explorers tend to be more accurate
-        elif source_type == 'exploitative':
-            type_multiplier = 0.9  # Exploiters might confirm biases
-        else:
-            type_multiplier = 1.0  # AI or unknown
-
-        # Factor 4: Friend modifier (social trust for exploiters)
-        is_friend = source_id in self.friends if source_id else False
-        if self.agent_type == "exploitative" and is_friend:
-            friend_multiplier = 1.3  # Exploiters trust friends more
-        else:
-            friend_multiplier = 1.0
-
-        # Combined precision
+        # Combined precision — no source-type or friend multipliers.
+        # Whether exploiters give worse info or friends are more reliable should
+        # emerge from the belief system (D/delta, memory, trust), not be hardcoded.
         raw_precision = (
             base_trust *
             source_confidence *
-            sensing_multiplier *
-            type_multiplier *
-            friend_multiplier
+            sensing_multiplier
         )
 
         # Convert to precision scale (0 to ~10)
@@ -980,7 +964,7 @@ class HumanAgent(Agent):
             if mode and mode in self.q_table:
                 old_mode_q = self.q_table[mode]
                 # Base learning rate by agent type
-                base_lr = 0.25 if self.agent_type == "exploratory" else 0.12
+                base_lr = 0.15  # Unified — data volume difference handles type asymmetry
                 # Scale by source knowledge confidence
                 info_learning_rate = base_lr * source_knowledge_conf
                 # Use standard Q-learning update: Q += lr * (reward - Q)
@@ -990,7 +974,7 @@ class HumanAgent(Agent):
             # Also update specific source Q-value (for tracking individuals)
             if source_id in self.q_table:
                 old_q = self.q_table[source_id]
-                base_lr = 0.25 if self.agent_type == "exploratory" else 0.12
+                base_lr = 0.15  # Unified — data volume difference handles type asymmetry
                 info_learning_rate = base_lr * source_knowledge_conf
                 # Use standard Q-learning update: Q += lr * (reward - Q)
                 new_q = old_q + info_learning_rate * (accuracy_reward - old_q)
@@ -1005,11 +989,11 @@ class HumanAgent(Agent):
                 if accuracy_reward < 0:
                     # Bad info: aggressive penalty, target drops to 0 for worst case
                     trust_target = max(0.0, 0.5 + accuracy_reward)  # -0.7→0, 0→0.5
-                    base_trust_lr = 0.25 if self.agent_type == "exploratory" else 0.15
+                    base_trust_lr = 0.18  # Universal: distrust faster than trust
                 else:
                     # Good info: moderate reward
                     trust_target = min(1.0, 0.5 + 0.5 * accuracy_reward)  # 0→0.5, +0.5→0.75
-                    base_trust_lr = 0.12 if self.agent_type == "exploratory" else 0.06
+                    base_trust_lr = 0.10  # Universal: trust builds slower
                 # Scale trust update by source knowledge confidence
                 trust_lr = base_trust_lr * source_knowledge_conf
                 new_trust = max(0.0, min(1.0, old_trust + trust_lr * (trust_target - old_trust)))
@@ -1239,7 +1223,7 @@ class HumanAgent(Agent):
             # Update mode Q-value (scaled by confidence AND source knowledge)
             if mode and mode in self.q_table:
                 old_mode_q = self.q_table[mode]
-                base_lr = 0.25 if self.agent_type == "exploratory" else 0.12
+                base_lr = 0.15  # Unified — data volume difference handles type asymmetry
                 # Scale by BOTH reference confidence and source knowledge
                 info_lr = base_lr * confidence_scaling * source_knowledge_conf
                 self.q_table[mode] = old_mode_q + info_lr * (accuracy_reward - old_mode_q)
@@ -1247,7 +1231,7 @@ class HumanAgent(Agent):
             # Update specific source Q-value (scaled by confidence AND source knowledge)
             if source_id in self.q_table:
                 old_q = self.q_table[source_id]
-                base_lr = 0.25 if self.agent_type == "exploratory" else 0.12
+                base_lr = 0.15  # Unified — data volume difference handles type asymmetry
                 info_lr = base_lr * confidence_scaling * source_knowledge_conf
                 self.q_table[source_id] = old_q + info_lr * (accuracy_reward - old_q)
 
@@ -1259,14 +1243,10 @@ class HumanAgent(Agent):
                 old_trust = self.trust[source_id]
                 if accuracy_reward < 0:
                     trust_target = max(0.0, 0.5 + accuracy_reward)
-                    # EXPLOITERS: Fast penalty (defensive, distrust easily)
-                    # EXPLORERS: Slower penalty (give sources more chances)
-                    base_trust_lr = 0.10 if self.agent_type == "exploratory" else 0.20
+                    base_trust_lr = 0.18  # Universal: distrust faster than trust
                 else:
                     trust_target = min(1.0, 0.5 + 0.5 * accuracy_reward)
-                    # EXPLORERS: Faster reward (quick to trust valuable sources)
-                    # EXPLOITERS: Slow reward (suspicious of new trust)
-                    base_trust_lr = 0.15 if self.agent_type == "exploratory" else 0.06
+                    base_trust_lr = 0.10  # Universal: trust builds slower
                 # Scale by BOTH reference confidence and source knowledge
                 trust_lr = base_trust_lr * confidence_scaling * source_knowledge_conf
                 new_trust = max(0.0, min(1.0, old_trust + trust_lr * (trust_target - old_trust)))
@@ -1696,32 +1676,10 @@ class HumanAgent(Agent):
                 scores = {mode: self.q_table.get(mode, 0.0) for mode in possible_modes}
                 decision_factors['base_scores'] = scores.copy()
 
-                # Agent-type specific biases (preferences, not alignment-based)
+                # No manual biases — let Q-learning discover source preferences
+                # Agent-type differences come from D/delta acceptance, memory size,
+                # trust decay, and reward structure — not from score offsets.
                 decision_factors['biases'] = {}
-
-                if self.agent_type == "exploitative":
-                    # Exploitative agents prefer friends and self-confirmation
-                    scores["human"] += self.exploit_friend_bias
-                    scores["self_action"] += self.exploit_self_bias
-
-                    decision_factors['biases']["human"] = self.exploit_friend_bias
-                    decision_factors['biases']["self_action"] = self.exploit_self_bias
-
-                    # NO AI bias - let Q-learning determine AI value through experience
-
-                else:  # exploratory
-                    # Exploratory agents seek diverse information sources
-                    # Bias toward querying to get info quality feedback
-                    scores["human"] += 0.2   # Encourage querying humans
-                    scores["ai"] += 0.2      # Encourage querying AI
-                    scores["self_action"] -= 0.1  # Discourage pure self-reliance
-
-                    decision_factors['biases']["human"] = 0.2
-                    decision_factors['biases']["ai"] = 0.2
-                    decision_factors['biases']["self_action"] = -0.1
-
-                    # NO alignment-based biases - let Q-learning determine which sources are good
-                    # Exploratory agents will naturally prefer accurate sources through feedback
 
                 # Add small random noise to break ties
                 for mode in scores:
@@ -2042,8 +2000,7 @@ class HumanAgent(Agent):
                 # Update Q-table and trust - KEY CHANGE: Adjust learning rates by agent type
                 if mode == "self_action":
                     old_q = self.q_table.get("self_action", 0.0)
-                    # Explorers learn faster from self-action outcomes
-                    effective_learning_rate = self.learning_rate * (1.5 if self.agent_type == "exploratory" else 1.0)
+                    effective_learning_rate = self.learning_rate
                     new_q = old_q + effective_learning_rate * (scaled_reward - old_q)
                     self.q_table["self_action"] = new_q
 
@@ -2052,10 +2009,7 @@ class HumanAgent(Agent):
                     # mode is what's used in action selection (e.g., "human", "A_0")
                     if mode in self.q_table:
                         old_mode_q = self.q_table[mode]
-                        if self.agent_type == "exploratory":
-                            effective_learning_rate = self.learning_rate * 1.5
-                        else:
-                            effective_learning_rate = self.learning_rate
+                        effective_learning_rate = self.learning_rate
                         new_mode_q = old_mode_q + effective_learning_rate * (scaled_reward - old_mode_q)
                         self.q_table[mode] = new_mode_q
 
