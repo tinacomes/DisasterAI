@@ -580,9 +580,9 @@ class HumanAgent(Agent):
                     # No existing belief, create new one
                     self.beliefs[cell] = {'level': belief_level, 'confidence': belief_conf}
 
-                # Evaluate information quality feedback for this sensed cell
-                self.evaluate_information_quality(cell, actual)
-                # Also evaluate self-action feedback
+                # Note: info quality evaluation now handled exclusively by evaluate_pending_info()
+                # per tick (called from step()), avoiding double-dipping with inconsistent scaling.
+                # Evaluate self-action feedback
                 self.evaluate_self_action(cell, actual)
 
         # Batch update self_action Q-value: ONE update per tick with average reward
@@ -964,8 +964,8 @@ class HumanAgent(Agent):
                 if conf_change > 0.15:
                     combined_reward += 0.25  # Larger bonus for reducing uncertainty
 
-            # Scale to match Q-update expectations
-            accuracy_reward = combined_reward * 0.5
+            # Scale to match Q-update expectations (unified with evaluate_pending_info)
+            accuracy_reward = combined_reward * 0.6
 
             # Determine mode from source_id (map to high-level modes)
             if is_human_source:
@@ -1122,13 +1122,36 @@ class HumanAgent(Agent):
             confidence_scaling = min(1.0, belief_conf / 0.5)  # Full strength at 0.5+ confidence
 
             # --- Accuracy score: reported vs current reference ---
-            # CRITICAL FIX: For EXPLORERS querying REMOTE cells, don't penalize disagreement
-            # with uncertain beliefs. Only evaluate accuracy for sensed/verified cells.
+            # For explorers querying remote cells, check if ground truth has been
+            # obtained since the query (via sensing). If so, use it for proper feedback.
+            # This closes the feedback loop: explorers query remote cells, later sense
+            # them, and retroactively evaluate the source's accuracy.
             if is_remote_cell and self.agent_type == "exploratory":
-                # Explorer querying remote cell: can't verify accuracy yet
-                # Use NEUTRAL accuracy score - don't penalize or reward based on unverified belief
-                # They'll get proper feedback when they eventually sense the cell
-                accuracy_score = 0.0
+                # Check if we've since sensed this cell: the cell is now within
+                # sensing range AND we have a high-confidence belief (from direct sensing)
+                has_ground_truth = False
+                ground_truth_level = None
+                if self.is_within_sensing_range(cell):
+                    cell_belief = self.beliefs.get(cell, {})
+                    if isinstance(cell_belief, dict) and cell_belief.get('confidence', 0) >= 0.7:
+                        # High confidence + within range = we've sensed it
+                        has_ground_truth = True
+                        ground_truth_level = cell_belief.get('level', 0)
+
+                if has_ground_truth:
+                    # Ground truth obtained — evaluate against sensed value
+                    level_error = abs(reported_level - ground_truth_level)
+                    if level_error == 0:
+                        accuracy_score = 1.0
+                    elif level_error == 1:
+                        accuracy_score = 0.5
+                    elif level_error == 2:
+                        accuracy_score = -0.2
+                    else:
+                        accuracy_score = -0.6
+                else:
+                    # No ground truth yet — neutral score (don't penalize unverifiable info)
+                    accuracy_score = 0.0
             else:
                 # For sensed cells OR exploiters: evaluate normally
                 level_error = abs(reported_level - reference_level)
@@ -1203,7 +1226,7 @@ class HumanAgent(Agent):
                     # Sensed cell: can verify accuracy properly
                     combined_reward = 0.95 * accuracy_score + 0.05 * confirmation_score
 
-            accuracy_reward = combined_reward * 0.7 - 0.1  # Slightly larger scale
+            accuracy_reward = combined_reward * 0.6  # Unified scaling (no negative offset)
 
             # Determine mode from source_id
             if is_human_source:
@@ -1515,7 +1538,7 @@ class HumanAgent(Agent):
                 elif old_trust < neutral:
                     self.trust[source_id] = min(neutral, old_trust + decay_rate)
         else:  # exploratory
-            decay_rate = 0.012  # Moderate decay - responsive to change
+            decay_rate = 0.005  # Slow decay - lets feedback signals accumulate before washing out
             neutral_trust = 0.5
             for source_id in list(self.trust.keys()):
                 old_trust = self.trust[source_id]
@@ -1656,9 +1679,12 @@ class HumanAgent(Agent):
             for mode in possible_modes:
                 decision_factors['q_values'][mode] = self.q_table.get(mode, 0.0)
 
-            # Epsilon greedy strategy - not to be confused with the agent types :)
+            # Epsilon greedy strategy with decay - not to be confused with the agent types :)
+            # Epsilon decays linearly from initial value to 10% of initial over the run,
+            # so early ticks explore broadly and later ticks exploit learned Q-values.
+            effective_epsilon = self.epsilon * max(0.1, 1.0 - (self.model.tick / self.model.ticks))
             # Exploration case - record randomly chosen mode
-            if random.random() < self.epsilon: #epsilon parameter for randomness
+            if random.random() < effective_epsilon:
                 chosen_mode = random.choice(possible_modes)
                 decision_factors['selection_type'] = 'exploration'
                 decision_factors['chosen_mode'] = chosen_mode
@@ -3290,9 +3316,9 @@ class DisasterModel(Model):
                     global_var = np.var(all_belief_levels) if len(all_belief_levels) > 1 else 1e-6
                     component_var = np.var(component_belief_levels) if len(component_belief_levels) > 1 else global_var
                     
-                    # Calculate component SECI more robustly
+                    # Calculate component SECI: negative = echo chamber (less variance within component)
                     if global_var > 1e-9:  # Avoid division by zero with small threshold
-                        component_seci_val = max(0, min(1, (global_var - component_var) / global_var))
+                        component_seci_val = max(-1, min(1, (component_var - global_var) / global_var))
                         component_seci_list.append(component_seci_val)
                     else:
                         component_seci_list.append(0)
@@ -3897,13 +3923,13 @@ def validate_social_network(model, save_dir="analysis_plots"):
                 # Debug output for this specific cell
                 print(f"    Cell {cell}: global_var={global_var:.4f}, component_var={component_var:.4f}")
 
-                # SECI formula: (global_var - component_var) / global_var
-                seci = (global_var - component_var) / global_var
-                seci = max(0, min(1, seci))  # Bound to [0,1]
+                # SECI formula: negative = echo chamber (less variance within component)
+                seci = (component_var - global_var) / global_var
+                seci = max(-1, min(1, seci))  # Bound to [-1,+1]
                 seci_values.append(seci)
 
-                # Extra debug if SECI is 0
-                if seci < 0.01:
+                # Extra debug if SECI is near zero
+                if abs(seci) < 0.01:
                     print(f"      Low SECI ({seci:.4f}) - component levels: {component_levels}")
                     print(f"      Global levels in cell {cell}: {all_beliefs.get(cell, [])}")
 
@@ -3924,7 +3950,7 @@ def validate_social_network(model, save_dir="analysis_plots"):
 
     # Create a histogram of SECI values
     plt.figure(figsize=(10, 6))
-    plt.hist(list(component_seci_values.values()), bins=10, range=(0, 1),
+    plt.hist(list(component_seci_values.values()), bins=20, range=(-1, 1),
              color='skyblue', edgecolor='black', alpha=0.7)
     plt.xlabel('SECI Value')
     plt.ylabel('Frequency')
@@ -3989,8 +4015,9 @@ def calculate_component_seci(model, components):
             if len(component_levels) > 1 and cell in global_vars and global_vars[cell] > 0:
                 component_var = np.var(component_levels)
                 global_var = global_vars[cell]
-                seci = (global_var - component_var) / global_var
-                seci = max(0, min(1, seci))  # Bound to [0,1]
+                # Negative = echo chamber (less variance within component)
+                seci = (component_var - global_var) / global_var
+                seci = max(-1, min(1, seci))  # Bound to [-1,+1]
                 seci_values.append(seci)
 
         # Average SECI for this component
@@ -4072,14 +4099,14 @@ def track_component_seci_evolution(model, tick_interval=10, save_dir="analysis_p
                             component_beliefs_by_cell[cell] = []
                         component_beliefs_by_cell[cell].append(level)
 
-        # Calculate SECI for this component
+        # Calculate SECI for this component: negative = echo chamber
         seci_values = []
         for cell, component_levels in component_beliefs_by_cell.items():
             if len(component_levels) > 1 and cell in global_vars and global_vars[cell] > 0:
                 component_var = np.var(component_levels)
                 global_var = global_vars[cell]
-                seci = (global_var - component_var) / global_var
-                seci = max(0, min(1, seci))  # Bound to [0,1]
+                seci = (component_var - global_var) / global_var
+                seci = max(-1, min(1, seci))  # Bound to [-1,+1]
                 seci_values.append(seci)
 
         # Average SECI for this component
@@ -4200,7 +4227,7 @@ def plot_component_seci_distribution(results_dict, title_suffix=""):
     
     # Plot 1: SECI distribution histogram
     if all_seci_values:
-        ax1.hist(all_seci_values, bins=30, range=(0, 1),
+        ax1.hist(all_seci_values, bins=30, range=(-1, 1),
                  color='skyblue', edgecolor='black', alpha=0.7)
         ax1.axvline(np.mean(all_seci_values), color='red', linestyle='--', linewidth=2,
                    label=f'Mean: {np.mean(all_seci_values):.3f}')
