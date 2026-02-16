@@ -519,76 +519,98 @@ class HumanAgent(Agent):
             ]
 
     def sense_environment(self):
+        """
+        Scarcity sensing: observe 2 cells per tick (own cell + 1 strategic pick).
+
+        This creates meaningful information economics:
+        - Agents can't just overwrite rumors by standing still for a few ticks
+        - They need ongoing observation, corroboration from sources, or movement
+        - Explore/exploit distinction: exploiters verify near believed epicenter,
+          explorers reduce uncertainty on least-known cells
+        """
         pos = self.pos
-        radius = 2  # Same for both agent types - behavioral differences should be in information-seeking, not perception
-        cells = self.model.grid.get_neighborhood(pos, moore=True, radius=radius, include_center=True)
-        for cell in cells:
-            if 0 <= cell[0] < self.model.width and 0 <= cell[1] < self.model.height:
-                actual = self.model.disaster_grid[cell[0], cell[1]]
+        radius = 2
 
-                # Issue 2 FIX: Reward agent's own belief accuracy BEFORE updating belief
-                # This is separate from source quality - evaluates agent's internal model
-                self.reward_belief_accuracy(cell, actual)
+        # Tier 1: Always sense own cell (ground truth anchor)
+        self._sense_cell(pos)
 
-                noise_roll = random.random()
-                noise_threshold = 0.08
+        # Tier 2: 1 strategic cell from neighborhood
+        neighborhood = self.model.grid.get_neighborhood(
+            pos, moore=True, radius=radius, include_center=False)
+        valid_cells = [c for c in neighborhood
+                       if 0 <= c[0] < self.model.width and 0 <= c[1] < self.model.height]
 
-                belief_level = 0
-                belief_conf = 0.1
-
-                if noise_roll < noise_threshold: # Noisy Read
-                    belief_level = max(0, min(5, actual + random.choice([-1, 1])))
-                    belief_conf = 0.5
-                else: # Accurate Read
-                    belief_level = actual
-                    if self.agent_type == "exploitative":
-                        # Keep slightly lower base confidence, but boost strongly for high levels
-                        belief_conf = 0.6 # Lower base than explorer
-                        if belief_level >= 3:
-                            belief_conf = 0.85 # HIGH confidence if accurately sensing L3+
-                        elif belief_level > 0:
-                            belief_conf = 0.75 # Moderate confidence for L1/L2
-                    else: # Exploratory (Keep previous boost: 0.90 base, 0.98 for L>0)
-                        belief_conf = 0.9
-                        if belief_level > 0:
-                            belief_conf = 0.98
-
-                if cell in self.beliefs and isinstance(self.beliefs[cell], dict):
-                    old_belief = self.beliefs[cell]
-                    old_level = old_belief.get('level', 0)
-                    old_confidence = old_belief.get('confidence', 0.1)
-
-                    # FIXED: Calculate distance-based weight - cells further away get less weight
-                    distance = math.sqrt((cell[0] - pos[0])**2 + (cell[1] - pos[1])**2)
-                    distance_factor = max(0.1, 1.0 - (distance / (radius + 1)))
-
-                    # FIXED: More conservative blending weights
-                    # Direct perception has more weight for nearby cells and accurate readings
-                    accuracy_factor = 0.7 if noise_roll >= noise_threshold else 0.5
-                    sense_weight = accuracy_factor * distance_factor
-
-                    # FIXED: Blend both level and confidence
-                    # For level, use weighted average with rounding
-                    final_level = int(round(sense_weight * belief_level + (1 - sense_weight) * old_level))
-
-                    # For confidence, use weighted average with bounds
-                    final_confidence = (sense_weight * belief_conf) + ((1 - sense_weight) * old_confidence)
-                    final_confidence = max(0.1, min(0.98, final_confidence))
-
-                    self.beliefs[cell] = {'level': final_level, 'confidence': final_confidence}
-                else:
-                    # No existing belief, create new one
-                    self.beliefs[cell] = {'level': belief_level, 'confidence': belief_conf}
-
-                # Note: info quality evaluation now handled exclusively by evaluate_pending_info()
-                # per tick (called from step()), avoiding double-dipping with inconsistent scaling.
-                # Evaluate self-action feedback
-                self.evaluate_self_action(cell, actual)
+        if valid_cells:
+            if self.agent_type == "exploitative":
+                target = self._pick_exploit_observation(valid_cells)
+            else:
+                target = self._pick_explore_observation(valid_cells)
+            self._sense_cell(target)
 
         # Batch update self_action Q-value: ONE update per tick with average reward
-        # This prevents self_action from being inflated by ~25 per-cell updates
-        # while human/ai Q-values only get 0-1 updates per tick
         self.flush_belief_rewards()
+
+    def _sense_cell(self, cell):
+        """Sense a single cell: get noisy reading, route through memory for triangulation."""
+        actual = self.model.disaster_grid[cell[0], cell[1]]
+
+        # Reward agent's own belief accuracy BEFORE updating belief
+        self.reward_belief_accuracy(cell, actual)
+
+        noise_roll = random.random()
+        noise_threshold = 0.08
+
+        if noise_roll < noise_threshold:
+            # Noisy read
+            belief_level = max(0, min(5, actual + random.choice([-1, 1])))
+            observation_weight = 0.3  # Low weight for noisy observation
+        else:
+            # Accurate read — observation weight feeds into memory as source confidence.
+            # Kept moderate so that confidence builds through triangulation (multiple
+            # agreeing observations), not from a single read.
+            belief_level = actual
+            if self.agent_type == "exploitative":
+                observation_weight = 0.4
+                if belief_level >= 3:
+                    observation_weight = 0.5
+                elif belief_level > 0:
+                    observation_weight = 0.45
+            else:  # Exploratory
+                observation_weight = 0.5
+                if belief_level > 0:
+                    observation_weight = 0.55
+
+        # Route through memory system — belief confidence determined by convergence
+        # of multiple observations, not single reads. This implements triangulation:
+        # 1st observation → low confidence (~0.45)
+        # 2nd agreeing observation → high confidence (~0.90)
+        # 2nd disagreeing observation → stays low (~0.41)
+        self.add_to_memory(cell, belief_level, observation_weight, source_id=self.unique_id)
+
+        # Evaluate self-action feedback
+        self.evaluate_self_action(cell, actual)
+
+    def _pick_exploit_observation(self, valid_cells):
+        """Pick the cell closest to believed epicenter (verify high-value area)."""
+        self.find_believed_epicenter()
+        if self.believed_epicenter:
+            return min(valid_cells,
+                       key=lambda c: (c[0] - self.believed_epicenter[0])**2 +
+                                     (c[1] - self.believed_epicenter[1])**2)
+        # Fallback: highest believed disaster level in neighborhood
+        return max(valid_cells,
+                   key=lambda c: self.beliefs.get(c, {}).get('level', 0))
+
+    def _pick_explore_observation(self, valid_cells):
+        """Pick among the most uncertain cells in neighborhood (reduce ignorance)."""
+        def uncertainty(c):
+            b = self.beliefs.get(c)
+            if not b or not isinstance(b, dict):
+                return 1.0  # Unknown cell = max uncertainty
+            return 1.0 - b.get('confidence', 0.1)
+        # Pick randomly from top-3 most uncertain (avoids deterministic cycling)
+        top_k = sorted(valid_cells, key=uncertainty, reverse=True)[:3]
+        return random.choice(top_k)
 
     # =========================================================================
     # MEMORY-BASED BELIEF SYSTEM (Geschke et al. 2019 inspired)
@@ -1026,6 +1048,11 @@ class HumanAgent(Agent):
         visit a cell to evaluate whether the info they received about it was good.
         They cross-reference against their current belief (which may come from
         sensing, other queries, or accumulated knowledge).
+
+        Aligned with evaluate_information_quality():
+        - Same 5-case explorer reward logic (belief_changed × info_was_accurate)
+        - Same Q-learning scaling (source_knowledge_conf only, no confidence_scaling)
+        - Same trust update scaling
         """
         if not self.pending_info_evaluations:
             return
@@ -1051,13 +1078,12 @@ class HumanAgent(Agent):
             # Check if this is a remote cell (outside sensing range)
             is_remote_cell = not self.is_within_sensing_range(cell)
 
-            # CRITICAL FIX: Remote cells for EXPLORERS get extended expiry window (30 ticks)
+            # Remote cells for EXPLORERS get extended expiry window (30 ticks).
             # They need time to move and sense the cell for ground truth verification.
-            # Non-remote cells and exploiters use normal 15-tick window.
             if self.agent_type == "exploratory" and is_remote_cell:
-                expiry_window = 30  # Extended window for explorers to reach and sense remote cells
+                expiry_window = 30
             else:
-                expiry_window = 15  # Normal window
+                expiry_window = 15
 
             # Too old — expire without evaluation
             if ticks_elapsed > expiry_window:
@@ -1072,81 +1098,30 @@ class HumanAgent(Agent):
             belief_conf = belief.get('confidence', 0.0)
             reference_level = belief.get('level', 0)
 
-            # CRITICAL FIX: Detect self-contaminated references.
+            # Detect self-contaminated references.
             # If the current belief was primarily set by the info being evaluated
             # (reference matches reported and confidence hasn't increased from an
-            # independent source), we can't cross-reference — use stored prior instead.
-            use_prior_as_reference = False
+            # independent source), use stored prior as reference instead.
             if stored_prior_level is not None:
-                # If belief was shifted BY this report (matches reported, differs from prior)
-                # AND no independent confirmation (confidence didn't grow beyond what
-                # the Bayesian update from this single source would give)
                 if (reference_level == reported_level and
                     reference_level != stored_prior_level and
                     belief_conf < stored_prior_conf + 0.3):
-                    # Belief is self-contaminated. Use stored prior as reference instead
-                    # of skipping entirely (which starves info feedback).
-                    use_prior_as_reference = True
                     reference_level = stored_prior_level
                     belief_conf = stored_prior_conf
-
-            # For cells outside sensing range, we can't verify accuracy against ground truth.
-            # CRITICAL: Explorers should NOT penalize sources for disagreeing with their
-            # uncertain beliefs about remote cells. This would cause them to distrust
-            # truthful sources that report correct info that differs from wrong beliefs.
-            #
-            # EXPLOITERS: Use confirmation scoring (they want agreeing sources)
-            # EXPLORERS: For remote cells, defer to evaluate_information_quality when sensed
-            #            Only evaluate accuracy for cells they can actually verify (sensed cells)
 
             if belief_conf < 0.15:
                 continue  # Skip only if we have almost no information
 
-            # Scale learning rate by confidence - uncertain references lead to weaker updates
-            confidence_scaling = min(1.0, belief_conf / 0.5)  # Full strength at 0.5+ confidence
-
             # --- Accuracy score: reported vs current reference ---
-            # For explorers querying remote cells, check if ground truth has been
-            # obtained since the query (via sensing). If so, use it for proper feedback.
-            # This closes the feedback loop: explorers query remote cells, later sense
-            # them, and retroactively evaluate the source's accuracy.
-            if is_remote_cell and self.agent_type == "exploratory":
-                # Check if we've since sensed this cell: the cell is now within
-                # sensing range AND we have a high-confidence belief (from direct sensing)
-                has_ground_truth = False
-                ground_truth_level = None
-                if self.is_within_sensing_range(cell):
-                    cell_belief = self.beliefs.get(cell, {})
-                    if isinstance(cell_belief, dict) and cell_belief.get('confidence', 0) >= 0.7:
-                        # High confidence + within range = we've sensed it
-                        has_ground_truth = True
-                        ground_truth_level = cell_belief.get('level', 0)
-
-                if has_ground_truth:
-                    # Ground truth obtained — evaluate against sensed value
-                    level_error = abs(reported_level - ground_truth_level)
-                    if level_error == 0:
-                        accuracy_score = 1.0
-                    elif level_error == 1:
-                        accuracy_score = 0.5
-                    elif level_error == 2:
-                        accuracy_score = -0.2
-                    else:
-                        accuracy_score = -0.6
-                else:
-                    # No ground truth yet — neutral score (don't penalize unverifiable info)
-                    accuracy_score = 0.0
+            level_error = abs(reported_level - reference_level)
+            if level_error == 0:
+                accuracy_score = 1.0
+            elif level_error == 1:
+                accuracy_score = 0.5
+            elif level_error == 2:
+                accuracy_score = -0.2
             else:
-                # For sensed cells OR exploiters: evaluate normally
-                level_error = abs(reported_level - reference_level)
-                if level_error == 0:
-                    accuracy_score = 1.0
-                elif level_error == 1:
-                    accuracy_score = 0.5
-                elif level_error == 2:
-                    accuracy_score = -0.2
-                else:
-                    accuracy_score = -0.6
+                accuracy_score = -0.6
 
             # --- Confirmation score: reported vs STORED prior (uncontaminated) ---
             prior_level = stored_prior_level if stored_prior_level is not None else reference_level
@@ -1156,106 +1131,112 @@ class HumanAgent(Agent):
             elif prior_error == 1:
                 confirmation_score = 0.5
             elif prior_error == 2:
-                confirmation_score = -0.4  # Exploiters penalize more for moderate disagreement
+                confirmation_score = -0.4
             else:
-                confirmation_score = -0.8  # Exploiters strongly penalize large disagreement
+                confirmation_score = -0.8
 
             # Determine source type from source_id
             is_ai_source = source_id.startswith("A_")
             is_human_source = source_id.startswith("H_")
 
             # SOURCE KNOWLEDGE CONFIDENCE: How likely did the source KNOW the truth?
-            # This scales the learning rate - stronger signal when source likely knew.
-            # - AI: Broad sensing → high confidence they knew truth
-            # - Human on remote cell: Limited radius → may not have known (weaker signal)
-            # - Friends: For exploiters, friend info is more meaningful (authentic shared beliefs)
+            # Scales the learning rate — stronger signal when source likely knew.
             if is_ai_source:
-                source_knowledge_conf = 1.0  # AI has broad knowledge
+                source_knowledge_conf = 1.0
             elif is_human_source:
                 if is_remote_cell:
-                    source_knowledge_conf = 0.5  # Human likely didn't sense this cell
+                    source_knowledge_conf = 0.5
                 else:
-                    source_knowledge_conf = 0.9  # Human could have sensed it
-                # Friends are more meaningful for exploiters (authentic shared beliefs)
+                    source_knowledge_conf = 0.9
                 if self.agent_type == "exploitative" and source_id in self.friends:
                     source_knowledge_conf = min(1.0, source_knowledge_conf * 1.2)
             else:
-                source_knowledge_conf = 0.7  # Unknown source type
+                source_knowledge_conf = 0.7
 
-            # Weighted combination by agent type
-            # EXPLOITERS: Almost entirely driven by confirmation (they want to hear what they believe)
-            # EXPLORERS: Almost entirely driven by accuracy (they want correct information)
+            # --- Combined reward by agent type ---
+            # Aligned with evaluate_information_quality() reward logic.
+            info_was_accurate = (level_error <= 1)
+
             if self.agent_type == "exploitative":
-                # 95% confirmation, 5% accuracy - exploiters reward sources that agree with them
-                combined_reward = 0.95 * confirmation_score + 0.05 * accuracy_score
-            else:
-                # EXPLORERS reward sources based on accuracy for sensed cells
-                # CRITICAL FIX: For REMOTE cells, DON'T evaluate yet - defer until sensed
-                # This prevents confirming AI from getting free pass with neutral score
-                if is_remote_cell:
-                    # Explorer querying remote cell: Can't verify accuracy against ground truth
-                    # INSTEAD: Reward based on whether info IMPROVED CONFIDENCE (reduced uncertainty)
-                    # This gives explorers feedback for seeking useful information
-                    conf_improvement = belief_conf - (stored_prior_conf if stored_prior_conf else 0.1)
-                    if conf_improvement > 0.1:
-                        # Source helped reduce uncertainty - positive!
-                        combined_reward = 0.5 + conf_improvement
-                    elif conf_improvement > 0:
-                        # Small improvement
-                        combined_reward = 0.2
-                    else:
-                        # No improvement or got worse - neutral to slight negative
-                        combined_reward = -0.1
+                # EXPLOITER: confirmation × accuracy (matches evaluate_information_quality)
+                info_confirmed = (prior_error <= 1)
+                if info_confirmed and info_was_accurate:
+                    combined_reward = 0.8
+                elif info_confirmed and not info_was_accurate:
+                    combined_reward = 0.1
+                elif not info_confirmed and info_was_accurate:
+                    combined_reward = 0.3
                 else:
-                    # Sensed cell: can verify accuracy properly
-                    combined_reward = 0.95 * accuracy_score + 0.05 * confirmation_score
+                    combined_reward = -0.3
+                if source_id in self.friends:
+                    combined_reward += 0.1
+            else:
+                # EXPLORER: belief_changed × info_was_accurate (5-case logic)
+                # Matches evaluate_information_quality lines 922-949.
+                prior_conf_stored = stored_prior_conf if stored_prior_conf else 0.5
+                belief_changed = (prior_error >= 1)
+                was_uncertain = (prior_conf_stored < 0.5)
 
-            accuracy_reward = combined_reward * 0.6  # Unified scaling (no negative offset)
+                # For remote cells, accuracy is a best-guess from reference belief.
+                # For sensed cells, accuracy is verified against direct observation.
+                if belief_changed and info_was_accurate:
+                    combined_reward = 0.8
+                elif belief_changed and not info_was_accurate:
+                    combined_reward = -0.4
+                elif not belief_changed and was_uncertain and info_was_accurate:
+                    combined_reward = 0.5
+                elif not belief_changed and not was_uncertain and info_was_accurate:
+                    combined_reward = 0.0
+                else:
+                    combined_reward = -0.3
+
+                # Bonus for confidence increase (uncertainty reduction)
+                current_belief = self.beliefs.get(cell, {})
+                current_conf = current_belief.get('confidence', 0.5) if isinstance(current_belief, dict) else 0.5
+                if current_conf - prior_conf_stored > 0.15:
+                    combined_reward += 0.25
+
+            accuracy_reward = combined_reward * 0.6
 
             # Determine mode from source_id
             if is_human_source:
                 mode = "human"
-            elif is_ai_source:
-                mode = "ai"
             else:
-                mode = None
+                mode = "ai"
 
-            # Update mode Q-value (scaled by confidence AND source knowledge)
-            if mode and mode in self.q_table:
+            # Update mode Q-value (scaled by source knowledge only — matches
+            # evaluate_information_quality, no extra confidence_scaling)
+            if mode in self.q_table:
                 old_mode_q = self.q_table[mode]
-                base_lr = 0.15  # Unified — data volume difference handles type asymmetry
-                # Scale by BOTH reference confidence and source knowledge
-                info_lr = base_lr * confidence_scaling * source_knowledge_conf
+                base_lr = 0.15
+                info_lr = base_lr * source_knowledge_conf
                 self.q_table[mode] = old_mode_q + info_lr * (accuracy_reward - old_mode_q)
 
-            # Update specific source Q-value (scaled by confidence AND source knowledge)
+            # Update specific source Q-value
             if source_id in self.q_table:
                 old_q = self.q_table[source_id]
-                base_lr = 0.15  # Unified — data volume difference handles type asymmetry
-                info_lr = base_lr * confidence_scaling * source_knowledge_conf
+                base_lr = 0.15
+                info_lr = base_lr * source_knowledge_conf
                 self.q_table[source_id] = old_q + info_lr * (accuracy_reward - old_q)
 
-            # Update trust based on accuracy_reward
-            # EXPLOITERS: Fast to punish disagreement, slow to reward agreement (defensive)
-            # EXPLORERS: More balanced - willing to trust new sources that provide value
-            # SCALE BY SOURCE KNOWLEDGE: weaker updates when source may not have known
+            # Update trust (scaled by source knowledge only — matches
+            # evaluate_information_quality, no extra confidence_scaling)
             if source_id in self.trust:
                 old_trust = self.trust[source_id]
                 if accuracy_reward < 0:
                     trust_target = max(0.0, 0.5 + accuracy_reward)
-                    base_trust_lr = 0.18  # Universal: distrust faster than trust
+                    base_trust_lr = 0.18
                 else:
                     trust_target = min(1.0, 0.5 + 0.5 * accuracy_reward)
-                    base_trust_lr = 0.10  # Universal: trust builds slower
-                # Scale by BOTH reference confidence and source knowledge
-                trust_lr = base_trust_lr * confidence_scaling * source_knowledge_conf
+                    base_trust_lr = 0.10
+                trust_lr = base_trust_lr * source_knowledge_conf
                 new_trust = max(0.0, min(1.0, old_trust + trust_lr * (trust_target - old_trust)))
                 self.trust[source_id] = new_trust
 
             evaluated.append(item)
 
             if self.model.debug_mode and hasattr(self, 'id_num') and (self.id_num < 2 or (50 <= self.id_num < 52)):
-                print(f"[DEBUG] Agent {self.unique_id} ({self.agent_type}) PENDING INFO EVAL: source={source_id}, mode={mode}, error={level_error}, acc_rew={accuracy_reward:.3f}, trust={new_trust:.2f}")
+                print(f"[DEBUG] Agent {self.unique_id} ({self.agent_type}) PENDING INFO EVAL: source={source_id}, mode={mode}, error={level_error}, acc_rew={accuracy_reward:.3f}, trust={self.trust.get(source_id, 0):.2f}")
 
         # Remove evaluated/expired items
         self.pending_info_evaluations = [
@@ -3001,11 +2982,16 @@ class DisasterModel(Model):
         """
         Update disaster grid based on disaster_dynamics parameter.
 
+        Multiple cells change per tick with both intensification and recovery,
+        spatially weighted toward the disaster zone. This creates ongoing
+        uncertainty that makes old observations go stale and supports
+        the need for triangulation (continuous re-sensing).
+
         disaster_dynamics:
         0 = Static (no updates)
-        1 = Slow evolution (5% chance per tick, smaller magnitude)
-        2 = Medium evolution (10% chance per tick, medium magnitude)
-        3 = Rapid evolution (20% chance per tick, larger magnitude)
+        1 = Slow evolution (1-2 cells per tick, small changes)
+        2 = Medium evolution (3-5 cells per tick, mix of growth and recovery)
+        3 = Rapid evolution (5-8 cells per tick, large swings)
         """
         # Store a copy of the current grid before updating
         if self.disaster_grid is not None:
@@ -3015,29 +3001,22 @@ class DisasterModel(Model):
 
         # Apply disaster dynamics based on parameter
         if self.disaster_dynamics == 0:
-            # Static disaster - no updates
-            pass
+            pass  # Static
 
         elif self.disaster_dynamics == 1:
-            # Slow evolution: 5% chance, +1-2 magnitude
-            if random.random() < 0.05:
-                x, y = np.random.randint(0, self.disaster_grid.shape[0]), np.random.randint(0, self.disaster_grid.shape[1])
-                magnitude = random.randint(1, 2)
-                self.disaster_grid[x, y] = min(5, self.disaster_grid[x, y] + magnitude)
+            # Slow: 1-2 cells, small changes
+            for _ in range(random.randint(1, 2)):
+                self._evolve_cell(magnitude_range=(1, 2))
 
         elif self.disaster_dynamics == 2:
-            # Medium evolution: 10% chance, +2-3 magnitude
-            if random.random() < 0.1:
-                x, y = np.random.randint(0, self.disaster_grid.shape[0]), np.random.randint(0, self.disaster_grid.shape[1])
-                magnitude = random.randint(2, 3)
-                self.disaster_grid[x, y] = min(5, self.disaster_grid[x, y] + magnitude)
+            # Medium: 3-5 cells per tick, mix of growth and recovery
+            for _ in range(random.randint(3, 5)):
+                self._evolve_cell(magnitude_range=(1, 3))
 
         elif self.disaster_dynamics == 3:
-            # Rapid evolution: 20% chance, +3-4 magnitude
-            if random.random() < 0.2:
-                x, y = np.random.randint(0, self.disaster_grid.shape[0]), np.random.randint(0, self.disaster_grid.shape[1])
-                magnitude = random.randint(3, 4)
-                self.disaster_grid[x, y] = min(5, self.disaster_grid[x, y] + magnitude)
+            # Rapid: 5-8 cells per tick, large swings
+            for _ in range(random.randint(5, 8)):
+                self._evolve_cell(magnitude_range=(2, 4))
 
         # Detect significant changes
         if self.previous_grid is not None:
@@ -3045,7 +3024,34 @@ class DisasterModel(Model):
             max_change = np.max(grid_change)
             if max_change >= self.event_threshold:
                 self.event_ticks.append(self.tick)
-                # print(f"Tick {self.tick}: Significant disaster event detected (max change: {max_change})")
+
+    def _evolve_cell(self, magnitude_range=(1, 3)):
+        """
+        Evolve a single cell — spatially weighted toward disaster zone.
+        Both intensification (60%) and recovery (40%) to create churn.
+        """
+        # 70% chance: change near epicenter (aftershocks/recovery)
+        # 30% chance: random location (new developments)
+        if random.random() < 0.7 and hasattr(self, 'epicenter'):
+            sigma = max(1, self.disaster_radius * 0.8)
+            x = int(np.clip(
+                np.random.normal(self.epicenter[0], sigma),
+                0, self.width - 1))
+            y = int(np.clip(
+                np.random.normal(self.epicenter[1], sigma),
+                0, self.height - 1))
+        else:
+            x = random.randint(0, self.width - 1)
+            y = random.randint(0, self.height - 1)
+
+        magnitude = random.randint(*magnitude_range)
+        current = self.disaster_grid[x, y]
+
+        # 60% intensify, 40% recover (net growth but with churn)
+        if random.random() < 0.6:
+            self.disaster_grid[x, y] = min(5, current + magnitude)
+        else:
+            self.disaster_grid[x, y] = max(0, current - magnitude)
 
     def update_ai_knowledge_maps(self):
         """Update knowledge maps after AIs have sensed the environment."""
