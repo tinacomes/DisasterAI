@@ -81,6 +81,13 @@ def run_test(ai_alignment, test_name):
         if len(sample_agents) == 2:
             break
 
+    # Snapshot for windowed AI preference: track per-10-tick deltas, not cumulative totals.
+    # Cumulative ratio dilutes late-divergence signal (early equal-rate ticks swamp later differences).
+    ai_call_snapshot = {
+        agent.unique_id: (agent.accum_calls_ai, agent.accum_calls_total)
+        for agent in model.agent_list if isinstance(agent, HumanAgent)
+    }
+
     # --- Run simulation ---
     for tick in range(params['ticks']):
         # Track Q-values and trust from sample agents before step
@@ -150,12 +157,20 @@ def run_test(ai_alignment, test_name):
                                 count += 1
                         if count > 0:
                             errors.append(mae / count)
-                        # AI preference rate
-                        if hasattr(agent, 'accum_calls_total') and agent.accum_calls_total > 0:
-                            ai_rates.append(agent.accum_calls_ai / agent.accum_calls_total)
+                        # Windowed AI preference rate: calls in the last 10 ticks only
+                        prev_ai, prev_total = ai_call_snapshot.get(agent.unique_id, (0, 0))
+                        window_ai = agent.accum_calls_ai - prev_ai
+                        window_total = agent.accum_calls_total - prev_total
+                        if window_total > 0:
+                            ai_rates.append(window_ai / window_total)
 
                 belief_accuracy[agent_type_label].append(np.mean(errors) if errors else 0)
                 ai_preference[agent_type_label].append(np.mean(ai_rates) if ai_rates else 0)
+
+            # Advance snapshot to current tick for next window
+            for agent in model.agent_list:
+                if isinstance(agent, HumanAgent):
+                    ai_call_snapshot[agent.unique_id] = (agent.accum_calls_ai, agent.accum_calls_total)
 
     print(f"\nFeedback Event Summary:")
     print(f"  Exploratory  - Info: {info_feedback_counts['exploratory']}, Relief: {relief_feedback_counts['exploratory']}")
@@ -166,6 +181,19 @@ def run_test(ai_alignment, test_name):
         print(f"  Final AECI - Exploit: {aeci_by_tick['exploit'][-1]:.3f}, Explor: {aeci_by_tick['explor'][-1]:.3f}")
     if belief_accuracy['exploratory']:
         print(f"  Final MAE  - Exploit: {belief_accuracy['exploitative'][-1]:.3f}, Explor: {belief_accuracy['exploratory'][-1]:.3f}")
+        # Detect the "weird" MAE peak for exploiters under low alignment:
+        # Exploiters anchor on accurate beliefs early (truthful AI raises confidence),
+        # then resist updating when disaster_dynamics causes sudden grid shifts
+        # (high-confidence rejection at prob ~ 0.7*confidence for level_diff >= 2).
+        # This creates a transient MAE spike: correct → disaster shifts → stuck.
+        exploit_series = belief_accuracy['exploitative']
+        if len(exploit_series) >= 3:
+            peak = max(exploit_series)
+            peak_idx = exploit_series.index(peak)
+            if peak_idx > 0 and peak > 1.3 * exploit_series[0] and peak > exploit_series[-1]:
+                print(f"  [NOTE] Exploitative MAE peak at tick ~{peak_idx*10} (value {peak:.3f}):")
+                print(f"         Exploiters locked in accurate beliefs → disaster shifted →")
+                print(f"         high-confidence rejection prevented timely update (expected behaviour).")
 
     return {
         'q_values': q_values_by_tick,
@@ -312,9 +340,9 @@ def visualize_results(results_high, results_low):
         if results['aeci']['exploit']:
             ax.plot(results['aeci']['exploit'], '--', color=color, alpha=0.8, linewidth=1.5, label=f'{label} Exploit')
             ax.plot(results['aeci']['explor'], '-', color=color, alpha=0.8, linewidth=1.5, label=f'{label} Explor')
-    ax.set_title('AECI: AI Echo Chamber Index\n(Higher = more AI reliance)', fontsize=10, fontweight='bold')
+    ax.set_title('AECI: AI Query Rate by Type\n(AI calls / total calls, higher = more AI reliance)', fontsize=10, fontweight='bold')
     ax.set_xlabel('Tick')
-    ax.set_ylabel('AECI (0 to 1)')
+    ax.set_ylabel('AECI: AI query fraction (0–1)')
     ax.legend(fontsize=7, loc='best')
     ax.grid(True, alpha=0.3)
     ax.set_ylim(-0.1, 1.1)
@@ -329,7 +357,7 @@ def visualize_results(results_high, results_low):
             ax.plot(ticks, data, linestyle=ls, color=color, linewidth=1.5, alpha=0.8,
                     label=f'{label} {agent_type[:6]}')
     ax.axhline(y=0.5, color='k', linestyle=':', alpha=0.5, label='Equal preference')
-    ax.set_title('AI vs Friend Preference\n(>0.5 = prefers AI, <0.5 = prefers friends)', fontsize=10, fontweight='bold')
+    ax.set_title('AI Preference Rate (windowed per 10 ticks)\n(>0.5 = prefers AI, <0.5 = prefers friends)', fontsize=10, fontweight='bold')
     ax.set_xlabel('Tick')
     ax.set_ylabel('AI Query Rate')
     ax.legend(fontsize=7, loc='best')

@@ -2689,8 +2689,14 @@ class DisasterModel(Model):
         # Ensure each community has at least 5 agents (or appropriate minimum)
         min_community_size = max(5, self.num_humans // (num_communities * 2))
 
-        all_agents = list(range(self.num_humans))
-        random.shuffle(all_agents)  # Randomize agent assignment
+        # Type-biased ordering: shuffle within each type, then concatenate.
+        # This produces type-homophilous communities (exploiters cluster with exploiters,
+        # explorers with explorers), so SECI can diverge by agent type as intended.
+        exploiters_pool = list(range(num_exploitative))
+        explorers_pool = list(range(num_exploitative, self.num_humans))
+        random.shuffle(exploiters_pool)
+        random.shuffle(explorers_pool)
+        all_agents = exploiters_pool + explorers_pool
 
         # Create the communities with minimum size constraints
         communities = []
@@ -2715,7 +2721,8 @@ class DisasterModel(Model):
         if remaining_agents:
             communities.append(remaining_agents)
 
-        # Ensure type diversity within each community (some mixture of types)
+        # Ensure a minimal crossover (at most ~2 agents of the minority type per community)
+        # so no community is entirely monotype, while preserving strong type homophily.
         for community in communities:
             exploit_count = sum(1 for a in community if a < num_exploitative)
             explor_count = len(community) - exploit_count
@@ -3298,49 +3305,23 @@ class DisasterModel(Model):
 
             self.belief_variance_data.append((self.tick, var_exploit, var_explor))
 
-            # --- AECI Calculation (Variance-based, matching SECI methodology) ---
-            # For each AI-reliant agent, compare their belief variance against
-            # global variance. Negative = AI reduces diversity (echo chamber),
-            # Positive = AI increases diversity. Same normalization as SECI.
+            # --- AECI Calculation (Ratio-based: AI query fraction by agent type) ---
+            # AECI = AI queries / total queries, averaged by type.
+            # Range [0, 1]: higher means more AI reliance.
+            # Conceptually distinct from SECI (which measures social belief-variance narrowing).
+            # Previously used the same variance formula as SECI → produced identical values.
             aeci_exp = []
             aeci_expl = []
-
-            min_ai_calls = 5  # Need some AI usage to be meaningful
 
             for agent in self.humans.values():
                 if not hasattr(agent, 'accum_calls_ai') or not hasattr(agent, 'accum_calls_total'):
                     continue
 
-                agent.accum_calls_ai = max(0, agent.accum_calls_ai)
-                agent.accum_calls_total = max(0, agent.accum_calls_total)
-
-                # Only include agents that have used AI meaningfully
-                if agent.accum_calls_ai < min_ai_calls:
+                total = max(0, agent.accum_calls_total)
+                if total == 0:
                     continue
 
-                # Collect this agent's belief levels
-                agent_belief_levels = []
-                for belief_info in agent.beliefs.values():
-                    if isinstance(belief_info, dict):
-                        level = belief_info.get('level', 0)
-                        if not np.isnan(level):
-                            agent_belief_levels.append(level)
-
-                if len(agent_belief_levels) < 2:
-                    continue
-
-                agent_var = np.var(agent_belief_levels)
-
-                # Calculate AECI same way as SECI: variance diff normalized
-                if global_var > 1e-9:
-                    var_diff = agent_var - global_var
-                    if var_diff < 0:  # Variance reduction (echo chamber)
-                        aeci_val = max(-1, var_diff / global_var)
-                    else:  # Variance increase (diversification)
-                        max_possible_var = 5.0
-                        aeci_val = min(1, var_diff / (max_possible_var - global_var))
-                else:
-                    aeci_val = 0.0
+                aeci_val = max(0, agent.accum_calls_ai) / total  # [0, 1]
 
                 if agent.agent_type == "exploitative":
                     aeci_exp.append(aeci_val)
@@ -3350,8 +3331,8 @@ class DisasterModel(Model):
             avg_aeci_exp = float(np.mean(aeci_exp)) if aeci_exp else 0.0
             avg_aeci_expl = float(np.mean(aeci_expl)) if aeci_expl else 0.0
 
-            avg_aeci_exp = max(-1.0, min(1.0, avg_aeci_exp))
-            avg_aeci_expl = max(-1.0, min(1.0, avg_aeci_expl))
+            avg_aeci_exp = max(0.0, min(1.0, avg_aeci_exp))
+            avg_aeci_expl = max(0.0, min(1.0, avg_aeci_expl))
 
             # Update last metrics
             self._last_metrics['aeci'] = {
