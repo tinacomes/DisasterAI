@@ -738,20 +738,25 @@ class HumanAgent(Agent):
             belief_conf = belief.get('confidence', 0.0)
             reference_level = belief.get('level', 0)
 
-            # CRITICAL FIX: Detect self-contaminated references.
-            # If the current belief was primarily set by the info being evaluated
-            # (reference matches reported and confidence hasn't increased from an
-            # independent source), we can't cross-reference — use stored prior instead.
+            # Fix circular eval: Detect self-contaminated references.
+            # The previous check only caught FULL contamination (belief == reported).
+            # PARTIAL contamination occurs when the belief shifted TOWARD the reported
+            # value (closer than prior was) without independent confirmation.
+            # In that case, the belief is a partially circular reference and we should
+            # use the stored prior instead to avoid rewarding sources for being consistent
+            # with the belief they themselves caused.
             use_prior_as_reference = False
             if stored_prior_level is not None:
-                # If belief was shifted BY this report (matches reported, differs from prior)
-                # AND no independent confirmation (confidence didn't grow beyond what
-                # the Bayesian update from this single source would give)
-                if (reference_level == reported_level and
-                    reference_level != stored_prior_level and
-                    belief_conf < stored_prior_conf + 0.3):
-                    # Belief is self-contaminated. Use stored prior as reference instead
-                    # of skipping entirely (which starves info feedback).
+                # Detect partial contamination: belief moved toward reported level
+                # without enough independent confirmation (confidence stayed low).
+                belief_moved_toward_reported = (
+                    abs(reference_level - reported_level) <
+                    abs(stored_prior_level - reported_level)
+                )
+                no_independent_confirmation = belief_conf < stored_prior_conf + 0.3
+                if belief_moved_toward_reported and no_independent_confirmation:
+                    # Belief is (partially) self-contaminated. Use stored prior as
+                    # reference to avoid circular evaluation.
                     use_prior_as_reference = True
                     reference_level = stored_prior_level
                     belief_conf = stored_prior_conf
@@ -870,22 +875,25 @@ class HumanAgent(Agent):
                 info_lr = base_lr * confidence_scaling * source_knowledge_conf
                 self.q_table[source_id] = old_q + info_lr * (accuracy_reward - old_q)
 
-            # Update trust based on accuracy_reward
-            # EXPLOITERS: Fast to punish disagreement, slow to reward agreement (defensive)
-            # EXPLORERS: More balanced - willing to trust new sources that provide value
-            # SCALE BY SOURCE KNOWLEDGE: weaker updates when source may not have known
+            # Fix trust learning rate: align with evaluate_information_quality logic.
+            # Previously inverted: exploiters penalized bad info faster (0.20) than
+            # explorers (0.10), but evaluate_information_quality correctly has explorers
+            # penalizing faster (0.25 vs 0.15) since they care about accuracy.
+            # Consistent design: explorers penalize inaccuracy faster, exploiters
+            # penalize disagreement-with-belief more slowly (they are stubborn).
+            # confidence_scaling already reduces effect for uncertain belief references.
             if source_id in self.trust:
                 old_trust = self.trust[source_id]
                 if accuracy_reward < 0:
                     trust_target = max(0.0, 0.5 + accuracy_reward)
-                    # EXPLOITERS: Fast penalty (defensive, distrust easily)
-                    # EXPLORERS: Slower penalty (give sources more chances)
-                    base_trust_lr = 0.10 if self.agent_type == "exploratory" else 0.20
+                    # EXPLORERS: Faster penalty for inaccurate sources (accuracy-focused)
+                    # EXPLOITERS: Slower penalty (stubborn; high-confidence beliefs resist change)
+                    base_trust_lr = 0.25 if self.agent_type == "exploratory" else 0.15
                 else:
                     trust_target = min(1.0, 0.5 + 0.5 * accuracy_reward)
-                    # EXPLORERS: Faster reward (quick to trust valuable sources)
+                    # EXPLORERS: Moderate reward for accurate sources
                     # EXPLOITERS: Slow reward (suspicious of new trust)
-                    base_trust_lr = 0.15 if self.agent_type == "exploratory" else 0.06
+                    base_trust_lr = 0.12 if self.agent_type == "exploratory" else 0.06
                 # Scale by BOTH reference confidence and source knowledge
                 trust_lr = base_trust_lr * confidence_scaling * source_knowledge_conf
                 new_trust = max(0.0, min(1.0, old_trust + trust_lr * (trust_target - old_trust)))
@@ -1545,19 +1553,37 @@ class HumanAgent(Agent):
                 source_id = None  # No external source used
 
             elif chosen_mode == "human":
-                # Select specific human source within "human" mode
+                # Fix human source selection: use trust-weighted random selection
+                # instead of always picking the highest-trust friend.
+                # Always-max-trust means Q-table["human"] only reflects one friend,
+                # never exploring other humans. Weighted selection lets agents
+                # occasionally query less-trusted or non-friend humans, enabling
+                # Q-learning to discover the true value of human sources as a category.
                 valid_sources = [h for h in self.model.humans if h != self.unique_id]
                 if not valid_sources:
                     return
-                if not self.friends:
-                    source_id = random.choice(valid_sources)
-                else:
-                    # Get friend with highest trust
-                    friend_trust_pairs = [(fid, self.trust.get(fid, 0.1)) for fid in self.friends]
-                    if friend_trust_pairs:
-                        source_id = max(friend_trust_pairs, key=lambda x: x[1])[0]
+                # Build candidate pool: friends get a trust-based weight, non-friends
+                # get a small baseline weight so they can be discovered.
+                candidates = []
+                weights = []
+                for h_id in valid_sources:
+                    trust_val = self.trust.get(h_id, 0.1)
+                    if h_id in self.friends:
+                        w = max(0.05, trust_val)  # Friends: weight by trust
                     else:
-                        source_id = random.choice(valid_sources)
+                        w = 0.05  # Non-friends: small baseline for exploration
+                    candidates.append(h_id)
+                    weights.append(w)
+                # Weighted random draw
+                total_w = sum(weights)
+                r = random.random() * total_w
+                cumulative = 0.0
+                source_id = candidates[-1]  # fallback
+                for cid, w in zip(candidates, weights):
+                    cumulative += w
+                    if r <= cumulative:
+                        source_id = cid
+                        break
 
                 source_agent = self.model.humans.get(source_id)
                 if source_agent:
