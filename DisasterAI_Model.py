@@ -59,7 +59,8 @@ class HumanAgent(Agent):
                  exploit_trust_lr=0.03, # Low trust Learning Rate for exploiters
                  explor_trust_lr=0.06,  # Higher trust Learning Rate for explorers
                  exploit_friend_bias=0.1,     # Action Selection: Bias added to 'human' score (exploiter) (tune)
-                 exploit_self_bias=0.1):
+                 exploit_self_bias=0.1,
+                 exploit_ai_confirm_bias=0.15): # Action Selection: Bonus added to 'ai' score when Q(ai)>0 (exploiter)
                  #exploiter_trust_lr=0.1):
                  #exploit_reward_weight=0.2,  # Reward weight for exploitative agents
                  #onfirmation_weight=0.2):     # Action Selection: Bias added to 'self_action' score (exploiter) (tune)
@@ -88,6 +89,7 @@ class HumanAgent(Agent):
         self.explore_reward_weight = explore_reward_weight
         self.exploit_friend_bias = exploit_friend_bias
         self.exploit_self_bias = exploit_self_bias
+        self.exploit_ai_confirm_bias = exploit_ai_confirm_bias
         self.exploit_trust_lr = exploit_trust_lr
         # self.exploit_reward_weight = exploit_reward_weight
         # self.confirmation_weight = confirmation_weight
@@ -1494,14 +1496,21 @@ class HumanAgent(Agent):
                 decision_factors['biases'] = {}
 
                 if self.agent_type == "exploitative":
-                    # Exploitative agents prefer friends and self-confirmation
+                    # Exploitative agents prefer friends and self-confirmation by default.
                     scores["human"] += self.exploit_friend_bias
                     scores["self_action"] += self.exploit_self_bias
 
                     decision_factors['biases']["human"] = self.exploit_friend_bias
                     decision_factors['biases']["self_action"] = self.exploit_self_bias
 
-                    # NO AI bias - let Q-learning determine AI value through experience
+                    # Conditional AI bonus: once Q("ai") has grown positive (i.e. the agent
+                    # has learned AI is confirming its beliefs), add a top-up bias so AI can
+                    # overcome the standing friend bias.  This makes the mechanism visible:
+                    # exploiters gradually shift toward AI under confirming conditions and
+                    # away from AI under truthful conditions (where Q("ai") goes negative).
+                    if self.q_table.get("ai", 0) > 0:
+                        scores["ai"] += self.exploit_ai_confirm_bias
+                        decision_factors['biases']["ai"] = self.exploit_ai_confirm_bias
 
                 else:  # exploratory
                     # Exploratory agents seek diverse information sources
@@ -2291,8 +2300,9 @@ class DisasterModel(Model):
                  min_rumor_separation_factor=0.5,
                  exploit_trust_lr=0.03, # Default value matching base_params
                  explor_trust_lr=0.05,
-                 exploit_friend_bias=0.1, # Default value matching base_params
-                 exploit_self_bias=0.1  # Default value matching base_params
+                 exploit_friend_bias=0.1,       # Default value matching base_params
+                 exploit_self_bias=0.1,         # Default value matching base_params
+                 exploit_ai_confirm_bias=0.15   # Bonus added to AI score when Q(ai)>0 for exploiters
                  ):
         super(DisasterModel, self).__init__()
         self.share_exploitative = share_exploitative
@@ -2321,6 +2331,7 @@ class DisasterModel(Model):
         self.explor_trust_lr = explor_trust_lr
         self.exploit_friend_bias = exploit_friend_bias
         self.exploit_self_bias = exploit_self_bias
+        self.exploit_ai_confirm_bias = exploit_ai_confirm_bias
 
         self.grid = MultiGrid(width, height, torus=False)
         self.tick = 0
@@ -2394,8 +2405,9 @@ class DisasterModel(Model):
                              epsilon=self.epsilon,           # Epsilon from model
                              # pass trust rates and biases
                              trust_learning_rate=current_trust_lr,
-                             exploit_friend_bias=self.exploit_friend_bias, # From model
-                             exploit_self_bias=self.exploit_self_bias     # From model
+                             exploit_friend_bias=self.exploit_friend_bias,         # From model
+                             exploit_self_bias=self.exploit_self_bias,             # From model
+                             exploit_ai_confirm_bias=self.exploit_ai_confirm_bias  # From model
                              )
             self.humans[f"H_{i}"] = agent
             self.agent_list.append(agent)
@@ -3305,34 +3317,45 @@ class DisasterModel(Model):
 
             self.belief_variance_data.append((self.tick, var_exploit, var_explor))
 
-            # --- AECI Calculation (Ratio-based: AI query fraction by agent type) ---
-            # AECI = AI queries / total queries, averaged by type.
-            # Range [0, 1]: higher means more AI reliance.
-            # Conceptually distinct from SECI (which measures social belief-variance narrowing).
-            # Previously used the same variance formula as SECI → produced identical values.
-            aeci_exp = []
-            aeci_expl = []
+            # --- AECI Calculation (Variance-based: high-AI-user group vs global) ---
+            # For each type, collect beliefs from agents whose AI query rate exceeds the
+            # population average (~1/3).  Then compare that group's belief variance to
+            # global_var using the same normalisation as SECI → same [-1, +1] scale.
+            # Negative = high-AI users have MORE homogeneous beliefs (AI echo chamber).
+            # Positive = high-AI users have MORE diverse beliefs than the population.
+            # Key difference from SECI: SECI uses each agent's friend circle; AECI uses
+            # the AI-reliance peer group.  Neither can produce identical values.
+            ai_reliance_threshold = 1.0 / 3.0  # agents querying AI > 33% of the time
+
+            high_ai_beliefs_exp = []
+            high_ai_beliefs_expl = []
 
             for agent in self.humans.values():
-                if not hasattr(agent, 'accum_calls_ai') or not hasattr(agent, 'accum_calls_total'):
+                if not hasattr(agent, 'accum_calls_total') or agent.accum_calls_total < 5:
                     continue
-
-                total = max(0, agent.accum_calls_total)
-                if total == 0:
+                if agent.accum_calls_ai / agent.accum_calls_total < ai_reliance_threshold:
                     continue
+                for belief_info in agent.beliefs.values():
+                    if isinstance(belief_info, dict):
+                        level = belief_info.get('level', 0)
+                        if not np.isnan(level):
+                            if agent.agent_type == "exploitative":
+                                high_ai_beliefs_exp.append(level)
+                            else:
+                                high_ai_beliefs_expl.append(level)
 
-                aeci_val = max(0, agent.accum_calls_ai) / total  # [0, 1]
-
-                if agent.agent_type == "exploitative":
-                    aeci_exp.append(aeci_val)
+            def _aeci_from_beliefs(group_beliefs, g_var):
+                if len(group_beliefs) < 2 or g_var <= 1e-9:
+                    return 0.0
+                peer_var = np.var(group_beliefs)
+                var_diff = peer_var - g_var
+                if var_diff < 0:
+                    return float(max(-1.0, var_diff / g_var))
                 else:
-                    aeci_expl.append(aeci_val)
+                    return float(min(1.0, var_diff / (5.0 - g_var)))
 
-            avg_aeci_exp = float(np.mean(aeci_exp)) if aeci_exp else 0.0
-            avg_aeci_expl = float(np.mean(aeci_expl)) if aeci_expl else 0.0
-
-            avg_aeci_exp = max(0.0, min(1.0, avg_aeci_exp))
-            avg_aeci_expl = max(0.0, min(1.0, avg_aeci_expl))
+            avg_aeci_exp  = _aeci_from_beliefs(high_ai_beliefs_exp,  global_var)
+            avg_aeci_expl = _aeci_from_beliefs(high_ai_beliefs_expl, global_var)
 
             # Update last metrics
             self._last_metrics['aeci'] = {
@@ -3350,8 +3373,8 @@ class DisasterModel(Model):
                 self.running_aeci_expl = avg_aeci_expl
             else:
                 # Apply exponential moving average with safety bounds
-                self.running_aeci_exp = max(0.0, min(1.0, self.running_aeci_exp * 0.8 + avg_aeci_exp * 0.2))
-                self.running_aeci_expl = max(0.0, min(1.0, self.running_aeci_expl * 0.8 + avg_aeci_expl * 0.2))
+                self.running_aeci_exp = max(-1.0, min(1.0, self.running_aeci_exp * 0.8 + avg_aeci_exp * 0.2))
+                self.running_aeci_expl = max(-1.0, min(1.0, self.running_aeci_expl * 0.8 + avg_aeci_expl * 0.2))
 
             # Update last metrics
             self._last_metrics['running_aeci'] = {

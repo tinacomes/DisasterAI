@@ -340,12 +340,13 @@ def visualize_results(results_high, results_low):
         if results['aeci']['exploit']:
             ax.plot(results['aeci']['exploit'], '--', color=color, alpha=0.8, linewidth=1.5, label=f'{label} Exploit')
             ax.plot(results['aeci']['explor'], '-', color=color, alpha=0.8, linewidth=1.5, label=f'{label} Explor')
-    ax.set_title('AECI: AI Query Rate by Type\n(AI calls / total calls, higher = more AI reliance)', fontsize=10, fontweight='bold')
+    ax.set_title('AECI: AI Echo Chamber Index\n(high-AI users vs global, negative = echo chamber)', fontsize=10, fontweight='bold')
     ax.set_xlabel('Tick')
-    ax.set_ylabel('AECI: AI query fraction (0–1)')
+    ax.set_ylabel('AECI (-1 to +1)')
     ax.legend(fontsize=7, loc='best')
     ax.grid(True, alpha=0.3)
-    ax.set_ylim(-0.1, 1.1)
+    ax.axhline(y=0, color='k', linestyle=':', alpha=0.5)
+    ax.set_ylim(-1.1, 1.1)
 
     # 9. AI vs Friend Preference
     ax = plt.subplot(4, 3, 9)
