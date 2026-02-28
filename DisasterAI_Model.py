@@ -3317,15 +3317,22 @@ class DisasterModel(Model):
 
             self.belief_variance_data.append((self.tick, var_exploit, var_explor))
 
-            # --- AECI Calculation (Variance-based: high-AI-user group vs global) ---
-            # For each type, collect beliefs from agents whose AI query rate exceeds the
-            # population average (~1/3).  Then compare that group's belief variance to
-            # global_var using the same normalisation as SECI → same [-1, +1] scale.
-            # Negative = high-AI users have MORE homogeneous beliefs (AI echo chamber).
-            # Positive = high-AI users have MORE diverse beliefs than the population.
-            # Key difference from SECI: SECI uses each agent's friend circle; AECI uses
-            # the AI-reliance peer group.  Neither can produce identical values.
-            ai_reliance_threshold = 1.0 / 3.0  # agents querying AI > 33% of the time
+            # --- AECI Calculation (Variance-based: within-type median split) ---
+            # Split each type by its own median AI-query rate, then compare the
+            # top-half ("high-AI") group's belief variance to global_var.
+            # Using a within-type median (not a fixed threshold) avoids the problem
+            # where explorers' high baseline AI rate (~50%) means a fixed 1/3 threshold
+            # captures almost all of them → peer_var ≈ global_var → AECI ≈ 0 always.
+            # Same [-1,+1] normalisation as SECI; negative = echo chamber (homogeneous).
+
+            type_rates = {"exploitative": [], "exploratory": []}
+            for agent in self.humans.values():
+                if hasattr(agent, 'accum_calls_total') and agent.accum_calls_total >= 5:
+                    r = agent.accum_calls_ai / agent.accum_calls_total
+                    type_rates[agent.agent_type].append(r)
+
+            median_exp  = float(np.median(type_rates["exploitative"])) if type_rates["exploitative"] else 0.33
+            median_expl = float(np.median(type_rates["exploratory"]))  if type_rates["exploratory"]  else 0.33
 
             high_ai_beliefs_exp = []
             high_ai_beliefs_expl = []
@@ -3333,7 +3340,9 @@ class DisasterModel(Model):
             for agent in self.humans.values():
                 if not hasattr(agent, 'accum_calls_total') or agent.accum_calls_total < 5:
                     continue
-                if agent.accum_calls_ai / agent.accum_calls_total < ai_reliance_threshold:
+                rate = agent.accum_calls_ai / agent.accum_calls_total
+                threshold = median_exp if agent.agent_type == "exploitative" else median_expl
+                if rate < threshold:
                     continue
                 for belief_info in agent.beliefs.values():
                     if isinstance(belief_info, dict):
