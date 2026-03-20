@@ -2942,24 +2942,24 @@ class DisasterModel(Model):
             pass
 
         elif self.disaster_dynamics == 1:
-            # Slow evolution: 5% chance, +1-2 magnitude
-            if random.random() < 0.05:
+            # Slow evolution: shock_probability * 0.5 chance, magnitude [shock_magnitude-1, shock_magnitude]
+            if random.random() < self.shock_probability * 0.5:
                 x, y = np.random.randint(0, self.disaster_grid.shape[0]), np.random.randint(0, self.disaster_grid.shape[1])
-                magnitude = random.randint(1, 2)
+                magnitude = random.randint(max(1, self.shock_magnitude - 1), max(1, self.shock_magnitude))
                 self.disaster_grid[x, y] = min(5, self.disaster_grid[x, y] + magnitude)
 
         elif self.disaster_dynamics == 2:
-            # Medium evolution: 10% chance, +2-3 magnitude
-            if random.random() < 0.1:
+            # Medium evolution: shock_probability chance, magnitude [shock_magnitude, shock_magnitude+1]
+            if random.random() < self.shock_probability:
                 x, y = np.random.randint(0, self.disaster_grid.shape[0]), np.random.randint(0, self.disaster_grid.shape[1])
-                magnitude = random.randint(2, 3)
+                magnitude = random.randint(max(1, self.shock_magnitude), self.shock_magnitude + 1)
                 self.disaster_grid[x, y] = min(5, self.disaster_grid[x, y] + magnitude)
 
         elif self.disaster_dynamics == 3:
-            # Rapid evolution: 20% chance, +3-4 magnitude
-            if random.random() < 0.2:
+            # Rapid evolution: shock_probability * 2 chance, magnitude [shock_magnitude+1, shock_magnitude+2]
+            if random.random() < min(1.0, self.shock_probability * 2.0):
                 x, y = np.random.randint(0, self.disaster_grid.shape[0]), np.random.randint(0, self.disaster_grid.shape[1])
-                magnitude = random.randint(3, 4)
+                magnitude = random.randint(self.shock_magnitude + 1, self.shock_magnitude + 2)
                 self.disaster_grid[x, y] = min(5, self.disaster_grid[x, y] + magnitude)
 
         # Detect significant changes
