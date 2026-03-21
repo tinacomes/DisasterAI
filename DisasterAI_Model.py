@@ -48,21 +48,9 @@ class Candidate:
 class HumanAgent(Agent):
     def __init__(self, unique_id, model, id_num, agent_type, share_confirming,
                  learning_rate=0.1, epsilon=0.3,
-                 # --- Q-learning & Behavior Tuning Parameters ---
-                 #exploit_trust_weight=0.7,    # Q-target: For 'human' mode, weight for avg FRIEND trust (exploiter)
-                 self_confirm_weight=0.9,     # Q-target: For 'self_action', weight for confirmation value (exploiter)
-                 self_confirm_boost=1.5,      # Multiplier for avg confidence to get confirmation value V_C (tune)
-                 confirmation_q_lr=0.05,       # Learning rate for Q-boost on confirmation
-                 #exploit_ai_trust_weight=0.95, # Q-target: For 'A_k' modes, trust weight (exploiter) - very high
-                 trust_learning_rate=0.05,  # Learning rate for trust updates
-                 explore_reward_weight=0.8,   # Q-target: For all modes, reward weight (exploratory)
-                 exploit_trust_lr=0.03, # Low trust Learning Rate for exploiters
-                 explor_trust_lr=0.06,  # Higher trust Learning Rate for explorers
-                 exploit_friend_bias=0.1,     # Action Selection: Bias added to 'human' score (exploiter) (tune)
-                 exploit_self_bias=0.1):
-                 #exploiter_trust_lr=0.1):
-                 #exploit_reward_weight=0.2,  # Reward weight for exploitative agents
-                 #onfirmation_weight=0.2):     # Action Selection: Bias added to 'self_action' score (exploiter) (tune)
+                 trust_learning_rate=0.05,
+                 exploit_trust_lr=0.03,
+                 explor_trust_lr=0.06):
 
         # Use workaround: call parent initializer with model only, then set attributes.
         super(HumanAgent, self).__init__(model)
@@ -79,19 +67,7 @@ class HumanAgent(Agent):
 
         self.exploration_targets = []
 
-        # --- Store Q-learning & Behavior Parameters ---
-        # self.exploit_trust_weight = exploit_trust_weight
-        self.self_confirm_weight = self_confirm_weight
-        self.self_confirm_boost = self_confirm_boost
-        self.confirmation_q_lr = confirmation_q_lr
-        # self.exploit_ai_trust_weight = exploit_ai_trust_weight
-        self.explore_reward_weight = explore_reward_weight
-        self.exploit_friend_bias = exploit_friend_bias
-        self.exploit_self_bias = exploit_self_bias
         self.exploit_trust_lr = exploit_trust_lr
-        # self.exploit_reward_weight = exploit_reward_weight
-        # self.confirmation_weight = confirmation_weight
-        # self.min_accept_chance = min_accept_chance
 
 
         # --- Agent State ---
@@ -606,13 +582,9 @@ class HumanAgent(Agent):
             else:
                 source_knowledge_conf = 0.7  # Unknown source type
 
-            # Weighted combination by agent type (no hardcoded biases based on source type)
-            # Exploiters value CONFIRMATION over accuracy (0.8/0.2)
-            # Explorers value ACCURACY over confirmation (0.8/0.2)
-            if self.agent_type == "exploitative":
-                combined_reward = 0.8 * confirmation_score + 0.2 * accuracy_score
-            else:
-                combined_reward = 0.8 * accuracy_score + 0.2 * confirmation_score
+            # Pure accuracy reward — agent-type differences emerge from D/delta acceptance,
+            # not from different reward functions that would double-count the effect
+            combined_reward = accuracy_score
 
             # Scale to [-0.7, +0.5] range to match existing Q-update expectations
             accuracy_reward = combined_reward * 0.6 - 0.1
@@ -830,25 +802,12 @@ class HumanAgent(Agent):
             else:
                 source_knowledge_conf = 0.7  # Unknown source type
 
-            # Weighted combination by agent type
-            # EXPLOITERS: Almost entirely driven by confirmation (they want to hear what they believe)
-            # EXPLORERS: Almost entirely driven by accuracy (they want correct information)
-            if self.agent_type == "exploitative":
-                # 95% confirmation, 5% accuracy - exploiters reward sources that agree with them
-                combined_reward = 0.95 * confirmation_score + 0.05 * accuracy_score
-            else:
-                # EXPLORERS reward sources based on accuracy for sensed cells
-                # CRITICAL FIX: For REMOTE cells, DON'T evaluate yet - defer until sensed
-                # This prevents confirming AI from getting free pass with neutral score
-                if is_remote_cell:
-                    # Explorer querying remote cell: DEFER evaluation until sensed
-                    # Don't give neutral score - wait for ground truth verification
-                    # Item will be evaluated by evaluate_information_quality when sensed,
-                    # or expire after extended window (30 ticks for remote cells)
-                    continue  # Skip this item, keep it pending
-                else:
-                    # Sensed cell: can verify accuracy properly
-                    combined_reward = 0.95 * accuracy_score + 0.05 * confirmation_score
+            # Pure accuracy reward for both types — agent-type differences emerge from
+            # D/delta acceptance (what info gets integrated), not from reward shaping
+            if is_remote_cell and self.agent_type == "exploratory":
+                # Explorer querying remote cell: defer until sensed (ground truth unavailable)
+                continue
+            combined_reward = accuracy_score
 
             accuracy_reward = combined_reward * 0.7 - 0.1  # Slightly larger scale
 
@@ -909,6 +868,50 @@ class HumanAgent(Agent):
             item for item in self.pending_info_evaluations
             if item not in evaluated
         ]
+
+        # Triangulation: multi-source agreement/disagreement on same cell → Q-signal
+        self.triangulate_sources()
+
+    def triangulate_sources(self):
+        """
+        Compare reports from multiple independent sources about the same cell
+        within a 5-tick window. Consensus is a learning signal without needing
+        ground truth — captures the second valid feedback mechanism alongside
+        action-outcome feedback.
+        """
+        current_tick = self.model.tick
+        recent_window = 5
+
+        # Group recent evaluations by cell
+        cell_reports = {}  # cell -> [(source_id, reported_level), ...]
+        for item in self.pending_info_evaluations:
+            tick_received, source_id, cell = item[0], item[1], item[2]
+            reported_level = item[3]
+            if current_tick - tick_received <= recent_window:
+                if cell not in cell_reports:
+                    cell_reports[cell] = []
+                cell_reports[cell].append((source_id, reported_level))
+
+        for cell, reports in cell_reports.items():
+            # Need at least 2 distinct sources
+            source_ids = [r[0] for r in reports]
+            if len(set(source_ids)) < 2:
+                continue
+
+            levels = [r[1] for r in reports]
+            max_disagreement = max(levels) - min(levels)
+
+            if max_disagreement <= 1:
+                q_delta = 0.05   # Consensus → small Q-boost for involved sources
+            elif max_disagreement >= 3:
+                q_delta = -0.05  # Strong conflict → small Q-penalty
+            else:
+                continue  # Ambiguous — no signal
+
+            for source_id, _ in reports:
+                mode = "ai" if source_id.startswith("A_") else "human"
+                if mode in self.q_table:
+                    self.q_table[mode] = max(-2.0, min(2.0, self.q_table[mode] + q_delta))
 
     def report_beliefs(self, interest_point, query_radius):
         """Reports human agent's beliefs about cells within query_radius of the interest_point."""
@@ -1182,113 +1185,61 @@ class HumanAgent(Agent):
             # Apply a minimum confidence threshold to prevent wild swings
             prior_confidence = max(0.1, prior_confidence)
 
-            # EXPLOITER REJECTION MECHANISM: Reject conflicting information
-            # Exploiters with high confidence REJECT info that conflicts with their beliefs
-            level_diff = abs(reported_level - prior_level)
-            if self.agent_type == "exploitative" and prior_confidence > 0.4:
-                # Higher confidence = higher rejection threshold
-                # If info differs by 2+ levels and confidence is high, likely reject
-                rejection_prob = 0.0
-                if level_diff >= 3:
-                    rejection_prob = 0.9 * prior_confidence  # Almost always reject big differences
-                elif level_diff >= 2:
-                    rejection_prob = 0.7 * prior_confidence  # Often reject moderate differences
-                elif level_diff >= 1:
-                    rejection_prob = 0.3 * prior_confidence  # Sometimes reject small differences
+            # D/DELTA ACCEPTANCE MECHANISM (from social judgment theory):
+            # P(accept) = D^δ / (d^δ + D^δ)  where d = distance between report and prior
+            # Exploitative: D=2.0, δ=3.5 → sharp narrow acceptance window
+            # Exploratory:  D=4.0, δ=1.2 → gradual wide acceptance window
+            # Friends get a trust-widened threshold (more open to friend info)
+            is_friend = source_id in self.friends if source_id else False
+            d = abs(reported_level - prior_level)
+            if d == 0:
+                accept_prob = 1.0
+            else:
+                D_eff = self.D * (1.0 + 0.5 * self.trust.get(source_id, 0.5)) if is_friend else self.D
+                accept_prob = (D_eff ** self.delta) / (d ** self.delta + D_eff ** self.delta)
 
-                # Friends get a pass - lower rejection probability
-                is_friend = source_id in self.friends if source_id else False
-                if is_friend:
-                    rejection_prob *= 0.3  # Much less likely to reject friend info
-
-                if random.random() < rejection_prob:
-                    # REJECT the information - still track for feedback but don't update belief
-                    if source_id:
-                        self.pending_info_evaluations.append((
-                            self.model.tick, source_id, cell,
-                            int(reported_level), int(prior_level), float(prior_confidence)
-                        ))
-                    return False  # No belief change
+            if random.random() > accept_prob:
+                # REJECT - still track for feedback but don't update belief
+                if source_id:
+                    self.pending_info_evaluations.append((
+                        self.model.tick, source_id, cell,
+                        int(reported_level), int(prior_level), float(prior_confidence)
+                    ))
+                return False  # No belief change
 
             # Convert confidence to precision with agent-specific scaling
+            # Exploiters: stronger prior (1.5x) → more resistant to change
+            # Explorers: weaker prior (0.8x) → more open to change
             if self.agent_type == "exploitative":
-                # Exploiters have higher prior precision (stronger resistance to change)
-                prior_precision = 2.5 * prior_confidence / (1 - prior_confidence + 1e-6)
+                prior_precision = 1.5 * prior_confidence / (1 - prior_confidence + 1e-6)
             else:
-                # Explorers have lower prior precision (more open to new information)
-                prior_precision = 0.6 * prior_confidence / (1 - prior_confidence + 1e-6)
+                prior_precision = 0.8 * prior_confidence / (1 - prior_confidence + 1e-6)
 
-            # Source precision calculation - Agent-type dependent
+            # Source precision — trust-based, moderate scaling
             if self.agent_type == "exploitative":
-                # Exploiters highly value trusted sources (trust has more impact)
-                source_precision_base = 4.0 * source_trust / (1 - source_trust + 1e-6)
+                source_precision_base = 2.0 * source_trust / (1 - source_trust + 1e-6)
             else:
-                # Explorers more moderately weigh trust
-                source_precision_base = 2.5 * source_trust / (1 - source_trust + 1e-6)
+                source_precision_base = 1.5 * source_trust / (1 - source_trust + 1e-6)
 
             source_precision = source_precision_base
 
-            # Apply conditional adjustments to source_precision
-
-            is_ai_source = hasattr(self, 'ai_info_sources') and cell in self.ai_info_sources
-
             if source_trust < 0.3:
-                # Smoother transition for low trust
-                trust_factor = (source_trust / 0.3) ** 0.5  # Square root for smoother curve
+                trust_factor = (source_trust / 0.3) ** 0.5
                 source_precision = source_precision_base * trust_factor
 
-            # Lower threshold for ignoring extremely low trust sources
             if source_trust < 0.03:
-                source_precision *= 0.05  # Almost entirely ignore
+                source_precision *= 0.05
 
-            # No special AI bonus - trust should capture source quality through feedback
-            # AI sources are treated the same as human sources based on learned trust
+            source_precision = min(source_precision, 8.0)
 
-            # Apply a maximum to source precision to prevent overwhelming prior
-            # Different maximums by agent type
-            if self.agent_type == "exploitative":
-                source_precision = min(source_precision, 8.0)  # Lower cap (more resistant)
-            else:
-                source_precision = min(source_precision, 12.0)  # Higher cap (more adaptive)
-
-            # Combine information using precision weighting
+            # Combine using precision-weighted (Bayesian) averaging
             posterior_precision = prior_precision + source_precision
-
-            # Calculate the weighted update of belief level
             posterior_level = (prior_precision * prior_level + source_precision * reported_level) / posterior_precision
-
-            # Convert precision back to confidence [0,1]
             posterior_confidence = posterior_precision / (1 + posterior_precision)
 
             # Constrain to valid ranges
             posterior_level = max(0, min(5, round(posterior_level)))
             posterior_confidence = max(0.1, min(0.98, posterior_confidence))
-
-            # Agent-type-specific adjustments
-            if self.agent_type == "exploitative":
-                # Exploitative agents give more weight to consistent information
-                if abs(posterior_level - prior_level) <= 1:
-                    # Information confirms existing belief - stronger boost
-                    confirmation_boost = min(0.3, 0.35 * prior_confidence)
-                    posterior_confidence = min(0.98, posterior_confidence + confirmation_boost)
-            else:  # exploratory
-                # Exploratory agents are more accepting of new information
-                if abs(posterior_level - prior_level) >= 2:
-                    # Information significantly differs from prior
-                    # Don't reduce confidence as much - they value the new information
-                    posterior_confidence = max(0.2, posterior_confidence * 0.95)
-
-                # Explorers gain extra confidence when source is trusted and reported level is high
-                if source_trust > 0.6 and reported_level >= 3:
-                    info_value_boost = min(0.3, 0.4 * source_trust)
-                    posterior_confidence = min(0.97, posterior_confidence + info_value_boost)
-
-            # Apply a smoothing factor to reduce large jumps in level for both agent types
-            if abs(posterior_level - prior_level) >= 2:
-                # Apply 20% smoothing for large changes (weighted average)
-                smoothing_factor = 0.2
-                smoothed_level = int(round((1-smoothing_factor) * posterior_level + smoothing_factor * prior_level))
-                posterior_level = smoothed_level
 
             # Update the belief
             self.beliefs[cell] = {
@@ -1493,29 +1444,9 @@ class HumanAgent(Agent):
                 # Agent-type specific biases (preferences, not alignment-based)
                 decision_factors['biases'] = {}
 
-                if self.agent_type == "exploitative":
-                    # Exploitative agents prefer friends and self-confirmation
-                    scores["human"] += self.exploit_friend_bias
-                    scores["self_action"] += self.exploit_self_bias
-
-                    decision_factors['biases']["human"] = self.exploit_friend_bias
-                    decision_factors['biases']["self_action"] = self.exploit_self_bias
-
-                    # NO AI bias - let Q-learning determine AI value through experience
-
-                else:  # exploratory
-                    # Exploratory agents seek diverse information sources
-                    # Bias toward querying to get info quality feedback
-                    scores["human"] += 0.2   # Encourage querying humans
-                    scores["ai"] += 0.2      # Encourage querying AI
-                    scores["self_action"] -= 0.1  # Discourage pure self-reliance
-
-                    decision_factors['biases']["human"] = 0.2
-                    decision_factors['biases']["ai"] = 0.2
-                    decision_factors['biases']["self_action"] = -0.1
-
-                    # NO alignment-based biases - let Q-learning determine which sources are good
-                    # Exploratory agents will naturally prefer accurate sources through feedback
+                # No hardcoded biases — Q-values emerge purely from feedback
+                # Agent-type differences arise from D/delta acceptance and network structure
+                decision_factors['biases'] = {}
 
                 # Add small random noise to break ties
                 for mode in scores:
@@ -1818,17 +1749,11 @@ class HumanAgent(Agent):
                 # Calculate batch reward based on correctness ratio and actual reward
                 if cell_rewards:
                     # Blend components for final reward - KEY CHANGE: Make this agent-type dependent
-                    if self.agent_type == "exploratory":
-                        # Explorers care more about actual levels (accuracy)
-                        # Explorers care almost exclusively about actual accuracy
-                        avg_actual_reward = sum(cell_rewards) / len(cell_rewards)
-                        correct_ratio = correct_in_batch / len(cell_rewards) if cell_rewards else 0
-                        batch_reward = 0.8 * avg_actual_reward + 0.2 * (correct_ratio * 5.0)  # 80% actual value, 10% correctness
-                    else:
-                        # Exploiters care much more about validation of beliefs than actual accuracy
-                        correct_ratio = correct_in_batch / len(cell_rewards) if cell_rewards else 0
-                        avg_actual_reward = sum(cell_rewards) / len(cell_rewards)
-                        batch_reward = 0.2 * avg_actual_reward + 0.8 * (correct_ratio * 5.0)  # 20% actual value, 70% correctness
+                    # Uniform accuracy-based reward for both agent types.
+                    # Agent-type differences in targeting emerge from belief accuracy
+                    # differences (shaped by D/delta), not from reward shaping.
+                    avg_actual_reward = sum(cell_rewards) / len(cell_rewards)
+                    batch_reward = avg_actual_reward
 
                     # Cap the reward range
                     batch_reward = max(-3.0, min(5.0, batch_reward))
