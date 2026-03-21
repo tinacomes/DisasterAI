@@ -1,45 +1,137 @@
-name: Run DisasterAI Experiment
+name: Run DisasterAI Experiment (full, manual)
 
+# Trigger manually from GitHub → Actions → "Run workflow" button.
+# Does NOT run on push — use smoke-test.yml for that.
 on:
-  push:
-    branches: ["**"]
   workflow_dispatch:
+    inputs:
+      n_runs:
+        description: "Replications per condition"
+        required: false
+        default: "10"
 
 env:
   MPLBACKEND: Agg
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
-  experiment:
+
+  simulate-alpha:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        alpha: ["0.0", "0.2", "0.4", "0.6", "0.8", "1.0"]
 
     steps:
       - uses: actions/checkout@v4
-
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11", cache: "pip"}
+      - run: pip install -r requirements.txt
+      - run: |
+          mkdir -p results
+          python3 simulate.py \
+            --alpha ${{ matrix.alpha }} \
+            --n_runs ${{ inputs.n_runs }} \
+            --outfile results/alpha_${{ matrix.alpha }}.json
+      - uses: actions/upload-artifact@v4
         with:
-          python-version: "3.11"
-          cache: "pip"
+          name: sim-alpha-${{ matrix.alpha }}
+          path: results/
 
-      - name: Install dependencies
-        run: pip install -r requirements.txt
+  simulate-factors:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {outfile: factor_rumor_0.0,  alpha: "0.5", rumor: "0.0", disaster: "2", exploit: "0.5"}
+          - {outfile: factor_rumor_0.5,  alpha: "0.5", rumor: "0.5", disaster: "2", exploit: "0.5"}
+          - {outfile: factor_rumor_1.0,  alpha: "0.5", rumor: "1.0", disaster: "2", exploit: "0.5"}
+          - {outfile: factor_disaster_0, alpha: "0.5", rumor: "0.3", disaster: "0", exploit: "0.5"}
+          - {outfile: factor_disaster_2, alpha: "0.5", rumor: "0.3", disaster: "2", exploit: "0.5"}
+          - {outfile: factor_disaster_3, alpha: "0.5", rumor: "0.3", disaster: "3", exploit: "0.5"}
+          - {outfile: factor_mix_0.2,    alpha: "0.5", rumor: "0.3", disaster: "2", exploit: "0.2"}
+          - {outfile: factor_mix_0.5,    alpha: "0.5", rumor: "0.3", disaster: "2", exploit: "0.5"}
+          - {outfile: factor_mix_0.8,    alpha: "0.5", rumor: "0.3", disaster: "2", exploit: "0.8"}
 
-      - name: Run Goldilocks alignment experiment
-        run: |
-          mkdir -p test_results
-          python3 test_filter_bubbles.py
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11", cache: "pip"}
+      - run: pip install -r requirements.txt
+      - run: |
+          mkdir -p results
+          python3 simulate.py \
+            --alpha ${{ matrix.alpha }} \
+            --n_runs ${{ inputs.n_runs }} \
+            --outfile results/${{ matrix.outfile }}.json \
+            --rumor_probability ${{ matrix.rumor }} \
+            --disaster_dynamics ${{ matrix.disaster }} \
+            --share_exploitative ${{ matrix.exploit }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sim-factor-${{ matrix.outfile }}
+          path: results/
 
-      - name: Run dual-feedback test
-        run: python3 test_dual_feedback.py
-
-      - name: Run agent improvement tests
-        run: python3 test_agent_improvements.py
-
-      - name: Upload plots as artifacts
-        uses: actions/upload-artifact@v4
+  filter-bubbles:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11", cache: "pip"}
+      - run: pip install -r requirements.txt
+      - run: |
+          mkdir -p filter_bubble_results
+          python3 test_filter_bubbles.py --save-dir filter_bubble_results/
+      - uses: actions/upload-artifact@v4
         if: always()
+        with:
+          name: filter-bubble-plots
+          path: filter_bubble_results/*.png
+          retention-days: 30
+
+  other-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11", cache: "pip"}
+      - run: pip install -r requirements.txt
+      - run: |
+          mkdir -p test_results
+          python3 test_dual_feedback.py
+          python3 test_agent_improvements.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: diagnostic-plots
+          path: test_results/*.png
+          retention-days: 30
+
+  plot:
+    needs: [simulate-alpha, simulate-factors]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11", cache: "pip"}
+      - run: pip install -r requirements.txt
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: sim-*
+          merge-multiple: true
+          path: results/
+      - run: ls -lh results/
+      - run: |
+          mkdir -p test_results
+          python3 plot_results.py --results-dir results/ --save-dir test_results/
+      - uses: actions/upload-artifact@v4
         with:
           name: experiment-plots
           path: test_results/*.png
