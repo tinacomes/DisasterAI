@@ -1,0 +1,94 @@
+name: Smoke test (on push)
+
+# Runs on every push — fast sanity check only.
+# Catches import errors, crashes, and broken plot code.
+# Uses 1 replication and 20 ticks, takes ~2 min.
+on:
+  push:
+    branches: ["**"]
+
+env:
+  MPLBACKEND: Agg
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Smoke-test simulate.py (1 run, 20 ticks)
+        run: |
+          mkdir -p results test_results
+          # Override ticks via a tiny wrapper — patch base params at runtime
+          python3 -c "
+          import simulate, json, os
+          simulate.BASE_PARAMS['ticks'] = 20
+          params = simulate.BASE_PARAMS.copy()
+          params['ai_alignment_level'] = 0.5
+          run = simulate.run_one(params)
+          out = {'condition': params, 'n_runs': 1, 'runs': [run]}
+          with open('results/alpha_0.5.json', 'w') as f:
+              json.dump(out, f)
+          print('simulate.py: OK')
+          "
+
+      - name: Smoke-test plot_results.py
+        run: |
+          python3 plot_results.py --results-dir results/ --save-dir test_results/
+          echo "plot_results.py: OK"
+
+      - name: Smoke-test test_filter_bubbles.py (1 run, 20 ticks)
+        run: |
+          python3 -c "
+          import test_filter_bubbles as fb
+          fb.base_params['ticks'] = 20
+          fb.N_RUNS = 1
+          fb.N_FACTOR_RUNS = 1
+          fb.ALIGNMENT_SWEEP = [0.0, 0.5, 1.0]
+          fb.RUMOR_SWEEP = [0.0, 1.0]
+          fb.DISASTER_SWEEP = [0, 3]
+          fb.EXPLOITATIVE_SWEEP = [0.2, 0.8]
+
+          import os
+          save_dir = 'test_results'
+
+          all_results = []
+          for alpha in fb.ALIGNMENT_SWEEP:
+              params = {**fb.base_params, 'ai_alignment_level': alpha}
+              all_results.append(fb.run_replicated(params, 1, f'smoke alpha={alpha}'))
+
+          metrics = fb.compute_goldilocks_metrics(all_results)
+          fb.plot_goldilocks(metrics, all_results, save_dir)
+
+          rumor_r, disaster_r, mix_r = {}, {}, {}
+          for rp in fb.RUMOR_SWEEP:
+              params = {**fb.base_params, 'ai_alignment_level': fb.FACTOR_ALPHA, 'rumor_probability': rp}
+              rumor_r[rp] = fb.run_replicated(params, 1, f'smoke rumor={rp}')
+          for dd in fb.DISASTER_SWEEP:
+              params = {**fb.base_params, 'ai_alignment_level': fb.FACTOR_ALPHA, 'disaster_dynamics': dd}
+              disaster_r[dd] = fb.run_replicated(params, 1, f'smoke disaster={dd}')
+          for se in fb.EXPLOITATIVE_SWEEP:
+              params = {**fb.base_params, 'ai_alignment_level': fb.FACTOR_ALPHA, 'share_exploitative': se}
+              mix_r[se] = fb.run_replicated(params, 1, f'smoke mix={se}')
+          fb.plot_factor_comparison(rumor_r, disaster_r, mix_r, save_dir)
+          print('test_filter_bubbles.py: OK')
+          "
+
+      - name: Upload smoke plots
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: smoke-plots
+          path: test_results/*.png
+          retention-days: 7
