@@ -82,6 +82,9 @@ jobs:
               params = {**fb.base_params, 'ai_alignment_level': fb.FACTOR_ALPHA, 'share_exploitative': se}
               mix_r[se] = fb.run_replicated(params, 1, f'smoke mix={se}')
           fb.plot_factor_comparison(rumor_r, disaster_r, mix_r, save_dir)
+          fb.plot_transition_timing(all_results, save_dir)
+          fb.plot_aeci_evolution(all_results, save_dir)
+          fb.plot_echo_chamber_lifecycle(all_results, save_dir)
           print('test_filter_bubbles.py: OK')
           "
 

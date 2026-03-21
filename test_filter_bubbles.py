@@ -79,14 +79,43 @@ EXPLOITATIVE_SWEEP = [0.2, 0.5, 0.8]
 # Simulation
 # ---------------------------------------------------------------------------
 
+def _first_cross(series, threshold, direction='up'):
+    """First index where series crosses threshold; returns len(series) if never."""
+    for i, v in enumerate(series):
+        if np.isnan(v):
+            continue
+        if direction == 'up'   and v >= threshold:
+            return i
+        if direction == 'down' and v <= threshold:
+            return i
+    return len(series)
+
+
+def _first_break(series, form_thresh=-0.1, break_thresh=-0.05):
+    """First index where series recovers above break_thresh after forming below form_thresh."""
+    formed = False
+    for i, v in enumerate(series):
+        if np.isnan(v):
+            continue
+        if not formed and v < form_thresh:
+            formed = True
+        elif formed and v > break_thresh:
+            return i
+    return len(series)
+
+
 def run_one_sim(params):
     """Run a single simulation and return per-tick metrics dict."""
     model = DisasterModel(**params)
 
-    seci_exploit, seci_explor = [], []
-    aeci_exploit, aeci_explor = [], []
-    mae_exploit,  mae_explor  = [], []
-    prec_exploit, prec_explor = [], []
+    seci_exploit, seci_explor       = [], []
+    aeci_exploit, aeci_explor       = [], []
+    trust_ai_exploit, trust_fri_exploit = [], []
+    trust_ai_explor,  trust_fri_explor  = [], []
+    aeci_var                        = []
+    info_div_exploit, info_div_explor   = [], []
+    mae_exploit,  mae_explor        = [], []
+    prec_exploit, prec_explor       = [], []
     metric_ticks = []
 
     for tick in range(params['ticks']):
@@ -101,6 +130,21 @@ def run_one_sim(params):
             a = model.aeci_data[-1]
             aeci_exploit.append(float(a[1]))
             aeci_explor.append(float(a[2]))
+
+        if model.trust_stats:
+            ts = model.trust_stats[-1]
+            trust_ai_exploit.append(float(ts[1]))
+            trust_fri_exploit.append(float(ts[2]))
+            trust_ai_explor.append(float(ts[4]))
+            trust_fri_explor.append(float(ts[5]))
+
+        if model.aeci_variance_data:
+            aeci_var.append(float(model.aeci_variance_data[-1][1]))
+
+        if model.info_diversity_data:
+            d = model.info_diversity_data[-1]
+            info_div_exploit.append(float(d[1]))
+            info_div_explor.append(float(d[2]))
 
         if tick % 5 == 0:
             ex_errors, er_errors = [], []
@@ -128,40 +172,102 @@ def run_one_sim(params):
             prec_explor.append( er_correct / er_total if er_total > 0 else float('nan'))
             metric_ticks.append(tick)
 
+    n = len(seci_exploit)
+
+    # --- Transition timing: first-crossing scalars (not cumulative end-counts) ---
+    # 1. First tick AI trust overtakes friend trust (per agent type)
+    trust_cross_exploit = next(
+        (i for i, (a, f) in enumerate(zip(trust_ai_exploit, trust_fri_exploit)) if a > f), n)
+    trust_cross_explor = next(
+        (i for i, (a, f) in enumerate(zip(trust_ai_explor, trust_fri_explor)) if a > f), n)
+
+    # 2. SECI breaks: first tick SECI recovers to > -0.05 after forming below -0.1
+    seci_break_exploit = _first_break(seci_exploit)
+    seci_break_explor  = _first_break(seci_explor)
+
+    # 3. First tick AI query ratio > 50%
+    ai_query50_exploit = _first_cross(aeci_exploit, 0.5)
+    ai_query50_explor  = _first_cross(aeci_explor,  0.5)
+
+    # 4. First tick AECI-Var approaches 0 (> -0.05)
+    aeci_var_zero = _first_cross(aeci_var, -0.05) if aeci_var else n
+
+    # 5. Info diversity surge: first tick where 1-step increase > 0.1
+    info_surge = n
+    if len(info_div_exploit) > 1:
+        info_surge = next(
+            (i + 1 for i in range(len(info_div_exploit) - 1)
+             if info_div_exploit[i + 1] - info_div_exploit[i] > 0.1),
+            n)
+
     return {
-        'seci_exploit': seci_exploit,
-        'seci_explor':  seci_explor,
-        'aeci_exploit': aeci_exploit,
-        'aeci_explor':  aeci_explor,
-        'mae_exploit':  mae_exploit,
-        'mae_explor':   mae_explor,
-        'prec_exploit': prec_exploit,
-        'prec_explor':  prec_explor,
-        'unmet_needs':  [float(v) for v in model.unmet_needs_evolution],
-        'metric_ticks': metric_ticks,
+        'seci_exploit':       seci_exploit,
+        'seci_explor':        seci_explor,
+        'aeci_exploit':       aeci_exploit,
+        'aeci_explor':        aeci_explor,
+        'trust_ai_exploit':   trust_ai_exploit,
+        'trust_fri_exploit':  trust_fri_exploit,
+        'trust_ai_explor':    trust_ai_explor,
+        'trust_fri_explor':   trust_fri_explor,
+        'aeci_var':           aeci_var,
+        'info_div_exploit':   info_div_exploit,
+        'info_div_explor':    info_div_explor,
+        'mae_exploit':        mae_exploit,
+        'mae_explor':         mae_explor,
+        'prec_exploit':       prec_exploit,
+        'prec_explor':        prec_explor,
+        'unmet_needs':        [float(v) for v in model.unmet_needs_evolution],
+        'metric_ticks':       metric_ticks,
+        # Scalar timing values (one per replication, aggregated across reps later)
+        'trust_cross_exploit':  float(trust_cross_exploit),
+        'trust_cross_explor':   float(trust_cross_explor),
+        'seci_break_exploit':   float(seci_break_exploit),
+        'seci_break_explor':    float(seci_break_explor),
+        'ai_query50_exploit':   float(ai_query50_exploit),
+        'ai_query50_explor':    float(ai_query50_explor),
+        'aeci_var_zero':        float(aeci_var_zero),
+        'info_surge_tick':      float(info_surge),
     }
 
 
 def _aggregate(runs):
     """Compute mean and std across replications for all metrics."""
-    keys = ['seci_exploit', 'seci_explor', 'aeci_exploit', 'aeci_explor',
-            'mae_exploit',  'mae_explor',  'prec_exploit', 'prec_explor',
-            'unmet_needs']
+    ts_keys = [
+        'seci_exploit', 'seci_explor', 'aeci_exploit', 'aeci_explor',
+        'trust_ai_exploit', 'trust_fri_exploit', 'trust_ai_explor', 'trust_fri_explor',
+        'aeci_var', 'info_div_exploit', 'info_div_explor',
+        'mae_exploit', 'mae_explor', 'prec_exploit', 'prec_explor',
+        'unmet_needs',
+    ]
+    scalar_keys = [
+        'trust_cross_exploit', 'trust_cross_explor',
+        'seci_break_exploit',  'seci_break_explor',
+        'ai_query50_exploit',  'ai_query50_explor',
+        'aeci_var_zero',       'info_surge_tick',
+    ]
     result = {
         'metric_ticks': runs[0]['metric_ticks'],
         'n_ticks': len(runs[0]['seci_exploit']),
     }
-    for key in keys:
+    for key in ts_keys:
         arrays = []
         for run in runs:
             arrays.append([
                 float('nan') if (v is None or (isinstance(v, float) and np.isnan(v))) else v
-                for v in run[key]
+                for v in run.get(key, [])
             ])
+        if not any(arrays):
+            result[f'{key}_mean'] = []
+            result[f'{key}_std']  = []
+            continue
         min_len = min(len(a) for a in arrays)
         mat = np.array([a[:min_len] for a in arrays], dtype=float)
         result[f'{key}_mean'] = np.nanmean(mat, axis=0).tolist()
         result[f'{key}_std']  = np.nanstd( mat, axis=0).tolist()
+    for key in scalar_keys:
+        vals = np.array([run.get(key, float('nan')) for run in runs], dtype=float)
+        result[f'{key}_mean'] = float(np.nanmean(vals))
+        result[f'{key}_std']  = float(np.nanstd(vals))
     return result
 
 
@@ -441,6 +547,269 @@ def plot_factor_comparison(rumor_res, disaster_res, mix_res, save_dir):
 
 
 # ---------------------------------------------------------------------------
+# Transition timing figure
+# ---------------------------------------------------------------------------
+
+def plot_transition_timing(all_results, save_dir):
+    """2×2 figure: when key behavioral shifts first occur, per alignment level.
+
+    Uses first-crossing scalars stored by run_one_sim() — NOT cumulative end-counts,
+    which are meaningless when the threshold is never reached within the run.
+    A value equal to n_ticks means "transition never observed in this run".
+    """
+    alphas = ALIGNMENT_SWEEP
+    n_ticks = all_results[0]['n_ticks']
+
+    def _eb(ax, key_e, key_r, c_e, c_r, label_e, label_r, title):
+        means_e = [r[f'{key_e}_mean'] for r in all_results]
+        stds_e  = [r[f'{key_e}_std']  for r in all_results]
+        means_r = [r[f'{key_r}_mean'] for r in all_results]
+        stds_r  = [r[f'{key_r}_std']  for r in all_results]
+        ax.errorbar(alphas, means_e, yerr=stds_e, fmt='-o', color=c_e,
+                    linewidth=2, capsize=5, capthick=1.5, label=label_e)
+        ax.errorbar(alphas, means_r, yerr=stds_r, fmt='-o', color=c_r,
+                    alpha=0.65, linewidth=2, capsize=5, capthick=1.5, label=label_r)
+        ax.set_xlabel('AI Alignment')
+        ax.set_ylabel('Tick (when transition occurs)')
+        ax.set_title(title)
+        ax.set_ylim(0, n_ticks * 1.05)
+        ax.legend(fontsize=9)
+        ax.grid(True, alpha=0.3)
+
+    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+    fig.suptitle(
+        'Transition Timing vs AI Alignment\n'
+        '(When do behavioral shifts occur during simulation?)',
+        fontsize=13, fontweight='bold',
+    )
+
+    _eb(axes[0, 0],
+        'trust_cross_exploit', 'trust_cross_explor',
+        '#8B0000', '#FA8072',
+        'Exploitative', 'Exploratory',
+        'AI Trust Overtakes Friend Trust')
+
+    _eb(axes[0, 1],
+        'seci_break_exploit', 'seci_break_explor',
+        '#1A3A6B', '#6BAED6',
+        'Exploitative', 'Exploratory',
+        'Social Echo Chamber Breaks (SECI → 0)')
+
+    _eb(axes[1, 0],
+        'ai_query50_exploit', 'ai_query50_explor',
+        '#1B5E20', '#66BB6A',
+        'Exploitative', 'Exploratory',
+        'AI Query Ratio > 50%')
+
+    # Bottom-right: system-wide scalars (single series each)
+    ax = axes[1, 1]
+    aeci_var_means = [r['aeci_var_zero_mean'] for r in all_results]
+    aeci_var_stds  = [r['aeci_var_zero_std']  for r in all_results]
+    info_means     = [r['info_surge_tick_mean'] for r in all_results]
+    info_stds      = [r['info_surge_tick_std']  for r in all_results]
+    ax.errorbar(alphas, aeci_var_means, yerr=aeci_var_stds, fmt='-o', color='magenta',
+                linewidth=2, capsize=5, capthick=1.5, label='AECI-Var → 0')
+    ax.errorbar(alphas, info_means, yerr=info_stds, fmt='-o', color='darkorange',
+                linewidth=2, capsize=5, capthick=1.5, label='Info Div Surge')
+    ax.set_xlabel('AI Alignment')
+    ax.set_ylabel('Tick (when transition occurs)')
+    ax.set_title('System-Wide Transitions')
+    ax.set_ylim(0, n_ticks * 1.05)
+    ax.legend(fontsize=9)
+    ax.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    os.makedirs(save_dir, exist_ok=True)
+    path = os.path.join(save_dir, 'transition_timing.png')
+    plt.savefig(path, dpi=150, bbox_inches='tight')
+    plt.close()
+    print(f"Transition timing figure saved: {path}")
+
+
+# ---------------------------------------------------------------------------
+# AI query preference evolution figure
+# ---------------------------------------------------------------------------
+
+def plot_aeci_evolution(all_results, save_dir):
+    """1×2 figure: AI query ratio (AECI) timeseries per alignment level.
+
+    Y-axis is fraction of queries directed to AI (0 = all to friends, 1 = all to AI).
+    A 0.5 dashed threshold marks when AI queries dominate.
+    """
+    colors = plt.cm.plasma(np.linspace(0.1, 0.9, len(ALIGNMENT_SWEEP)))
+
+    fig, axes = plt.subplots(1, 2, figsize=(16, 6), sharey=True)
+    fig.suptitle(
+        'AI Query Preference Evolution\n(Agent shift from friends to AI)',
+        fontsize=13, fontweight='bold',
+    )
+
+    for ax, key, title in [
+        (axes[0], 'aeci_exploit', 'Exploitative Agents'),
+        (axes[1], 'aeci_explor',  'Exploratory Agents'),
+    ]:
+        for color, (res, alpha) in zip(colors, zip(all_results, ALIGNMENT_SWEEP)):
+            mean = np.array(res[f'{key}_mean'])
+            std  = np.array(res[f'{key}_std'])
+            ticks = np.arange(len(mean))
+            ax.plot(ticks, mean, color=color, linewidth=2, label=f'AI Alignment={alpha}')
+            ax.fill_between(ticks, mean - std, mean + std, color=color, alpha=0.18)
+        ax.axhline(0.5, color='red', linestyle='--', linewidth=1.5, label='50% threshold')
+        ax.set_xlabel('Simulation Tick')
+        ax.set_ylabel('AECI (AI Query Ratio)')
+        ax.set_title(title)
+        ax.set_ylim(0, 1.02)
+        ax.legend(fontsize=8, loc='upper left')
+        ax.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    os.makedirs(save_dir, exist_ok=True)
+    path = os.path.join(save_dir, 'aeci_evolution.png')
+    plt.savefig(path, dpi=150, bbox_inches='tight')
+    plt.close()
+    print(f"AECI evolution figure saved: {path}")
+
+
+# ---------------------------------------------------------------------------
+# Echo chamber lifecycle figure
+# ---------------------------------------------------------------------------
+
+def plot_echo_chamber_lifecycle(all_results, save_dir):
+    """3×2 figure: SECI & AECI-Var timeseries (left) + lifecycle bar charts (right).
+
+    Bar charts use first-crossing / peak-based scalars rather than raw tick counts,
+    avoiding the "final counts" problem where bars merely reflect run length.
+    Duration = fraction of ticks spent below threshold (scale-invariant).
+    """
+    colors = plt.cm.viridis(np.linspace(0, 0.9, len(ALIGNMENT_SWEEP)))
+    alphas = ALIGNMENT_SWEEP
+
+    fig = plt.figure(figsize=(18, 14))
+    fig.suptitle(
+        'Echo Chamber Lifecycle: Rise and Fall\n'
+        '(How filter bubbles form, peak, and dissolve)',
+        fontsize=13, fontweight='bold',
+    )
+
+    # Left column: timeseries
+    ax_seci_exp  = fig.add_subplot(3, 2, 1)
+    ax_seci_expl = fig.add_subplot(3, 2, 3)
+    ax_aeci_var  = fig.add_subplot(3, 2, 5)
+    # Right column: bar charts
+    ax_peak      = fig.add_subplot(3, 2, 2)
+    ax_when      = fig.add_subplot(3, 2, 4)
+    ax_dur       = fig.add_subplot(3, 2, 6)
+
+    CHAMBER_THRESH = -0.1
+
+    peak_exp,  peak_expl  = [], []
+    when_exp,  when_expl  = [], []
+    dur_exp,   dur_expl   = [], []
+
+    for color, (res, alpha) in zip(colors, zip(all_results, ALIGNMENT_SWEEP)):
+        label = f'AI Alignment={alpha}'
+        ticks_arr = np.arange(res['n_ticks'])
+
+        for ax, key, title in [
+            (ax_seci_exp,  'seci_exploit', 'Exploitative Agents: Echo Chamber Formation & Dissolution'),
+            (ax_seci_expl, 'seci_explor',  'Exploratory Agents: Echo Chamber Formation & Dissolution'),
+        ]:
+            mean = np.array(res[f'{key}_mean'])
+            std  = np.array(res[f'{key}_std'])
+            t    = ticks_arr[:len(mean)]
+            ax.plot(t, mean, color=color, linewidth=1.8, label=label)
+            ax.fill_between(t, mean - std, mean + std, color=color, alpha=0.15)
+
+        # AECI-Var timeseries
+        av_mean = np.array(res['aeci_var_mean'])
+        av_std  = np.array(res['aeci_var_std'])
+        t_av    = ticks_arr[:len(av_mean)]
+        ax_aeci_var.plot(t_av, av_mean, color=color, linewidth=1.8)
+        ax_aeci_var.fill_between(t_av, av_mean - av_std, av_mean + av_std,
+                                 color=color, alpha=0.15)
+
+        # Lifecycle scalars from mean series (robust to N=1 replications)
+        se_mean = np.array(res['seci_exploit_mean'])
+        sr_mean = np.array(res['seci_explor_mean'])
+        n = res['n_ticks']
+
+        # Peak = max |SECI|
+        peak_exp.append(float(np.nanmax(np.abs(se_mean))) if len(se_mean) else 0.0)
+        peak_expl.append(float(np.nanmax(np.abs(sr_mean))) if len(sr_mean) else 0.0)
+
+        # When peak (tick of max |SECI|)
+        when_exp.append(int(np.nanargmax(np.abs(se_mean))) if len(se_mean) else 0)
+        when_expl.append(int(np.nanargmax(np.abs(sr_mean))) if len(sr_mean) else 0)
+
+        # Duration = fraction of ticks with SECI < CHAMBER_THRESH (scale-invariant)
+        dur_exp.append(float(np.mean(se_mean < CHAMBER_THRESH)) if len(se_mean) else 0.0)
+        dur_expl.append(float(np.mean(sr_mean < CHAMBER_THRESH)) if len(sr_mean) else 0.0)
+
+    # Timeseries decorations
+    for ax, title in [
+        (ax_seci_exp,  'Exploitative Agents: Echo Chamber Formation & Dissolution'),
+        (ax_seci_expl, 'Exploratory Agents: Echo Chamber Formation & Dissolution'),
+    ]:
+        ax.axhline(0,            color='gray',  linestyle='--', linewidth=1,   label='Neutral (SECI=0)')
+        ax.axhline(CHAMBER_THRESH, color='salmon', linestyle=':',  linewidth=1.2, label='Chamber threshold')
+        ax.set_title(title, fontsize=10)
+        ax.set_xlabel('Simulation Tick')
+        ax.set_ylabel('SECI (Social Echo Chamber Index)')
+        ax.set_ylim(-0.55, 0.25)
+        ax.grid(True, alpha=0.3)
+    ax_seci_exp.legend(fontsize=7, loc='lower right')
+    ax_seci_expl.legend(fontsize=7, loc='lower right')
+
+    ax_aeci_var.axhline(0, color='gray', linestyle='--', linewidth=1, label='Neutral')
+    ax_aeci_var.set_title('AI Belief Variance Reduction Over Time', fontsize=10)
+    ax_aeci_var.set_xlabel('Simulation Tick')
+    ax_aeci_var.set_ylabel('AECI-Var (AI Echo Chamber Index)')
+    ax_aeci_var.legend(
+        [plt.Line2D([0], [0], color=c, linewidth=2) for c in colors],
+        [f'AI Alignment={a}' for a in alphas],
+        fontsize=7, loc='lower right',
+    )
+    ax_aeci_var.grid(True, alpha=0.3)
+
+    # Bar charts
+    x      = np.arange(len(alphas))
+    w      = 0.38
+    x_str  = [str(a) for a in alphas]
+
+    ax_peak.bar(x - w/2, peak_exp,  w, label='Exploitative', color='#8B2020', alpha=0.85)
+    ax_peak.bar(x + w/2, peak_expl, w, label='Exploratory',  color='#FA8072', alpha=0.85)
+    ax_peak.set_title('Maximum Chamber Strength', fontsize=10)
+    ax_peak.set_ylabel('Peak Echo Chamber Strength |SECI|')
+    ax_peak.set_xticks(x); ax_peak.set_xticklabels(x_str)
+    ax_peak.set_xlabel('AI Alignment')
+    ax_peak.legend(fontsize=9); ax_peak.grid(True, alpha=0.3, axis='y')
+
+    ax_when.bar(x - w/2, when_exp,  w, label='Exploitative', color='#1A3A6B', alpha=0.85)
+    ax_when.bar(x + w/2, when_expl, w, label='Exploratory',  color='#6BAED6', alpha=0.85)
+    ax_when.set_title('When Do Chambers Peak?', fontsize=10)
+    ax_when.set_ylabel('Time to Peak (ticks)')
+    ax_when.set_xticks(x); ax_when.set_xticklabels(x_str)
+    ax_when.set_xlabel('AI Alignment')
+    ax_when.legend(fontsize=9); ax_when.grid(True, alpha=0.3, axis='y')
+
+    ax_dur.bar(x - w/2, dur_exp,  w, label='Exploitative', color='#1B5E20', alpha=0.85)
+    ax_dur.bar(x + w/2, dur_expl, w, label='Exploratory',  color='#66BB6A', alpha=0.85)
+    ax_dur.set_title('How Long Do Chambers Persist?\n(fraction of ticks with SECI<−0.1)', fontsize=10)
+    ax_dur.set_ylabel('Fraction of ticks in chamber')
+    ax_dur.set_xticks(x); ax_dur.set_xticklabels(x_str)
+    ax_dur.set_xlabel('AI Alignment')
+    ax_dur.set_ylim(0, 1.05)
+    ax_dur.legend(fontsize=9); ax_dur.grid(True, alpha=0.3, axis='y')
+
+    plt.tight_layout()
+    os.makedirs(save_dir, exist_ok=True)
+    path = os.path.join(save_dir, 'echo_chamber_lifecycle.png')
+    plt.savefig(path, dpi=150, bbox_inches='tight')
+    plt.close()
+    print(f"Echo chamber lifecycle figure saved: {path}")
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
@@ -499,6 +868,11 @@ if __name__ == '__main__':
         mix_results[se] = run_replicated(params, N_FACTOR_RUNS, f'Exploitative share={se}')
 
     plot_factor_comparison(rumor_results, disaster_results, mix_results, save_dir)
+
+    # 3. Dynamics figures (use all_results from alignment sweep)
+    plot_transition_timing(all_results, save_dir)
+    plot_aeci_evolution(all_results, save_dir)
+    plot_echo_chamber_lifecycle(all_results, save_dir)
 
     print('\n' + '=' * 70)
     print('EXPERIMENT COMPLETE')
