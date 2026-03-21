@@ -12,7 +12,7 @@ env:
 jobs:
   experiment:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     steps:
       - uses: actions/checkout@v4
@@ -27,7 +27,15 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Run Goldilocks alignment experiment
-        run: python3 test_filter_bubbles.py
+        run: |
+          mkdir -p test_results
+          python3 test_filter_bubbles.py
+
+      - name: Run dual-feedback test
+        run: python3 test_dual_feedback.py
+
+      - name: Run agent improvement tests
+        run: python3 test_agent_improvements.py
 
       - name: Upload plots as artifacts
         uses: actions/upload-artifact@v4

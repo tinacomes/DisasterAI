@@ -20,10 +20,11 @@ Metrics:
   * -1 = Strong echo chamber (friends very similar)
   *  0 = No echo chamber effect
   * +1 = Anti-echo chamber (friends more diverse)
-- AECI (AI Echo Chamber Index): 0 to 1
-  * 0 = Only queries humans
-  * 1 = Only queries AI
-- total_bubble = |SECI| + AECI  (minimise both)
+- AECI (AI Echo Chamber Index): -1 to +1  (same variance formula as SECI)
+  * -1 = AI-reliant agents have much lower belief variance than global (AI bubble)
+  *  0 = No AI echo chamber effect
+  * +1 = AI-reliant agents are more belief-diverse than global
+- total_bubble = |SECI| + |AECI|  (minimise both)
 - Belief MAE: accuracy cost at each alignment level
 
 Goldilocks detection: argmin of total_bubble across alignment sweep
@@ -44,15 +45,15 @@ base_params = {
     'disaster_dynamics': 2,
     'width': 30,
     'height': 30,
-    'ticks': 200,
+    'ticks': 100,
     'learning_rate': 0.1,
     'epsilon': 0.3,
     'exploit_trust_lr': 0.015,
     'explor_trust_lr': 0.03,
 }
 
-ALIGNMENT_SWEEP = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
-STEADY_STATE_WINDOW = 30  # last N ticks for final metrics
+ALIGNMENT_SWEEP = [0.0, 0.2, 0.4, 0.6, 0.8, 1.0]  # 6 levels; halved from 11 to cut runtime ~45%
+STEADY_STATE_WINDOW = 15  # last N ticks for final metrics
 
 
 def run_alignment_condition(ai_alignment, label):
@@ -68,6 +69,8 @@ def run_alignment_condition(ai_alignment, label):
     seci_exploit, seci_explor = [], []
     aeci_exploit, aeci_explor = [], []
     mae_exploit, mae_explor = [], []
+    prec_exploit, prec_explor = [], []  # targeting precision per agent type
+    metric_ticks = []                  # tick values for sampled metrics
 
     for tick in range(params['ticks']):
         model.step()
@@ -82,8 +85,10 @@ def run_alignment_condition(ai_alignment, label):
             aeci_exploit.append(a[1])
             aeci_explor.append(a[2])
 
-        if tick % 10 == 0:
+        if tick % 5 == 0:
             ex_errors, er_errors = [], []
+            ex_correct = ex_total = 0
+            er_correct = er_total = 0
             for agent in model.agent_list:
                 if not isinstance(agent, HumanAgent):
                     continue
@@ -92,9 +97,20 @@ def run_alignment_condition(ai_alignment, label):
                     for c, b in agent.beliefs.items()
                     if isinstance(b, dict)
                 ]) if agent.beliefs else 0
-                (ex_errors if agent.agent_type == "exploitative" else er_errors).append(err)
+                total = agent.correct_targets + agent.incorrect_targets
+                if agent.agent_type == "exploitative":
+                    ex_errors.append(err)
+                    ex_correct += agent.correct_targets
+                    ex_total += total
+                else:
+                    er_errors.append(err)
+                    er_correct += agent.correct_targets
+                    er_total += total
             mae_exploit.append(np.mean(ex_errors) if ex_errors else 0)
             mae_explor.append(np.mean(er_errors) if er_errors else 0)
+            prec_exploit.append(ex_correct / ex_total if ex_total > 0 else float('nan'))
+            prec_explor.append(er_correct / er_total if er_total > 0 else float('nan'))
+            metric_ticks.append(tick)
 
     return {
         'seci_exploit': seci_exploit,
@@ -103,6 +119,9 @@ def run_alignment_condition(ai_alignment, label):
         'aeci_explor': aeci_explor,
         'mae_exploit': mae_exploit,
         'mae_explor': mae_explor,
+        'prec_exploit': prec_exploit,
+        'prec_explor': prec_explor,
+        'metric_ticks': metric_ticks,
     }
 
 
@@ -116,8 +135,8 @@ def steady_state_mean(series, window=STEADY_STATE_WINDOW):
 def compute_goldilocks_metrics(all_results):
     """
     For each alignment level, compute steady-state SECI, AECI, and total_bubble.
-    total_bubble = |SECI_combined| + AECI_combined  (minimise)
-    SECI < 0 means echo chamber → higher |SECI| = worse
+    Both SECI and AECI use the same variance formula (-1 to +1).
+    total_bubble = |SECI| + |AECI|  (minimise — both measure echo chamber intensity)
     """
     metrics = {}
     for alpha, res in zip(ALIGNMENT_SWEEP, all_results):
@@ -127,7 +146,7 @@ def compute_goldilocks_metrics(all_results):
                    steady_state_mean(res['aeci_explor'])) / 2
         mae_ss = (steady_state_mean(res['mae_exploit']) +
                   steady_state_mean(res['mae_explor'])) / 2
-        total_bubble = abs(seci_ss) + aeci_ss
+        total_bubble = abs(seci_ss) + abs(aeci_ss)
         metrics[alpha] = {
             'seci': seci_ss,
             'aeci': aeci_ss,
@@ -171,21 +190,22 @@ def plot_goldilocks(metrics, all_results, save_dir):
     ax = axes[0, 1]
     ax.plot(alphas, aeci_vals, 'r-o', linewidth=2, label='AECI (combined)')
     ax.axvline(best_alpha, color='gold', linestyle='--', linewidth=2, label=f'α*={best_alpha}')
-    ax.set_title('AI Echo Chamber Index vs Alignment\n(Higher = more AI reliance / AI bubble)')
+    ax.set_title('AI Echo Chamber Index vs Alignment\n(More negative = stronger AI-induced bubble)')
     ax.set_xlabel('AI Alignment Level (α)')
-    ax.set_ylabel('AECI (0 to 1)')
-    ax.set_ylim(-0.05, 1.05)
+    ax.set_ylabel('AECI (-1 to +1)')
+    ax.set_ylim(-1.1, 1.1)
+    ax.axhline(0, color='k', linestyle=':', alpha=0.5)
     ax.legend(fontsize=9)
     ax.grid(True, alpha=0.3)
 
     # Panel 3: Total bubble + goldilocks
     ax = axes[1, 0]
-    ax.plot(alphas, total_vals, 'k-o', linewidth=2.5, label='total_bubble = |SECI| + AECI')
+    ax.plot(alphas, total_vals, 'k-o', linewidth=2.5, label='total_bubble = |SECI| + |AECI|')
     ax.plot(best_alpha, min(total_vals), 'g*', markersize=18, zorder=5, label=f'Goldilocks α*={best_alpha}')
     ax.fill_between(alphas, total_vals, alpha=0.15, color='purple')
     ax.set_title('Total Bubble Intensity vs Alignment\n(Minimise to find goldilocks zone)')
     ax.set_xlabel('AI Alignment Level (α)')
-    ax.set_ylabel('|SECI| + AECI')
+    ax.set_ylabel('|SECI| + |AECI|')
     ax.legend(fontsize=9)
     ax.grid(True, alpha=0.3)
 
@@ -211,36 +231,80 @@ def plot_goldilocks(metrics, all_results, save_dir):
 
 
 def _plot_timeseries(all_results, save_dir):
-    """Time-series SECI/AECI for selected alignment levels."""
-    key_idxs = [0, 2, 5, 8, 10]  # 0.0, 0.2, 0.5, 0.8, 1.0
+    """Time-series SECI/AECI/MAE/precision for all alignment levels."""
+    key_idxs = [0, 1, 2, 3, 4, 5]  # 0.0 … 1.0
     colors = plt.cm.viridis(np.linspace(0, 1, len(key_idxs)))
 
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
-    fig.suptitle('SECI and AECI Time-Series for Key Alignment Levels', fontsize=12)
+    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+    fig.suptitle('Filter Bubble & Delivery Metrics Over Time', fontsize=13, fontweight='bold')
+
+    ax_seci, ax_aeci = axes[0, 0], axes[0, 1]
+    ax_mae, ax_prec = axes[1, 0], axes[1, 1]
 
     for color, idx in zip(colors, key_idxs):
         alpha = ALIGNMENT_SWEEP[idx]
         res = all_results[idx]
         label = f'α={alpha}'
+        ticks = res['metric_ticks']
+
         seci_comb = [(e + r) / 2 for e, r in zip(res['seci_exploit'], res['seci_explor'])]
         aeci_comb = [(e + r) / 2 for e, r in zip(res['aeci_exploit'], res['aeci_explor'])]
-        ax1.plot(seci_comb, label=label, color=color, linewidth=1.8)
-        ax2.plot(aeci_comb, label=label, color=color, linewidth=1.8)
+        mae_comb  = [(e + r) / 2 for e, r in zip(res['mae_exploit'],  res['mae_explor'])]
 
-    ax1.axhline(0, color='k', linestyle=':', alpha=0.4)
-    ax1.set_title('SECI (Social Bubble) Over Time')
-    ax1.set_xlabel('Tick')
-    ax1.set_ylabel('SECI')
-    ax1.set_ylim(-1.1, 1.1)
-    ax1.legend(fontsize=9)
-    ax1.grid(True, alpha=0.3)
+        # SECI and AECI share the same tick count as the full run
+        ax_seci.plot(seci_comb, label=label, color=color, linewidth=1.8)
+        ax_aeci.plot(aeci_comb, label=label, color=color, linewidth=1.8)
+        ax_mae.plot(ticks, mae_comb, label=label, color=color, linewidth=1.8)
 
-    ax2.set_title('AECI (AI Bubble) Over Time')
-    ax2.set_xlabel('Tick')
-    ax2.set_ylabel('AECI')
-    ax2.set_ylim(-0.05, 1.05)
-    ax2.legend(fontsize=9)
-    ax2.grid(True, alpha=0.3)
+        # Precision: plot exploit (dashed) and explor (solid) separately
+        prec_e = [v for v in res['prec_exploit']]
+        prec_r = [v for v in res['prec_explor']]
+        valid_e = [(t, p) for t, p in zip(ticks, prec_e) if not np.isnan(p)]
+        valid_r = [(t, p) for t, p in zip(ticks, prec_r) if not np.isnan(p)]
+        if valid_e:
+            te, pe = zip(*valid_e)
+            ax_prec.plot(te, pe, linestyle='--', color=color, linewidth=1.5, alpha=0.85,
+                         label=f'α={alpha} exploit')
+        if valid_r:
+            tr, pr = zip(*valid_r)
+            ax_prec.plot(tr, pr, linestyle='-', color=color, linewidth=1.5, alpha=0.85,
+                         label=f'α={alpha} explor')
+
+    ax_seci.axhline(0, color='k', linestyle=':', alpha=0.4)
+    ax_seci.set_title('SECI (Social Bubble) Over Time')
+    ax_seci.set_xlabel('Tick')
+    ax_seci.set_ylabel('SECI (-1 to +1)')
+    ax_seci.set_ylim(-1.1, 1.1)
+    ax_seci.legend(fontsize=9)
+    ax_seci.grid(True, alpha=0.3)
+
+    ax_aeci.axhline(0, color='k', linestyle=':', alpha=0.4)
+    ax_aeci.set_title('AECI (AI Bubble) Over Time')
+    ax_aeci.set_xlabel('Tick')
+    ax_aeci.set_ylabel('AECI (-1 to +1)')
+    ax_aeci.set_ylim(-1.1, 1.1)
+    ax_aeci.legend(fontsize=9)
+    ax_aeci.grid(True, alpha=0.3)
+
+    ax_mae.set_title('Belief MAE Over Time\n(lower = beliefs closer to ground truth)')
+    ax_mae.set_xlabel('Tick')
+    ax_mae.set_ylabel('Mean Absolute Error')
+    ax_mae.set_ylim(bottom=0)
+    ax_mae.legend(fontsize=9)
+    ax_mae.grid(True, alpha=0.3)
+
+    ax_prec.axhline(0.6, color='k', linestyle=':', alpha=0.4, label='60% precision')
+    ax_prec.set_title('Relief Targeting Precision Over Time\n'
+                      'solid=exploratory, dashed=exploitative\n'
+                      '(fraction of relief tokens sent to disaster level ≥3 cells)')
+    ax_prec.set_xlabel('Tick')
+    ax_prec.set_ylabel('Correct Targets / Total Targets')
+    ax_prec.set_ylim(0, 1.05)
+    # Legend: one entry per α only (suppress per-type duplication)
+    handles, labels_ = ax_prec.get_legend_handles_labels()
+    # Keep only exploit entries for the legend (halve the entries)
+    ax_prec.legend(handles[::2], [l.replace(' exploit', '') for l in labels_[::2]], fontsize=9)
+    ax_prec.grid(True, alpha=0.3)
 
     plt.tight_layout()
     path = os.path.join(save_dir, 'bubble_timeseries.png')
@@ -273,7 +337,7 @@ if __name__ == "__main__":
         marker = "  ← α*" if abs(m['total_bubble'] - min(v['total_bubble'] for v in metrics.values())) < 1e-9 else ""
         print(f"{alpha:>6.1f}  {m['seci']:>8.3f}  {m['aeci']:>8.3f}  {m['total_bubble']:>12.3f}  {m['mae']:>8.3f}{marker}")
 
-    save_dir = '/home/user/DisasterAI/test_results'
+    save_dir = 'test_results'  # relative path; works both locally and on CI
     plot_goldilocks(metrics, all_results, save_dir)
 
     print("\n" + "=" * 70)
@@ -281,7 +345,7 @@ if __name__ == "__main__":
     print("=" * 70)
     print("\nInterpretation guide:")
     print("  SECI < 0 : social echo chamber active (friends more similar than random)")
-    print("  AECI > 0.5 : agents over-rely on AI (AI bubble risk)")
-    print("  total_bubble = |SECI| + AECI : composite measure to minimise")
+    print("  AECI < 0 : AI-induced bubble (AI-reliant agents more homogeneous than global)")
+    print("  total_bubble = |SECI| + |AECI| : composite measure to minimise")
     print("  Goldilocks α* : minimises total_bubble")
     print("  Check MAE at α* : alignment gain should not sacrifice belief accuracy")

@@ -654,6 +654,44 @@ class HumanAgent(Agent):
         if self.model.debug_mode and hasattr(self, 'id_num') and (self.id_num < 2 or (50 <= self.id_num < 52)) and self.model.tick % 10 == 0:
             print(f"[DEBUG] Agent {self.unique_id} ({self.agent_type}) tick={self.model.tick}: {len(self.pending_info_evaluations)} pending evals")
 
+    def get_network_consensus(self, cell, min_trust=0.4):
+        """
+        Compute the confidence-weighted mean belief of trusted friends about a cell.
+
+        Used by exploiters as a reference in evaluate_pending_info instead of their own
+        (potentially contaminated) belief. The network may share the same wrong beliefs —
+        the filter bubble is preserved — but the reference is:
+          - Built from multiple independent data points (less noise)
+          - Not contaminated by this agent's own interaction with the source being evaluated
+          - Architecturally consistent: exploiters trust their network, so the network IS
+            their effective ground truth
+
+        Returns (consensus_level, consensus_conf) or (None, 0.0) if < 2 friends have data.
+        """
+        weighted_levels = []
+        weights = []
+        for fid in self.friends:
+            friend = self.model.humans.get(fid)
+            if not friend:
+                continue
+            trust_val = self.trust.get(fid, 0.1)
+            if trust_val < min_trust:
+                continue
+            belief = friend.beliefs.get(cell, {})
+            if not isinstance(belief, dict):
+                continue
+            level = belief.get('level', None)
+            conf = belief.get('confidence', 0.0)
+            if level is not None and conf >= 0.2:
+                weighted_levels.append(level * trust_val)
+                weights.append(trust_val)
+        if len(weights) < 2:
+            return None, 0.0
+        consensus_level = int(round(sum(weighted_levels) / sum(weights)))
+        # Shrink confidence toward uncertainty to avoid over-weighting small networks
+        consensus_conf = min(0.75, sum(weights) / (len(weights) + 2))
+        return consensus_level, consensus_conf
+
     def evaluate_pending_info(self):
         """
         Dedicated pass to evaluate ALL pending info evaluations using current beliefs.
@@ -733,14 +771,27 @@ class HumanAgent(Agent):
                     reference_level = stored_prior_level
                     belief_conf = stored_prior_conf
 
+            # Fix 3: For exploiters, replace own belief with network consensus when available.
+            # The network may share the same wrong beliefs (filter bubble preserved), but:
+            #   - Multiple friends' data → less noise than single-agent belief
+            #   - Independent from this agent's own interaction with the source being evaluated
+            # Fall back to own belief if fewer than 2 friends have data for this cell.
+            used_network_consensus = False
+            if self.agent_type == "exploitative":
+                net_level, net_conf = self.get_network_consensus(cell)
+                if net_conf >= 0.3:
+                    reference_level = net_level
+                    belief_conf = net_conf
+                    used_network_consensus = True
+
             # For cells outside sensing range, we can't verify accuracy against ground truth.
             # CRITICAL: Explorers should NOT penalize sources for disagreeing with their
             # uncertain beliefs about remote cells. This would cause them to distrust
             # truthful sources that report correct info that differs from wrong beliefs.
             #
-            # EXPLOITERS: Use confirmation scoring (they want agreeing sources)
-            # EXPLORERS: For remote cells, defer to evaluate_information_quality when sensed
-            #            Only evaluate accuracy for cells they can actually verify (sensed cells)
+            # EXPLOITERS: Use network/own-belief confirmation (echo chamber by design)
+            # EXPLORERS: For remote cells, defer until ground truth arrives via process_reward
+            #            (Fix 1) or triangulate_sources convergence (Fix 2)
 
             if belief_conf < 0.15:
                 continue  # Skip only if we have almost no information
@@ -851,8 +902,13 @@ class HumanAgent(Agent):
                 else:
                     trust_target = min(1.0, 0.5 + 0.5 * accuracy_reward)
                     # EXPLORERS: Moderate reward for accurate sources
-                    # EXPLOITERS: Slow reward (suspicious of new trust)
-                    base_trust_lr = 0.12 if self.agent_type == "exploratory" else 0.06
+                    # EXPLOITERS: Slow reward (suspicious of new trust), but Fix 4: raise
+                    # the positive LR when the network consensus was used as reference —
+                    # network corroboration is a stronger signal than own-belief confirmation.
+                    if self.agent_type == "exploitative":
+                        base_trust_lr = 0.09 if used_network_consensus else 0.06
+                    else:
+                        base_trust_lr = 0.12
                 # Scale by BOTH reference confidence and source knowledge
                 trust_lr = base_trust_lr * confidence_scaling * source_knowledge_conf
                 new_trust = max(0.0, min(1.0, old_trust + trust_lr * (trust_target - old_trust)))
@@ -861,7 +917,7 @@ class HumanAgent(Agent):
             evaluated.append(item)
 
             if self.model.debug_mode and hasattr(self, 'id_num') and (self.id_num < 2 or (50 <= self.id_num < 52)):
-                print(f"[DEBUG] Agent {self.unique_id} ({self.agent_type}) PENDING INFO EVAL: source={source_id}, mode={mode}, error={level_error}, acc_rew={accuracy_reward:.3f}, trust={new_trust:.2f}")
+                print(f"[DEBUG] Agent {self.unique_id} ({self.agent_type}) PENDING INFO EVAL: source={source_id}, mode={mode}, error={level_error}, acc_rew={accuracy_reward:.3f}, trust={new_trust:.2f}, net_consensus={used_network_consensus}")
 
         # Remove evaluated/expired items
         self.pending_info_evaluations = [
@@ -902,9 +958,13 @@ class HumanAgent(Agent):
             max_disagreement = max(levels) - min(levels)
 
             if max_disagreement <= 1:
-                q_delta = 0.05   # Consensus → small Q-boost for involved sources
+                q_delta = 0.05    # Consensus → small Q-boost
+                trust_delta = 0.03  # Fix 2: weak trust boost; for explorers this is the
+                                    # primary path for remote-cell source validation when
+                                    # ground truth hasn't arrived yet via process_reward
             elif max_disagreement >= 3:
-                q_delta = -0.05  # Strong conflict → small Q-penalty
+                q_delta = -0.05   # Strong conflict → small Q-penalty
+                trust_delta = -0.03
             else:
                 continue  # Ambiguous — no signal
 
@@ -912,6 +972,11 @@ class HumanAgent(Agent):
                 mode = "ai" if source_id.startswith("A_") else "human"
                 if mode in self.q_table:
                     self.q_table[mode] = max(-2.0, min(2.0, self.q_table[mode] + q_delta))
+                # Trust update: only applied for explorers (exploiters get trust updates
+                # from the network-consensus path in evaluate_pending_info instead)
+                if self.agent_type == "exploratory" and source_id in self.trust:
+                    old_t = self.trust[source_id]
+                    self.trust[source_id] = max(0.0, min(1.0, old_t + trust_delta))
 
     def report_beliefs(self, interest_point, query_radius):
         """Reports human agent's beliefs about cells within query_radius of the interest_point."""
@@ -1640,6 +1705,16 @@ class HumanAgent(Agent):
                             self.model.tokens_this_tick[cell] = {'exploit': 0, 'explor': 0}
                         self.model.tokens_this_tick[cell][agent_type_key] += 1
 
+                # Snapshot pending info evaluations per targeted cell so process_reward can
+                # retroactively evaluate source accuracy against real ground truth (Fix 5).
+                # Entries may expire from pending_info_evaluations before process_reward fires,
+                # so we keep a copy here.
+                cell_eval_snapshots = {}
+                for cell in targeted_cells:
+                    cell_evals = [item for item in self.pending_info_evaluations if item[2] == cell]
+                    if cell_evals:
+                        cell_eval_snapshots[cell] = list(cell_evals)
+
                 # Relief outcome delay: 15-25 ticks (realistic logistics delay)
                 # Random variation models variable communication/logistics times
                 relief_delay = random.randint(15, 25)
@@ -1647,7 +1722,8 @@ class HumanAgent(Agent):
                     self.model.tick + relief_delay,
                     responsible_mode,
                     reward_cells,
-                    self.last_queried_source_ids
+                    self.last_queried_source_ids,
+                    cell_eval_snapshots
                 ))
 
             # NOTE: Don't clear tokens_this_tick here! It's cleared at the START of model.step()
@@ -1668,7 +1744,9 @@ class HumanAgent(Agent):
         total_reward = 0
 
         try:
-            for reward_tick, mode, cells_and_beliefs, source_ids in expired:
+            for reward_data in expired:
+                reward_tick, mode, cells_and_beliefs, source_ids = reward_data[0], reward_data[1], reward_data[2], reward_data[3]
+                cell_eval_snapshots = reward_data[4] if len(reward_data) > 4 else {}
                 if not cells_and_beliefs:
                     continue
 
@@ -1711,6 +1789,46 @@ class HumanAgent(Agent):
                         cell_reward = -2.0  # Very poor targeting - no need
 
                     cell_rewards.append(cell_reward)
+
+                    # Fix 1: Retroactive correctness-based feedback for explorers.
+                    # Explorer remote-cell queries get deferred in evaluate_pending_info
+                    # (no reliable belief reference), but process_reward provides real
+                    # ground truth for every targeted cell. Evaluate snapshotted pending
+                    # info entries against actual_level now.
+                    if self.agent_type == "exploratory" and cell in cell_eval_snapshots:
+                        for eval_item in cell_eval_snapshots[cell]:
+                            eval_source_id = eval_item[1]
+                            eval_reported_level = eval_item[3]
+                            level_err = abs(eval_reported_level - actual_level)
+                            if level_err == 0:
+                                acc_score = 1.0
+                            elif level_err == 1:
+                                acc_score = 0.5
+                            elif level_err == 2:
+                                acc_score = -0.2
+                            else:
+                                acc_score = -0.6
+                            acc_reward = acc_score * 0.6 - 0.1
+                            is_ai_src = eval_source_id.startswith("A_")
+                            is_human_src = eval_source_id.startswith("H_")
+                            eval_mode = "ai" if is_ai_src else ("human" if is_human_src else None)
+                            # AI always knows truth; human on remote cell less certain
+                            src_conf = 1.0 if is_ai_src else 0.5
+                            if eval_mode and eval_mode in self.q_table:
+                                lr = 0.25 * src_conf
+                                self.q_table[eval_mode] += lr * (acc_reward - self.q_table[eval_mode])
+                            if eval_source_id in self.q_table:
+                                lr = 0.25 * src_conf
+                                self.q_table[eval_source_id] += lr * (acc_reward - self.q_table[eval_source_id])
+                            if eval_source_id in self.trust:
+                                old_t = self.trust[eval_source_id]
+                                if acc_reward < 0:
+                                    t_target = max(0.0, 0.5 + acc_reward)
+                                    t_lr = 0.25 * src_conf
+                                else:
+                                    t_target = min(1.0, 0.5 + 0.5 * acc_reward)
+                                    t_lr = 0.12 * src_conf
+                                self.trust[eval_source_id] = max(0.0, min(1.0, old_t + t_lr * (t_target - old_t)))
 
                     # Update beliefs based on ground truth
                     if cell in self.beliefs and isinstance(self.beliefs[cell], dict):
@@ -2302,12 +2420,9 @@ class DisasterModel(Model):
 
             agent = HumanAgent(unique_id=f"H_{i}", model=self, id_num=i, agent_type=agent_type,
                              share_confirming=self.share_confirming,
-                             learning_rate=self.learning_rate, # Q rate from model
-                             epsilon=self.epsilon,           # Epsilon from model
-                             # pass trust rates and biases
+                             learning_rate=self.learning_rate,
+                             epsilon=self.epsilon,
                              trust_learning_rate=current_trust_lr,
-                             exploit_friend_bias=self.exploit_friend_bias, # From model
-                             exploit_self_bias=self.exploit_self_bias     # From model
                              )
             self.humans[f"H_{i}"] = agent
             self.agent_list.append(agent)
@@ -2331,7 +2446,7 @@ class DisasterModel(Model):
         # Find connected components in the social network
         # Note: This assumes node IDs 0..N-1 correspond to agent indices
         components = list(nx.connected_components(self.social_network))
-        print(f"Found {len(components)} network components.") # Debug print
+        #print(f"Found {len(components)} network components.") # Debug print
 
         for i, component_nodes in enumerate(components):
             # Decide if this component gets a rumor
@@ -2433,31 +2548,26 @@ class DisasterModel(Model):
 
     def calculate_aeci_variance(self):
         """Calculate AI Echo Chamber Index variance on a [-1, +1] scale."""
-        print(f"\nDEBUG: Starting AECI variance calculation at tick {self.tick}")
+        #print(f"\nDEBUG: Starting AECI variance calculation at tick {self.tick}")
         
         aeci_variance = 0.0  # Default neutral value
         
-        # Define AI-reliant agents with adjusted threshold for observed behavior
-        # With equal +0.2 biases for human/ai and friend selection effects,
-        # agents query ~70% human / ~30% AI in practice (not 50/50)
-        # Threshold set to 25% to capture agents using AI significantly
-        min_calls_threshold = 10   # Need stable sample size
-        min_ai_ratio = 0.25        # Above 25% indicates meaningful AI usage
-        
+        # Classify AI-reliant agents by accepted_ai (actual belief influence),
+        # not query ratio. The feedback loop means agents that validated AI info
+        # as accurate will have built trust and accepted more AI updates. Using
+        # accepted_ai captures this: a query counter (accum_calls_ai) inflated by
+        # low-trust probing does not reflect real AI influence on beliefs.
+        min_accepted_ai = 3  # At least 3 accepted AI belief updates to qualify
+
         ai_reliant_agents = []
         for agent in self.humans.values():
-            # Safety checks for valid counters
-            if not hasattr(agent, 'accum_calls_total') or not hasattr(agent, 'accum_calls_ai'):
+            if not hasattr(agent, 'accepted_ai'):
                 continue
-                
-            total_calls = max(1, agent.accum_calls_total)  # Prevent division by zero
-            ai_ratio = agent.accum_calls_ai / total_calls
-            
-            if total_calls >= min_calls_threshold and ai_ratio >= min_ai_ratio:
+            if agent.accepted_ai >= min_accepted_ai:
                 ai_reliant_agents.append(agent)
         
         # Debug print
-        print(f"  Found {len(ai_reliant_agents)}/{len(self.humans)} AI-reliant agents")
+        #print(f"  Found {len(ai_reliant_agents)}/{len(self.humans)} AI-reliant agents")
         
         # Get global belief variance
         all_beliefs = []
@@ -2471,10 +2581,10 @@ class DisasterModel(Model):
         # Calculate global variance with safety check
         if len(all_beliefs) > 1:
             global_var = np.var(all_beliefs)
-            print(f"  Global belief variance: {global_var:.4f}")
+            #print(f"  Global belief variance: {global_var:.4f}")
         else:
             global_var = 0.0
-            print("  WARNING: Not enough global beliefs to calculate variance")
+            #print("  WARNING: Not enough global beliefs to calculate variance")
             
         # Only proceed if we have a valid global variance and AI-reliant agents
         if global_var > 0 and ai_reliant_agents:
@@ -2490,7 +2600,7 @@ class DisasterModel(Model):
             # Calculate AI-reliant variance with safety check
             if len(ai_reliant_beliefs) > 1:
                 ai_reliant_var = np.var(ai_reliant_beliefs)
-                print(f"  AI-reliant beliefs variance: {ai_reliant_var:.4f}")
+                #print(f"  AI-reliant beliefs variance: {ai_reliant_var:.4f}")
                 
                 # Calculate variance effect
                 # Negative means AI reduces variance (echo chamber)
@@ -2505,15 +2615,15 @@ class DisasterModel(Model):
                     max_possible_var = 5.0  # Given belief levels are 0-5, max variance is around 5
                     aeci_variance = min(1, var_diff / (max_possible_var - global_var))
                 
-                print(f"  AECI variance effect: {aeci_variance:.4f}")
-            else:
-                print("  WARNING: Not enough AI-reliant beliefs to calculate variance")
-        else:
-            print(f"  WARNING: Invalid global variance ({global_var}) or no AI-reliant agents")
+                #print(f"  AECI variance effect: {aeci_variance:.4f}")
+            #else:
+            #    print("  WARNING: Not enough AI-reliant beliefs to calculate variance")
+        #else:
+        #    print(f"  WARNING: Invalid global variance ({global_var}) or no AI-reliant agents")
         
         # Create a CORRECTLY formatted tuple
         aeci_variance_tuple = (self.tick, aeci_variance)
-        print(f"  Returning AECI variance tuple: {aeci_variance_tuple}")
+        #print(f"  Returning AECI variance tuple: {aeci_variance_tuple}")
         
         # Update metrics dictionary with consistent format
         self._last_metrics['aeci_variance'] = {
@@ -3210,51 +3320,72 @@ class DisasterModel(Model):
 
             self.belief_variance_data.append((self.tick, var_exploit, var_explor))
 
-            # --- AECI Calculation (Variance-based, matching SECI methodology) ---
-            # For each AI-reliant agent, compare their belief variance against
-            # global variance. Negative = AI reduces diversity (echo chamber),
-            # Positive = AI increases diversity. Same normalization as SECI.
+            # --- AECI Calculation (SECI-style peer-group methodology) ---
+            # Mirrors SECI exactly, but "friend network" → "AI-peer network".
+            # AI-reliant agents are classified by accepted_ai (actual belief
+            # updates accepted from AI), not query count. The feedback loop
+            # means agents that validated AI info as accurate build higher AI
+            # trust and accept more AI updates — so accepted_ai is the correct
+            # measure of AI influence on beliefs.
+            #
+            # For each AI-reliant agent, we look at the beliefs held by all
+            # other AI-reliant agents (their "AI-peer group") and compute the
+            # variance of that peer group's beliefs. Compare to global variance:
+            #   peer_var < global_var → AI-reliant agents hold similar beliefs
+            #                           → AI created an echo chamber (negative)
+            #   peer_var > global_var → AI-reliant agents hold diverse beliefs
+            #                           → AI broadened perspectives (positive)
             aeci_exp = []
             aeci_expl = []
 
-            min_ai_calls = 5  # Need some AI usage to be meaningful
+            min_accepted_ai = 3  # Minimum accepted AI belief updates to classify as AI-reliant
 
+            # Partition AI-reliant agents by type
+            ai_reliant_exp = []
+            ai_reliant_expl = []
             for agent in self.humans.values():
-                if not hasattr(agent, 'accum_calls_ai') or not hasattr(agent, 'accum_calls_total'):
+                if not hasattr(agent, 'accepted_ai'):
+                    continue
+                if agent.accepted_ai >= min_accepted_ai:
+                    if agent.agent_type == "exploitative":
+                        ai_reliant_exp.append(agent)
+                    else:
+                        ai_reliant_expl.append(agent)
+
+            # Collect group-level beliefs for each type (all peers in the AI-reliant set)
+            def _peer_beliefs(agents):
+                levels = []
+                for a in agents:
+                    for belief_info in a.beliefs.values():
+                        if isinstance(belief_info, dict):
+                            level = belief_info.get('level', 0)
+                            if not np.isnan(level):
+                                levels.append(level)
+                return levels
+
+            for agent_type_label, ai_reliant_group in [("exploitative", ai_reliant_exp),
+                                                        ("exploratory", ai_reliant_expl)]:
+                if len(ai_reliant_group) < 2:
+                    # Not enough AI-reliant agents to form a peer group
                     continue
 
-                agent.accum_calls_ai = max(0, agent.accum_calls_ai)
-                agent.accum_calls_total = max(0, agent.accum_calls_total)
-
-                # Only include agents that have used AI meaningfully
-                if agent.accum_calls_ai < min_ai_calls:
+                peer_belief_levels = _peer_beliefs(ai_reliant_group)
+                if len(peer_belief_levels) < 2:
                     continue
 
-                # Collect this agent's belief levels
-                agent_belief_levels = []
-                for belief_info in agent.beliefs.values():
-                    if isinstance(belief_info, dict):
-                        level = belief_info.get('level', 0)
-                        if not np.isnan(level):
-                            agent_belief_levels.append(level)
+                peer_var = np.var(peer_belief_levels)
 
-                if len(agent_belief_levels) < 2:
-                    continue
-
-                agent_var = np.var(agent_belief_levels)
-
-                # Calculate AECI same way as SECI: variance diff normalized
                 if global_var > 1e-9:
-                    var_diff = agent_var - global_var
-                    if var_diff < 0:  # Variance reduction (echo chamber)
+                    var_diff = peer_var - global_var
+                    if var_diff < 0:  # Echo chamber: AI-reliant agents hold similar beliefs
                         aeci_val = max(-1, var_diff / global_var)
-                    else:  # Variance increase (diversification)
+                    else:  # Diversification: AI-reliant agents hold more varied beliefs
                         max_possible_var = 5.0
                         aeci_val = min(1, var_diff / (max_possible_var - global_var))
                 else:
                     aeci_val = 0.0
 
-                if agent.agent_type == "exploitative":
+                if agent_type_label == "exploitative":
                     aeci_exp.append(aeci_val)
                 else:
                     aeci_expl.append(aeci_val)
@@ -3281,8 +3412,8 @@ class DisasterModel(Model):
                 self.running_aeci_expl = avg_aeci_expl
             else:
                 # Apply exponential moving average with safety bounds
-                self.running_aeci_exp = max(0.0, min(1.0, self.running_aeci_exp * 0.8 + avg_aeci_exp * 0.2))
-                self.running_aeci_expl = max(0.0, min(1.0, self.running_aeci_expl * 0.8 + avg_aeci_expl * 0.2))
+                self.running_aeci_exp = max(-1.0, min(1.0, self.running_aeci_exp * 0.8 + avg_aeci_exp * 0.2))
+                self.running_aeci_expl = max(-1.0, min(1.0, self.running_aeci_expl * 0.8 + avg_aeci_expl * 0.2))
 
             # Update last metrics
             self._last_metrics['running_aeci'] = {
