@@ -45,7 +45,7 @@ base_params = {
     'disaster_dynamics': 2,
     'width': 30,
     'height': 30,
-    'ticks': 80,   # 80 ticks: 60 warmup + 20 steady-state window; was 200
+    'ticks': 100,
     'learning_rate': 0.1,
     'epsilon': 0.3,
     'exploit_trust_lr': 0.015,
@@ -53,7 +53,7 @@ base_params = {
 }
 
 ALIGNMENT_SWEEP = [0.0, 0.2, 0.4, 0.6, 0.8, 1.0]  # 6 levels; halved from 11 to cut runtime ~45%
-STEADY_STATE_WINDOW = 20  # last N ticks for final metrics
+STEADY_STATE_WINDOW = 15  # last N ticks for final metrics
 
 
 def run_alignment_condition(ai_alignment, label):
