@@ -236,7 +236,7 @@ def plot_goldilocks(metrics, all_results, save_dir):
     def eb(ax, key, color, ylabel, title, ylim=None):
         means = [metrics[a][key] for a in alphas]
         stds  = [metrics[a][f'{key}_std'] for a in alphas]
-        ax.errorbar(alphas, means, yerr=stds, fmt=f'{color}-o', linewidth=2,
+        ax.errorbar(alphas, means, yerr=stds, fmt='-o', color=color, linewidth=2,
                     capsize=5, capthick=1.5)
         ax.axvline(best_alpha, color='gold', linestyle='--', linewidth=2, label=f'α*={best_alpha}')
         ax.set_xlabel('AI Alignment Level (α)')
