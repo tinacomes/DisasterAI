@@ -76,6 +76,24 @@ jobs:
           name: sim-factor-${{ matrix.outfile }}
           path: results/
 
+  filter-bubbles:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11", cache: "pip"}
+      - run: pip install -r requirements.txt
+      - run: |
+          mkdir -p filter_bubble_results
+          python3 test_filter_bubbles.py --save-dir filter_bubble_results/
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: filter-bubble-plots
+          path: filter_bubble_results/*.png
+          retention-days: 30
+
   other-tests:
     runs-on: ubuntu-latest
     timeout-minutes: 30
