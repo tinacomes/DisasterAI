@@ -27,7 +27,9 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Run Goldilocks alignment experiment
-        run: python3 test_filter_bubbles.py
+        run: |
+          mkdir -p test_results
+          python3 test_filter_bubbles.py
 
       - name: Upload plots as artifacts
         uses: actions/upload-artifact@v4
