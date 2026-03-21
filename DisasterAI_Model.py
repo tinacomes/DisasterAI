@@ -2302,12 +2302,9 @@ class DisasterModel(Model):
 
             agent = HumanAgent(unique_id=f"H_{i}", model=self, id_num=i, agent_type=agent_type,
                              share_confirming=self.share_confirming,
-                             learning_rate=self.learning_rate, # Q rate from model
-                             epsilon=self.epsilon,           # Epsilon from model
-                             # pass trust rates and biases
+                             learning_rate=self.learning_rate,
+                             epsilon=self.epsilon,
                              trust_learning_rate=current_trust_lr,
-                             exploit_friend_bias=self.exploit_friend_bias, # From model
-                             exploit_self_bias=self.exploit_self_bias     # From model
                              )
             self.humans[f"H_{i}"] = agent
             self.agent_list.append(agent)
