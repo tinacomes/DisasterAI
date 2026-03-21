@@ -239,8 +239,9 @@ def _plot_timeseries(all_results, save_dir):
 
     ax2.set_title('AECI (AI Bubble) Over Time')
     ax2.set_xlabel('Tick')
-    ax2.set_ylabel('AECI')
-    ax2.set_ylim(-0.05, 1.05)
+    ax2.set_ylabel('AECI (-1 to +1)')
+    ax2.axhline(0, color='k', linestyle=':', alpha=0.4)
+    ax2.set_ylim(-1.1, 1.1)
     ax2.legend(fontsize=9)
     ax2.grid(True, alpha=0.3)
 
