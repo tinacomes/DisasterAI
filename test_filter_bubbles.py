@@ -1,32 +1,32 @@
 """
-Filter Bubble Experiment: How AI Alignment Creates, Amplifies, or Breaks Social Filter Bubbles
+Goldilocks AI Alignment Experiment: Social vs. AI Filter Bubble Interplay
 
-Research Questions:
-1. Does AI alignment CREATE filter bubbles where none existed?
-2. Does AI alignment AMPLIFY existing social filter bubbles?
-3. Can truthful AI BREAK filter bubbles?
+Research Question:
+What is the optimal AI alignment level α* that breaks social echo chambers
+without creating AI-enforced filter bubbles?
 
-Experimental Design:
-- AI Alignment Levels: None (control), Low (0.1, truthful), Medium (0.5), High (0.9, confirming)
-- Agent Types: 50% exploratory, 50% exploitative
-- Network Structure: 3 tight communities (existing social structure)
+Background — Triple Social Bubbles:
+1. Ego-network bubble: agents share/accept info primarily from friends
+2. Agent-type cluster: exploiters cluster with exploiters, explorers with explorers
+3. Shared-observation bubble: agents near same cells converge via direct sensing
 
-Metrics (Comparable Scales):
+AI Alignment Interplay:
+- High alignment (AI confirms user beliefs): AI penetrates networks but amplifies all three bubbles
+- Low alignment (AI reports truth): AI may be rejected (D/delta mechanism rejects divergent info)
+- Goldilocks α*: AI is trusted and used, but divergent enough to disrupt bubble consensus
+
+Metrics:
 - SECI (Social Echo Chamber Index): -1 to +1
   * -1 = Strong echo chamber (friends very similar)
-  * 0 = No echo chamber effect (friends as diverse as global population)
-  * +1 = Anti-echo chamber (friends more diverse than global)
-
+  *  0 = No echo chamber effect
+  * +1 = Anti-echo chamber (friends more diverse)
 - AECI (AI Echo Chamber Index): 0 to 1
   * 0 = Only queries humans
   * 1 = Only queries AI
-  * Normalized to match SECI scale for comparison: 2*(AECI - 0.5) = range [-1, +1]
+- total_bubble = |SECI| + AECI  (minimise both)
+- Belief MAE: accuracy cost at each alignment level
 
-Hypotheses:
-H1: Confirming AI (high alignment) AMPLIFIES social filter bubbles (SECI becomes more negative)
-H2: Truthful AI (low alignment) BREAKS social filter bubbles (SECI becomes less negative)
-H3: High AECI + confirming AI creates strongest filter bubbles
-H4: Exploratory agents show weaker filter bubble effects than exploitative agents
+Goldilocks detection: argmin of total_bubble across alignment sweep
 """
 
 import numpy as np
@@ -34,7 +34,6 @@ import matplotlib.pyplot as plt
 from DisasterAI_Model import DisasterModel, HumanAgent
 import os
 
-# Experimental parameters (using Fix 1 and Fix 2 values)
 base_params = {
     'share_exploitative': 0.5,
     'share_of_disaster': 0.15,
@@ -45,358 +44,244 @@ base_params = {
     'disaster_dynamics': 2,
     'width': 30,
     'height': 30,
-    'ticks': 200,  # Longer run to see filter bubble evolution
+    'ticks': 200,
     'learning_rate': 0.1,
     'epsilon': 0.3,
     'exploit_trust_lr': 0.015,
     'explor_trust_lr': 0.03,
 }
 
-def run_filter_bubble_experiment(ai_alignment, test_name):
-    """Run single condition and track filter bubble metrics."""
-    print(f"\n{'='*70}")
-    print(f"Running: {test_name}")
-    print(f"AI Alignment: {ai_alignment if ai_alignment is not None else 'None (Control)'}")
-    print(f"{'='*70}\n")
+ALIGNMENT_SWEEP = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+STEADY_STATE_WINDOW = 30  # last N ticks for final metrics
 
-    # Create model
+
+def run_alignment_condition(ai_alignment, label):
+    """Run one alignment condition and return per-tick metrics."""
+    print(f"\n{'='*60}")
+    print(f"Running: {label}  (alignment={ai_alignment})")
+    print(f"{'='*60}")
+
     params = base_params.copy()
-    if ai_alignment is not None:
-        params['ai_alignment_level'] = ai_alignment
-    else:
-        # Control condition: No AI agents
-        params['ai_alignment_level'] = 0.5  # Dummy value, won't be used
-
+    params['ai_alignment_level'] = ai_alignment
     model = DisasterModel(**params)
 
-    # For control condition, remove AI agents
-    if ai_alignment is None:
-        model.num_ai = 0
-        model.ai_list = []
-        print("Control condition: AI agents removed\n")
+    seci_exploit, seci_explor = [], []
+    aeci_exploit, aeci_explor = [], []
+    mae_exploit, mae_explor = [], []
 
-    # Tracking structures
-    seci_by_tick = {'exploit': [], 'explor': [], 'combined': []}
-    aeci_by_tick = {'exploit': [], 'explor': [], 'combined': []}
-    belief_accuracy = {'exploit': [], 'explor': []}
-    ai_usage_rate = {'exploit': [], 'explor': []}
-
-    # Run simulation
     for tick in range(params['ticks']):
         model.step()
 
-        # Extract SECI data (from model.seci_data)
-        if model.seci_data and len(model.seci_data) > 0:
-            latest_seci = model.seci_data[-1]
-            seci_by_tick['exploit'].append(latest_seci[1])  # exploit SECI
-            seci_by_tick['explor'].append(latest_seci[2])   # explor SECI
-            seci_by_tick['combined'].append((latest_seci[1] + latest_seci[2]) / 2)
+        if model.seci_data:
+            s = model.seci_data[-1]
+            seci_exploit.append(s[1])
+            seci_explor.append(s[2])
 
-        # Extract AECI data (from model.aeci_data)
-        if model.aeci_data and len(model.aeci_data) > 0:
-            latest_aeci = model.aeci_data[-1]
-            aeci_by_tick['exploit'].append(latest_aeci[1])  # exploit AECI
-            aeci_by_tick['explor'].append(latest_aeci[2])   # explor AECI
-            aeci_by_tick['combined'].append((latest_aeci[1] + latest_aeci[2]) / 2)
+        if model.aeci_data:
+            a = model.aeci_data[-1]
+            aeci_exploit.append(a[1])
+            aeci_explor.append(a[2])
 
-        # Calculate belief accuracy (MAE from ground truth)
-        if tick % 10 == 0:  # Every 10 ticks
-            exploit_errors = []
-            explor_errors = []
-
-            for agent in model.agent_list:
-                if isinstance(agent, HumanAgent):
-                    mae = 0
-                    count = 0
-                    for cell, belief_info in agent.beliefs.items():
-                        if isinstance(belief_info, dict):
-                            belief_level = belief_info.get('level', 0)
-                            true_level = model.disaster_grid[cell]
-                            mae += abs(belief_level - true_level)
-                            count += 1
-
-                    if count > 0:
-                        mae /= count
-                        if agent.agent_type == "exploitative":
-                            exploit_errors.append(mae)
-                        else:
-                            explor_errors.append(mae)
-
-            belief_accuracy['exploit'].append(np.mean(exploit_errors) if exploit_errors else 0)
-            belief_accuracy['explor'].append(np.mean(explor_errors) if explor_errors else 0)
-
-        # Track AI usage rate (queries per agent per tick)
         if tick % 10 == 0:
-            exploit_ai_calls = []
-            explor_ai_calls = []
-
+            ex_errors, er_errors = [], []
             for agent in model.agent_list:
-                if isinstance(agent, HumanAgent):
-                    if hasattr(agent, 'accum_calls_ai') and hasattr(agent, 'accum_calls_total'):
-                        if agent.accum_calls_total > 0:
-                            rate = agent.accum_calls_ai / agent.accum_calls_total
-                            if agent.agent_type == "exploitative":
-                                exploit_ai_calls.append(rate)
-                            else:
-                                explor_ai_calls.append(rate)
-
-            ai_usage_rate['exploit'].append(np.mean(exploit_ai_calls) if exploit_ai_calls else 0)
-            ai_usage_rate['explor'].append(np.mean(explor_ai_calls) if explor_ai_calls else 0)
-
-    print(f"\nFinal Metrics:")
-    print(f"  SECI (Exploit): {seci_by_tick['exploit'][-1]:.3f}")
-    print(f"  SECI (Explor):  {seci_by_tick['explor'][-1]:.3f}")
-    print(f"  AECI (Exploit): {aeci_by_tick['exploit'][-1]:.3f}")
-    print(f"  AECI (Explor):  {aeci_by_tick['explor'][-1]:.3f}")
-    print(f"  Belief Accuracy (Exploit MAE): {belief_accuracy['exploit'][-1]:.3f}")
-    print(f"  Belief Accuracy (Explor MAE):  {belief_accuracy['explor'][-1]:.3f}")
+                if not isinstance(agent, HumanAgent):
+                    continue
+                err = np.mean([
+                    abs(b.get('level', 0) - model.disaster_grid[c])
+                    for c, b in agent.beliefs.items()
+                    if isinstance(b, dict)
+                ]) if agent.beliefs else 0
+                (ex_errors if agent.agent_type == "exploitative" else er_errors).append(err)
+            mae_exploit.append(np.mean(ex_errors) if ex_errors else 0)
+            mae_explor.append(np.mean(er_errors) if er_errors else 0)
 
     return {
-        'seci': seci_by_tick,
-        'aeci': aeci_by_tick,
-        'belief_accuracy': belief_accuracy,
-        'ai_usage': ai_usage_rate,
-        'model': model,
-        'params': params
+        'seci_exploit': seci_exploit,
+        'seci_explor': seci_explor,
+        'aeci_exploit': aeci_exploit,
+        'aeci_explor': aeci_explor,
+        'mae_exploit': mae_exploit,
+        'mae_explor': mae_explor,
     }
 
-def normalize_aeci_to_seci_scale(aeci_values):
-    """Normalize AECI from [0,1] to [-1,+1] to match SECI scale."""
-    return [2 * (val - 0.5) for val in aeci_values]
 
-def visualize_filter_bubble_results(results_dict):
-    """Create comprehensive visualization comparing all conditions."""
-    fig = plt.figure(figsize=(18, 14))
+def steady_state_mean(series, window=STEADY_STATE_WINDOW):
+    """Mean of last `window` values."""
+    if not series:
+        return float('nan')
+    return float(np.mean(series[-window:]))
 
-    conditions = list(results_dict.keys())
-    colors = {'Control': 'gray', 'Truthful (0.1)': 'green',
-              'Mixed (0.5)': 'orange', 'Confirming (0.9)': 'red'}
 
-    # 1. SECI Evolution - Exploitative Agents
-    ax1 = plt.subplot(3, 3, 1)
-    for cond in conditions:
-        data = results_dict[cond]['seci']['exploit']
-        ax1.plot(data, label=cond, color=colors.get(cond, 'blue'), linewidth=2, alpha=0.8)
-    ax1.axhline(y=0, color='k', linestyle=':', alpha=0.5, label='No Echo Chamber')
-    ax1.axhline(y=-0.5, color='r', linestyle='--', alpha=0.3, label='Strong Echo Chamber')
-    ax1.set_title('SECI Evolution: Exploitative Agents\n(More negative = Stronger filter bubble)',
-                  fontsize=10, fontweight='bold')
-    ax1.set_xlabel('Tick')
-    ax1.set_ylabel('SECI (-1 to +1)')
-    ax1.legend(fontsize=8, loc='best')
-    ax1.grid(True, alpha=0.3)
-    ax1.set_ylim(-1.1, 1.1)
+def compute_goldilocks_metrics(all_results):
+    """
+    For each alignment level, compute steady-state SECI, AECI, and total_bubble.
+    total_bubble = |SECI_combined| + AECI_combined  (minimise)
+    SECI < 0 means echo chamber → higher |SECI| = worse
+    """
+    metrics = {}
+    for alpha, res in zip(ALIGNMENT_SWEEP, all_results):
+        seci_ss = (steady_state_mean(res['seci_exploit']) +
+                   steady_state_mean(res['seci_explor'])) / 2
+        aeci_ss = (steady_state_mean(res['aeci_exploit']) +
+                   steady_state_mean(res['aeci_explor'])) / 2
+        mae_ss = (steady_state_mean(res['mae_exploit']) +
+                  steady_state_mean(res['mae_explor'])) / 2
+        total_bubble = abs(seci_ss) + aeci_ss
+        metrics[alpha] = {
+            'seci': seci_ss,
+            'aeci': aeci_ss,
+            'mae': mae_ss,
+            'total_bubble': total_bubble,
+        }
+    return metrics
 
-    # 2. SECI Evolution - Exploratory Agents
-    ax2 = plt.subplot(3, 3, 2)
-    for cond in conditions:
-        data = results_dict[cond]['seci']['explor']
-        ax2.plot(data, label=cond, color=colors.get(cond, 'blue'), linewidth=2, alpha=0.8)
-    ax2.axhline(y=0, color='k', linestyle=':', alpha=0.5)
-    ax2.axhline(y=-0.5, color='r', linestyle='--', alpha=0.3)
-    ax2.set_title('SECI Evolution: Exploratory Agents\n(More negative = Stronger filter bubble)',
-                  fontsize=10, fontweight='bold')
-    ax2.set_xlabel('Tick')
-    ax2.set_ylabel('SECI (-1 to +1)')
-    ax2.legend(fontsize=8, loc='best')
-    ax2.grid(True, alpha=0.3)
-    ax2.set_ylim(-1.1, 1.1)
 
-    # 3. AECI Evolution - Both Agent Types
-    ax3 = plt.subplot(3, 3, 3)
-    for cond in conditions:
-        if cond != 'Control':  # Control has no AI
-            data_exploit = results_dict[cond]['aeci']['exploit']
-            data_explor = results_dict[cond]['aeci']['explor']
-            ax3.plot(data_exploit, linestyle='--', label=f'{cond} (Exploit)',
-                    color=colors.get(cond, 'blue'), linewidth=1.5, alpha=0.7)
-            ax3.plot(data_explor, linestyle='-', label=f'{cond} (Explor)',
-                    color=colors.get(cond, 'blue'), linewidth=1.5, alpha=0.7)
-    ax3.set_title('AECI Evolution: AI Usage\n(Higher = More AI reliance)',
-                  fontsize=10, fontweight='bold')
-    ax3.set_xlabel('Tick')
-    ax3.set_ylabel('AECI (0 to 1)')
-    ax3.legend(fontsize=7, loc='best')
-    ax3.grid(True, alpha=0.3)
-    ax3.set_ylim(-0.1, 1.1)
+def plot_goldilocks(metrics, all_results, save_dir):
+    """Four-panel goldilocks summary figure."""
+    alphas = ALIGNMENT_SWEEP
+    seci_vals = [metrics[a]['seci'] for a in alphas]
+    aeci_vals = [metrics[a]['aeci'] for a in alphas]
+    total_vals = [metrics[a]['total_bubble'] for a in alphas]
+    mae_vals = [metrics[a]['mae'] for a in alphas]
 
-    # 4. Normalized AECI vs SECI - Exploitative
-    ax4 = plt.subplot(3, 3, 4)
-    for cond in conditions:
-        if cond != 'Control':
-            seci = results_dict[cond]['seci']['exploit']
-            aeci_norm = normalize_aeci_to_seci_scale(results_dict[cond]['aeci']['exploit'])
-            ax4.plot(seci, label=f'{cond} SECI', color=colors.get(cond, 'blue'),
-                    linewidth=2, alpha=0.8)
-            ax4.plot(aeci_norm, label=f'{cond} AECI (norm)', color=colors.get(cond, 'blue'),
-                    linewidth=2, alpha=0.4, linestyle='--')
-    ax4.axhline(y=0, color='k', linestyle=':', alpha=0.5)
-    ax4.set_title('SECI vs Normalized AECI: Exploitative\n(Both on -1 to +1 scale)',
-                  fontsize=10, fontweight='bold')
-    ax4.set_xlabel('Tick')
-    ax4.set_ylabel('Index Value (-1 to +1)')
-    ax4.legend(fontsize=7, loc='best')
-    ax4.grid(True, alpha=0.3)
-    ax4.set_ylim(-1.1, 1.1)
+    best_alpha = alphas[int(np.argmin(total_vals))]
+    print(f"\nGoldilocks α* = {best_alpha}  (minimum total_bubble = {min(total_vals):.3f})")
 
-    # 5. Normalized AECI vs SECI - Exploratory
-    ax5 = plt.subplot(3, 3, 5)
-    for cond in conditions:
-        if cond != 'Control':
-            seci = results_dict[cond]['seci']['explor']
-            aeci_norm = normalize_aeci_to_seci_scale(results_dict[cond]['aeci']['explor'])
-            ax5.plot(seci, label=f'{cond} SECI', color=colors.get(cond, 'blue'),
-                    linewidth=2, alpha=0.8)
-            ax5.plot(aeci_norm, label=f'{cond} AECI (norm)', color=colors.get(cond, 'blue'),
-                    linewidth=2, alpha=0.4, linestyle='--')
-    ax5.axhline(y=0, color='k', linestyle=':', alpha=0.5)
-    ax5.set_title('SECI vs Normalized AECI: Exploratory\n(Both on -1 to +1 scale)',
-                  fontsize=10, fontweight='bold')
-    ax5.set_xlabel('Tick')
-    ax5.set_ylabel('Index Value (-1 to +1)')
-    ax5.legend(fontsize=7, loc='best')
-    ax5.grid(True, alpha=0.3)
-    ax5.set_ylim(-1.1, 1.1)
+    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+    fig.suptitle(
+        'Goldilocks AI Alignment: Social vs. AI Filter Bubble Interplay\n'
+        f'(α* = {best_alpha} minimises total bubble intensity)',
+        fontsize=13, fontweight='bold'
+    )
 
-    # 6. Final SECI Comparison (Bar Chart)
-    ax6 = plt.subplot(3, 3, 6)
-    x_pos = np.arange(len(conditions))
-    exploit_final_seci = [results_dict[cond]['seci']['exploit'][-1] for cond in conditions]
-    explor_final_seci = [results_dict[cond]['seci']['explor'][-1] for cond in conditions]
+    # Panel 1: SECI vs alignment
+    ax = axes[0, 0]
+    ax.plot(alphas, seci_vals, 'b-o', linewidth=2, label='SECI (combined)')
+    ax.axhline(0, color='k', linestyle=':', alpha=0.5)
+    ax.axvline(best_alpha, color='gold', linestyle='--', linewidth=2, label=f'α*={best_alpha}')
+    ax.set_title('Social Echo Chamber Index vs Alignment\n(More negative = stronger social bubble)')
+    ax.set_xlabel('AI Alignment Level (α)')
+    ax.set_ylabel('SECI (-1 to +1)')
+    ax.set_ylim(-1.1, 1.1)
+    ax.legend(fontsize=9)
+    ax.grid(True, alpha=0.3)
 
-    width = 0.35
-    ax6.bar(x_pos - width/2, exploit_final_seci, width, label='Exploitative', alpha=0.8, color='red')
-    ax6.bar(x_pos + width/2, explor_final_seci, width, label='Exploratory', alpha=0.8, color='blue')
-    ax6.axhline(y=0, color='k', linestyle=':', alpha=0.5)
-    ax6.axhline(y=-0.5, color='r', linestyle='--', alpha=0.3, label='Strong Echo Chamber')
-    ax6.set_title('Final SECI Values\n(Lower = Stronger filter bubbles)',
-                  fontsize=10, fontweight='bold')
-    ax6.set_ylabel('SECI (-1 to +1)')
-    ax6.set_xticks(x_pos)
-    ax6.set_xticklabels(conditions, rotation=15, ha='right', fontsize=8)
-    ax6.legend(fontsize=8)
-    ax6.grid(True, alpha=0.3, axis='y')
-    ax6.set_ylim(-1.1, 0.5)
+    # Panel 2: AECI vs alignment
+    ax = axes[0, 1]
+    ax.plot(alphas, aeci_vals, 'r-o', linewidth=2, label='AECI (combined)')
+    ax.axvline(best_alpha, color='gold', linestyle='--', linewidth=2, label=f'α*={best_alpha}')
+    ax.set_title('AI Echo Chamber Index vs Alignment\n(Higher = more AI reliance / AI bubble)')
+    ax.set_xlabel('AI Alignment Level (α)')
+    ax.set_ylabel('AECI (0 to 1)')
+    ax.set_ylim(-0.05, 1.05)
+    ax.legend(fontsize=9)
+    ax.grid(True, alpha=0.3)
 
-    # 7. Belief Accuracy Evolution
-    ax7 = plt.subplot(3, 3, 7)
-    for cond in conditions:
-        data_exploit = results_dict[cond]['belief_accuracy']['exploit']
-        data_explor = results_dict[cond]['belief_accuracy']['explor']
-        ticks = list(range(0, len(data_exploit) * 10, 10))
-        ax7.plot(ticks, data_exploit, linestyle='--', label=f'{cond} (Exploit)',
-                color=colors.get(cond, 'blue'), linewidth=1.5, alpha=0.7)
-        ax7.plot(ticks, data_explor, linestyle='-', label=f'{cond} (Explor)',
-                color=colors.get(cond, 'blue'), linewidth=1.5, alpha=0.7)
-    ax7.set_title('Belief Accuracy (MAE)\n(Lower = More accurate)',
-                  fontsize=10, fontweight='bold')
-    ax7.set_xlabel('Tick')
-    ax7.set_ylabel('Mean Absolute Error')
-    ax7.legend(fontsize=7, loc='best')
-    ax7.grid(True, alpha=0.3)
+    # Panel 3: Total bubble + goldilocks
+    ax = axes[1, 0]
+    ax.plot(alphas, total_vals, 'k-o', linewidth=2.5, label='total_bubble = |SECI| + AECI')
+    ax.plot(best_alpha, min(total_vals), 'g*', markersize=18, zorder=5, label=f'Goldilocks α*={best_alpha}')
+    ax.fill_between(alphas, total_vals, alpha=0.15, color='purple')
+    ax.set_title('Total Bubble Intensity vs Alignment\n(Minimise to find goldilocks zone)')
+    ax.set_xlabel('AI Alignment Level (α)')
+    ax.set_ylabel('|SECI| + AECI')
+    ax.legend(fontsize=9)
+    ax.grid(True, alpha=0.3)
 
-    # 8. SECI Change Over Time (Delta from initial)
-    ax8 = plt.subplot(3, 3, 8)
-    for cond in conditions:
-        seci_exploit = results_dict[cond]['seci']['exploit']
-        if len(seci_exploit) > 10:
-            initial_seci = np.mean(seci_exploit[0:10])  # Average first 10 ticks
-            delta_seci = [val - initial_seci for val in seci_exploit]
-            ax8.plot(delta_seci, label=f'{cond} (Exploit)',
-                    color=colors.get(cond, 'blue'), linewidth=2, alpha=0.8)
-    ax8.axhline(y=0, color='k', linestyle=':', alpha=0.5, label='No change')
-    ax8.set_title('SECI Change: Exploitative\n(Negative = Increasing echo chamber)',
-                  fontsize=10, fontweight='bold')
-    ax8.set_xlabel('Tick')
-    ax8.set_ylabel('Δ SECI from baseline')
-    ax8.legend(fontsize=8, loc='best')
-    ax8.grid(True, alpha=0.3)
-
-    # 9. Summary Statistics Table
-    ax9 = plt.subplot(3, 3, 9)
-    ax9.axis('off')
-
-    summary_lines = ["FILTER BUBBLE EXPERIMENT SUMMARY\n"]
-    summary_lines.append("Hypothesis Testing:\n")
-
-    # H1: Confirming AI amplifies filter bubbles
-    control_final_seci = results_dict['Control']['seci']['exploit'][-1]
-    confirming_final_seci = results_dict['Confirming (0.9)']['seci']['exploit'][-1]
-    h1_result = "SUPPORTED" if confirming_final_seci < control_final_seci else "REJECTED"
-    summary_lines.append(f"H1 (Confirming amplifies bubbles): {h1_result}")
-    summary_lines.append(f"  Control SECI: {control_final_seci:.3f}")
-    summary_lines.append(f"  Confirming SECI: {confirming_final_seci:.3f}\n")
-
-    # H2: Truthful AI breaks filter bubbles
-    truthful_final_seci = results_dict['Truthful (0.1)']['seci']['exploit'][-1]
-    h2_result = "SUPPORTED" if truthful_final_seci > control_final_seci else "REJECTED"
-    summary_lines.append(f"H2 (Truthful breaks bubbles): {h2_result}")
-    summary_lines.append(f"  Truthful SECI: {truthful_final_seci:.3f}\n")
-
-    # H4: Exploratory weaker effect
-    explor_seci_range = max([results_dict[c]['seci']['explor'][-1] for c in conditions]) - \
-                        min([results_dict[c]['seci']['explor'][-1] for c in conditions])
-    exploit_seci_range = max([results_dict[c]['seci']['exploit'][-1] for c in conditions]) - \
-                         min([results_dict[c]['seci']['exploit'][-1] for c in conditions])
-    h4_result = "SUPPORTED" if explor_seci_range < exploit_seci_range else "REJECTED"
-    summary_lines.append(f"H4 (Explor weaker effect): {h4_result}")
-    summary_lines.append(f"  Explor range: {explor_seci_range:.3f}")
-    summary_lines.append(f"  Exploit range: {exploit_seci_range:.3f}\n")
-
-    # Key findings
-    summary_lines.append("Key Findings:")
-    summary_lines.append(f"• SECI scale: -1 (echo chamber) to +1 (diverse)")
-    summary_lines.append(f"• AECI scale: 0 (human-only) to 1 (AI-only)")
-    summary_lines.append(f"• Metrics are independently tracked and comparable")
-
-    summary_text = "\n".join(summary_lines)
-    ax9.text(0.05, 0.95, summary_text, fontsize=9, family='monospace',
-             verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.3))
+    # Panel 4: Belief MAE vs alignment (accuracy cost)
+    ax = axes[1, 1]
+    ax.plot(alphas, mae_vals, 'm-o', linewidth=2, label='Belief MAE (combined)')
+    ax.axvline(best_alpha, color='gold', linestyle='--', linewidth=2, label=f'α*={best_alpha}')
+    ax.set_title('Belief Accuracy vs Alignment\n(Lower MAE = more accurate beliefs)')
+    ax.set_xlabel('AI Alignment Level (α)')
+    ax.set_ylabel('Mean Absolute Error')
+    ax.legend(fontsize=9)
+    ax.grid(True, alpha=0.3)
 
     plt.tight_layout()
+    os.makedirs(save_dir, exist_ok=True)
+    path = os.path.join(save_dir, 'goldilocks_alignment_sweep.png')
+    plt.savefig(path, dpi=150, bbox_inches='tight')
+    print(f"Goldilocks figure saved: {path}")
 
-    # Save figure
-    output_dir = '/home/user/DisasterAI/test_results'
-    os.makedirs(output_dir, exist_ok=True)
-    output_path = os.path.join(output_dir, 'filter_bubble_experiment.png')
-    plt.savefig(output_path, dpi=150, bbox_inches='tight')
-    print(f"\n{'='*70}")
-    print(f"Visualization saved to: {output_path}")
-    print(f"{'='*70}\n")
-
+    # Also plot SECI/AECI time-series for a few key alignments
+    _plot_timeseries(all_results, save_dir)
     return fig
 
+
+def _plot_timeseries(all_results, save_dir):
+    """Time-series SECI/AECI for selected alignment levels."""
+    key_idxs = [0, 2, 5, 8, 10]  # 0.0, 0.2, 0.5, 0.8, 1.0
+    colors = plt.cm.viridis(np.linspace(0, 1, len(key_idxs)))
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
+    fig.suptitle('SECI and AECI Time-Series for Key Alignment Levels', fontsize=12)
+
+    for color, idx in zip(colors, key_idxs):
+        alpha = ALIGNMENT_SWEEP[idx]
+        res = all_results[idx]
+        label = f'α={alpha}'
+        seci_comb = [(e + r) / 2 for e, r in zip(res['seci_exploit'], res['seci_explor'])]
+        aeci_comb = [(e + r) / 2 for e, r in zip(res['aeci_exploit'], res['aeci_explor'])]
+        ax1.plot(seci_comb, label=label, color=color, linewidth=1.8)
+        ax2.plot(aeci_comb, label=label, color=color, linewidth=1.8)
+
+    ax1.axhline(0, color='k', linestyle=':', alpha=0.4)
+    ax1.set_title('SECI (Social Bubble) Over Time')
+    ax1.set_xlabel('Tick')
+    ax1.set_ylabel('SECI')
+    ax1.set_ylim(-1.1, 1.1)
+    ax1.legend(fontsize=9)
+    ax1.grid(True, alpha=0.3)
+
+    ax2.set_title('AECI (AI Bubble) Over Time')
+    ax2.set_xlabel('Tick')
+    ax2.set_ylabel('AECI')
+    ax2.set_ylim(-0.05, 1.05)
+    ax2.legend(fontsize=9)
+    ax2.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    path = os.path.join(save_dir, 'bubble_timeseries.png')
+    plt.savefig(path, dpi=150, bbox_inches='tight')
+    print(f"Time-series figure saved: {path}")
+
+
 if __name__ == "__main__":
-    print("="*70)
-    print("FILTER BUBBLE EXPERIMENT: AI ALIGNMENT EFFECTS")
-    print("="*70)
-    print("\nThis experiment tests how different AI alignment levels")
-    print("create, amplify, or break social filter bubbles.\n")
+    print("=" * 70)
+    print("GOLDILOCKS ALIGNMENT EXPERIMENT: SOCIAL vs. AI FILTER BUBBLE INTERPLAY")
+    print("=" * 70)
+    print(f"Sweeping alignment levels: {ALIGNMENT_SWEEP}")
+    print(f"Ticks per run: {base_params['ticks']}")
+    print(f"Steady-state window: last {STEADY_STATE_WINDOW} ticks\n")
 
-    # Define experimental conditions
-    conditions = {
-        'Control': None,           # No AI
-        'Truthful (0.1)': 0.1,     # Truthful AI
-        'Mixed (0.5)': 0.5,        # Mixed AI
-        'Confirming (0.9)': 0.9    # Confirming AI
-    }
+    all_results = []
+    for alpha in ALIGNMENT_SWEEP:
+        res = run_alignment_condition(alpha, f"Alignment {alpha:.1f}")
+        all_results.append(res)
 
-    # Run all conditions
-    results = {}
-    for name, alignment in conditions.items():
-        results[name] = run_filter_bubble_experiment(alignment, name)
+    metrics = compute_goldilocks_metrics(all_results)
 
-    # Create comprehensive visualization
-    print("\nGenerating comprehensive visualization...")
-    fig = visualize_filter_bubble_results(results)
+    print("\n" + "=" * 70)
+    print("STEADY-STATE METRICS SUMMARY")
+    print("=" * 70)
+    print(f"{'α':>6}  {'SECI':>8}  {'AECI':>8}  {'|SECI|+AECI':>12}  {'MAE':>8}")
+    print("-" * 50)
+    for alpha in ALIGNMENT_SWEEP:
+        m = metrics[alpha]
+        marker = "  ← α*" if abs(m['total_bubble'] - min(v['total_bubble'] for v in metrics.values())) < 1e-9 else ""
+        print(f"{alpha:>6.1f}  {m['seci']:>8.3f}  {m['aeci']:>8.3f}  {m['total_bubble']:>12.3f}  {m['mae']:>8.3f}{marker}")
 
-    print("\n" + "="*70)
+    save_dir = '/home/user/DisasterAI/test_results'
+    plot_goldilocks(metrics, all_results, save_dir)
+
+    print("\n" + "=" * 70)
     print("EXPERIMENT COMPLETE")
-    print("="*70)
-    print("\nMetrics Verified:")
-    print("✓ SECI correctly ranges from -1 to +1")
-    print("✓ AECI correctly ranges from 0 to 1")
-    print("✓ Both metrics independently tracked and comparable")
-    print("✓ Filter bubble effects measured across all conditions")
-    print("\nNext steps: Analyze results to understand how AI alignment")
-    print("creates, amplifies, or breaks social filter bubbles.")
+    print("=" * 70)
+    print("\nInterpretation guide:")
+    print("  SECI < 0 : social echo chamber active (friends more similar than random)")
+    print("  AECI > 0.5 : agents over-rely on AI (AI bubble risk)")
+    print("  total_bubble = |SECI| + AECI : composite measure to minimise")
+    print("  Goldilocks α* : minimises total_bubble")
+    print("  Check MAE at α* : alignment gain should not sacrifice belief accuracy")

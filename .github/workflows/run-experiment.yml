@@ -1,0 +1,38 @@
+name: Run DisasterAI Experiment
+
+on:
+  push:
+    branches: ["**"]
+  workflow_dispatch:
+
+env:
+  MPLBACKEND: Agg
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  experiment:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run Goldilocks alignment experiment
+        run: python3 test_filter_bubbles.py
+
+      - name: Upload plots as artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: experiment-plots
+          path: test_results/*.png
+          retention-days: 30
