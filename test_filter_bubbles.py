@@ -120,8 +120,19 @@ def run_one_sim(params):
     prec_exploit, prec_explor       = [], []
     metric_ticks = []
 
+    W, H = params['width'], params['height']
+    cum_aid_grid      = np.zeros((W, H), dtype=float)
+    cum_disaster_grid = np.zeros((W, H), dtype=float)
+
     for tick in range(params['ticks']):
         model.step()
+
+        # Accumulate spatial aid and disaster grids
+        tok = np.zeros((W, H), dtype=float)
+        for pos, cnt in model.tokens_this_tick.items():
+            tok[pos[0], pos[1]] = cnt.get('exploit', 0) + cnt.get('explor', 0)
+        cum_aid_grid      += tok
+        cum_disaster_grid += model.disaster_grid.astype(float)
 
         if model.seci_data:
             s = model.seci_data[-1]
@@ -176,6 +187,67 @@ def run_one_sim(params):
 
     n = len(seci_exploit)
 
+    # ------------------------------------------------------------------ #
+    # Spatial coverage & network-periphery metrics (computed post-loop)   #
+    # ------------------------------------------------------------------ #
+    ticks_run = params['ticks']
+    avg_disaster = cum_disaster_grid / ticks_run
+    avg_aid      = cum_aid_grid      / ticks_run
+    # Positive = high need but little aid; negative = more aid than disaster level
+    coverage_deficit = avg_disaster - avg_aid
+
+    G       = model.social_network
+    degrees = dict(G.degree())          # {node_id(int): degree}
+    deg_vals = sorted(degrees.values())
+    n_agents = len(deg_vals)
+    lo_thresh = deg_vals[max(0, n_agents // 4 - 1)]
+    hi_thresh = deg_vals[min(n_agents - 1, 3 * n_agents // 4)]
+
+    ex, ey = model.epicenter           # grid coords of disaster centre
+    all_dists  = []
+    agent_data = []                    # (dist, degree, mae, ai_frac, aid_sent)
+    for agent in model.agent_list:
+        if not isinstance(agent, HumanAgent):
+            continue
+        node_id = int(agent.unique_id.split('_')[1])
+        deg     = degrees.get(node_id, 0)
+        ax, ay  = agent.pos
+        dist    = float(np.sqrt((ax - ex) ** 2 + (ay - ey) ** 2))
+        all_dists.append(dist)
+        err = float(np.mean([
+            abs(b.get('level', 0) - model.disaster_grid[c])
+            for c, b in agent.beliefs.items()
+            if isinstance(b, dict)
+        ])) if agent.beliefs else 0.0
+        ai_frac  = (agent.accum_calls_ai /
+                    max(agent.accum_calls_total, 1))
+        aid_sent = float(agent.correct_targets + agent.incorrect_targets)
+        agent_data.append((dist, deg, err, ai_frac, aid_sent))
+
+    # Split by spatial distance quartile (Q1 = near, Q4 = far)
+    if all_dists:
+        dist_q1 = np.percentile(all_dists, 25)
+        dist_q3 = np.percentile(all_dists, 75)
+    else:
+        dist_q1 = dist_q3 = 0.0
+
+    near_mae, near_ai, near_aid = [], [], []
+    far_mae,  far_ai,  far_aid  = [], [], []
+    lodeg_mae, lodeg_ai, lodeg_aid = [], [], []
+    hideg_mae, hideg_ai, hideg_aid = [], [], []
+
+    for dist, deg, err, ai_frac, aid_sent in agent_data:
+        if dist <= dist_q1:
+            near_mae.append(err); near_ai.append(ai_frac); near_aid.append(aid_sent)
+        elif dist >= dist_q3:
+            far_mae.append(err);  far_ai.append(ai_frac);  far_aid.append(aid_sent)
+        if deg <= lo_thresh:
+            lodeg_mae.append(err); lodeg_ai.append(ai_frac); lodeg_aid.append(aid_sent)
+        elif deg >= hi_thresh:
+            hideg_mae.append(err); hideg_ai.append(ai_frac); hideg_aid.append(aid_sent)
+
+    def _m(lst): return float(np.nanmean(lst)) if lst else float('nan')
+
     # --- Transition timing: first-crossing scalars (not cumulative end-counts) ---
     # 1. First tick AI trust overtakes friend trust (per agent type)
     trust_cross_exploit = next(
@@ -229,6 +301,19 @@ def run_one_sim(params):
         'ai_query50_explor':    float(ai_query50_explor),
         'aeci_var_zero':        float(aeci_var_zero),
         'info_surge_tick':      float(info_surge),
+        # Spatial coverage maps (averaged across ticks)
+        'coverage_deficit_map': coverage_deficit.tolist(),
+        'avg_disaster_map':     avg_disaster.tolist(),
+        'avg_aid_map':          avg_aid.tolist(),
+        'epicenter':            list(model.epicenter),
+        # Network-periphery scalars (spatial distance: near Q1 vs far Q4)
+        'near_mae':   _m(near_mae),  'far_mae':   _m(far_mae),
+        'near_ai':    _m(near_ai),   'far_ai':    _m(far_ai),
+        'near_aid':   _m(near_aid),  'far_aid':   _m(far_aid),
+        # Network-periphery scalars (graph degree: low Q1 vs high Q4)
+        'lodeg_mae':  _m(lodeg_mae), 'hideg_mae':  _m(hideg_mae),
+        'lodeg_ai':   _m(lodeg_ai),  'hideg_ai':   _m(hideg_ai),
+        'lodeg_aid':  _m(lodeg_aid), 'hideg_aid':  _m(hideg_aid),
     }
 
 
@@ -246,6 +331,9 @@ def _aggregate(runs):
         'seci_break_exploit',  'seci_break_explor',
         'ai_query50_exploit',  'ai_query50_explor',
         'aeci_var_zero',       'info_surge_tick',
+        # Spatial / network-periphery scalars
+        'near_mae', 'far_mae', 'near_ai', 'far_ai', 'near_aid', 'far_aid',
+        'lodeg_mae', 'hideg_mae', 'lodeg_ai', 'hideg_ai', 'lodeg_aid', 'hideg_aid',
     ]
     result = {
         'metric_ticks': runs[0]['metric_ticks'],
@@ -276,6 +364,12 @@ def _aggregate(runs):
         occurred = valid[valid < n_ticks_val] if n_ticks_val > 0 else np.array([])
         result[f'{key}_frac']      = float(len(occurred) / max(len(valid), 1))
         result[f'{key}_cond_mean'] = float(np.nanmean(occurred)) if len(occurred) > 0 else float('nan')
+    # Spatial maps: mean across replications (2-D arrays stored as list-of-lists)
+    for map_key in ('coverage_deficit_map', 'avg_disaster_map', 'avg_aid_map'):
+        maps = [np.array(r[map_key]) for r in runs if map_key in r and r[map_key]]
+        if maps:
+            result[f'{map_key}_mean'] = np.mean(maps, axis=0).tolist()
+    result['epicenter'] = runs[0].get('epicenter', [0, 0])
     return result
 
 
@@ -834,6 +928,184 @@ def plot_echo_chamber_lifecycle(all_results, save_dir):
 
 
 # ---------------------------------------------------------------------------
+# Spatial coverage & periphery-gap plots
+# ---------------------------------------------------------------------------
+
+def plot_spatial_coverage(all_results, metrics, save_dir):
+    """
+    2-row × 3-col figure comparing spatial coverage across three α levels.
+
+    Row 1 — Coverage Deficit (avg_disaster − avg_aid): red = chronically
+             under-served; blue = over-served relative to local severity.
+    Row 2 — Average Aid Density: how many tokens per tick reached each cell.
+
+    The epicenter is marked with a white star on every panel.
+    """
+    alphas = ALIGNMENT_SWEEP
+    total_vals = [metrics[a]['total_bubble'] for a in alphas]
+    best_alpha  = alphas[int(np.argmin(total_vals))]
+
+    # Choose three representative α values
+    show_alphas = [0.0, best_alpha, 1.0]
+    # De-duplicate while preserving order
+    seen = set()
+    show_alphas = [a for a in show_alphas if not (a in seen or seen.add(a))]
+    ncols = len(show_alphas)
+
+    fig, axes = plt.subplots(2, ncols, figsize=(5 * ncols, 9))
+    fig.suptitle(
+        'Spatial Coverage Analysis  (avg over full run)\n'
+        'Top: coverage deficit (disaster − aid)  |  Bottom: aid density',
+        fontsize=12, fontweight='bold'
+    )
+
+    # Gather colour-scale limits across all shown results for consistency
+    all_deficits = []
+    all_aids     = []
+    result_map   = {}
+    for alpha, res in zip(alphas, all_results):
+        if alpha not in show_alphas:
+            continue
+        if 'coverage_deficit_map_mean' in res:
+            all_deficits.append(np.array(res['coverage_deficit_map_mean']))
+            all_aids.append(    np.array(res['avg_aid_map_mean']))
+        result_map[alpha] = res
+
+    vdef = max(abs(np.nanmax(all_deficits)), abs(np.nanmin(all_deficits))) if all_deficits else 1.0
+    vaid = np.nanmax(all_aids) if all_aids else 1.0
+
+    for col, alpha in enumerate(show_alphas):
+        res = result_map.get(alpha)
+        ex, ey = res['epicenter'] if res else [0, 0]
+
+        ax_def = axes[0, col] if ncols > 1 else axes[0]
+        ax_aid = axes[1, col] if ncols > 1 else axes[1]
+
+        label = f'α={alpha:.1f}'
+        if alpha == best_alpha:
+            label += '  ← α*'
+
+        if res and 'coverage_deficit_map_mean' in res:
+            deficit = np.array(res['coverage_deficit_map_mean']).T  # transpose: x→col, y→row
+            aid_map = np.array(res['avg_aid_map_mean']).T
+
+            im1 = ax_def.imshow(deficit, origin='lower', cmap='RdBu_r',
+                                vmin=-vdef, vmax=vdef, aspect='auto')
+            ax_def.plot(ex, ey, '*', color='white', markersize=14,
+                        markeredgecolor='black', markeredgewidth=0.8,
+                        label='Epicentre')
+            plt.colorbar(im1, ax=ax_def, fraction=0.046, pad=0.04,
+                         label='Deficit (disaster − aid)')
+
+            im2 = ax_aid.imshow(aid_map, origin='lower', cmap='Blues',
+                                vmin=0, vmax=vaid, aspect='auto')
+            ax_aid.plot(ex, ey, '*', color='gold', markersize=14,
+                        markeredgecolor='black', markeredgewidth=0.8)
+            plt.colorbar(im2, ax=ax_aid, fraction=0.046, pad=0.04,
+                         label='Avg tokens / tick')
+        else:
+            ax_def.text(0.5, 0.5, 'No data', ha='center', va='center',
+                        transform=ax_def.transAxes)
+            ax_aid.text(0.5, 0.5, 'No data', ha='center', va='center',
+                        transform=ax_aid.transAxes)
+
+        ax_def.set_title(label, fontsize=11)
+        ax_def.set_xlabel('Grid x'); ax_def.set_ylabel('Grid y')
+        ax_aid.set_xlabel('Grid x'); ax_aid.set_ylabel('Grid y')
+
+    plt.tight_layout()
+    os.makedirs(save_dir, exist_ok=True)
+    path = os.path.join(save_dir, 'spatial_coverage.png')
+    plt.savefig(path, dpi=150, bbox_inches='tight')
+    plt.close()
+    print(f"Spatial coverage figure saved: {path}")
+
+
+def plot_periphery_gap(all_results, metrics, save_dir):
+    """
+    2-row × 2-col figure showing how the periphery gap varies with α.
+
+    Left column  — spatial periphery (far Q4 vs near Q1 agents by distance
+                   to the disaster epicentre).
+    Right column — network periphery (low-degree Q1 vs high-degree Q4 agents
+                   in the Watts–Strogatz social network).
+
+    Row 1 — Belief MAE: are periphery agents less accurate?
+    Row 2 — AI-query fraction: do periphery agents compensate via AI?
+
+    A gap that shrinks toward α* is evidence that Goldilocks alignment
+    reduces structural inequality in situational awareness.
+    """
+    alphas = ALIGNMENT_SWEEP
+    total_vals  = [metrics[a]['total_bubble'] for a in alphas]
+    best_alpha  = alphas[int(np.argmin(total_vals))]
+
+    def _get(res, key):
+        return float(res.get(f'{key}_mean', float('nan')))
+
+    near_mae  = [_get(r, 'near_mae')  for r in all_results]
+    far_mae   = [_get(r, 'far_mae')   for r in all_results]
+    near_ai   = [_get(r, 'near_ai')   for r in all_results]
+    far_ai    = [_get(r, 'far_ai')    for r in all_results]
+
+    lodeg_mae = [_get(r, 'lodeg_mae') for r in all_results]
+    hideg_mae = [_get(r, 'hideg_mae') for r in all_results]
+    lodeg_ai  = [_get(r, 'lodeg_ai')  for r in all_results]
+    hideg_ai  = [_get(r, 'hideg_ai')  for r in all_results]
+
+    fig, axes = plt.subplots(2, 2, figsize=(13, 9))
+    fig.suptitle(
+        'Periphery Gap across AI Alignment (α)\n'
+        'Left: spatial (far vs near epicentre)  |  Right: network degree (low vs high)',
+        fontsize=12, fontweight='bold'
+    )
+
+    def _panel(ax, core_vals, periph_vals, core_label, periph_label,
+                ylabel, title, ylim=None):
+        ax.plot(alphas, core_vals,   'o-', color='steelblue',  linewidth=2,
+                label=core_label,   markersize=7)
+        ax.plot(alphas, periph_vals, 's--', color='firebrick', linewidth=2,
+                label=periph_label, markersize=7)
+        # Shade the gap
+        ax.fill_between(alphas, core_vals, periph_vals, alpha=0.12, color='orange',
+                         label='Gap')
+        ax.axvline(best_alpha, color='gold', linestyle='--', linewidth=2,
+                   label=f'α*={best_alpha}')
+        ax.set_xlabel('AI Alignment Level (α)')
+        ax.set_ylabel(ylabel)
+        ax.set_title(title)
+        if ylim:
+            ax.set_ylim(*ylim)
+        ax.legend(fontsize=8)
+        ax.grid(True, alpha=0.3)
+
+    _panel(axes[0, 0], near_mae, far_mae,
+           'Near epicentre (Q1)', 'Far epicentre (Q4)',
+           'Belief MAE', 'Spatial periphery — Belief Accuracy\n(lower = better)')
+
+    _panel(axes[0, 1], hideg_mae, lodeg_mae,
+           'High degree (Q4)', 'Low degree (Q1)',
+           'Belief MAE', 'Network periphery — Belief Accuracy\n(lower = better)')
+
+    _panel(axes[1, 0], near_ai, far_ai,
+           'Near epicentre (Q1)', 'Far epicentre (Q4)',
+           'AI query fraction', 'Spatial periphery — AI Usage\n(higher = more AI queries)',
+           ylim=(0, 1))
+
+    _panel(axes[1, 1], hideg_ai, lodeg_ai,
+           'High degree (Q4)', 'Low degree (Q1)',
+           'AI query fraction', 'Network periphery — AI Usage\n(higher = more AI queries)',
+           ylim=(0, 1))
+
+    plt.tight_layout()
+    os.makedirs(save_dir, exist_ok=True)
+    path = os.path.join(save_dir, 'periphery_gap.png')
+    plt.savefig(path, dpi=150, bbox_inches='tight')
+    plt.close()
+    print(f"Periphery gap figure saved: {path}")
+
+
+# ---------------------------------------------------------------------------
 # Results persistence
 # ---------------------------------------------------------------------------
 
@@ -961,6 +1233,8 @@ if __name__ == '__main__':
     plot_transition_timing(all_results, save_dir)
     plot_aeci_evolution(all_results, save_dir)
     plot_echo_chamber_lifecycle(all_results, save_dir)
+    plot_spatial_coverage(all_results, metrics, save_dir)
+    plot_periphery_gap(all_results, metrics, save_dir)
 
     print('\n' + '=' * 70)
     print('EXPERIMENT COMPLETE')
