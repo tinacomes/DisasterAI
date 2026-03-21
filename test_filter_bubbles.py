@@ -77,10 +77,20 @@ def run_alignment_condition(ai_alignment, label):
             seci_exploit.append(s[1])
             seci_explor.append(s[2])
 
-        if model.aeci_data:
-            a = model.aeci_data[-1]
-            aeci_exploit.append(a[1])
-            aeci_explor.append(a[2])
+        # Compute AECI as call-fraction ratio (0–1) directly from agents.
+        # model.aeci_data uses a variance formula that can go negative; we
+        # want accum_calls_ai / accum_calls_total per agent type.
+        exp_vals, expl_vals = [], []
+        for agent in model.agent_list:
+            if not isinstance(agent, HumanAgent) or agent.accum_calls_total == 0:
+                continue
+            ratio = agent.accum_calls_ai / agent.accum_calls_total
+            if agent.agent_type == "exploitative":
+                exp_vals.append(ratio)
+            else:
+                expl_vals.append(ratio)
+        aeci_exploit.append(np.mean(exp_vals) if exp_vals else 0.0)
+        aeci_explor.append(np.mean(expl_vals) if expl_vals else 0.0)
 
         if tick % 10 == 0:
             ex_errors, er_errors = [], []
@@ -273,7 +283,7 @@ if __name__ == "__main__":
         marker = "  ← α*" if abs(m['total_bubble'] - min(v['total_bubble'] for v in metrics.values())) < 1e-9 else ""
         print(f"{alpha:>6.1f}  {m['seci']:>8.3f}  {m['aeci']:>8.3f}  {m['total_bubble']:>12.3f}  {m['mae']:>8.3f}{marker}")
 
-    save_dir = '/home/user/DisasterAI/test_results'
+    save_dir = 'test_results'  # relative path; works both locally and on CI
     plot_goldilocks(metrics, all_results, save_dir)
 
     print("\n" + "=" * 70)
