@@ -266,10 +266,16 @@ def _aggregate(runs):
         mat = np.array([a[:min_len] for a in arrays], dtype=float)
         result[f'{key}_mean'] = np.nanmean(mat, axis=0).tolist()
         result[f'{key}_std']  = np.nanstd( mat, axis=0).tolist()
+    n_ticks_val = result['n_ticks']
     for key in scalar_keys:
         vals = np.array([run.get(key, float('nan')) for run in runs], dtype=float)
         result[f'{key}_mean'] = float(np.nanmean(vals))
         result[f'{key}_std']  = float(np.nanstd(vals))
+        # Fraction of runs where transition occurred (value strictly < n_ticks)
+        valid = vals[~np.isnan(vals)]
+        occurred = valid[valid < n_ticks_val] if n_ticks_val > 0 else np.array([])
+        result[f'{key}_frac']      = float(len(occurred) / max(len(valid), 1))
+        result[f'{key}_cond_mean'] = float(np.nanmean(occurred)) if len(occurred) > 0 else float('nan')
     return result
 
 
@@ -489,7 +495,7 @@ def plot_factor_comparison(rumor_res, disaster_res, mix_res, save_dir):
     """3×3 bar chart comparing factor effects on bubble & response metrics."""
     fig, axes = plt.subplots(3, 3, figsize=(16, 12))
     fig.suptitle(
-        f'Factor Effects at α={FACTOR_ALPHA}  (mean ± std, N={N_FACTOR_RUNS} replications)\n'
+        f'Factor Effects at α={FACTOR_ALPHA}  (mean ± std across {N_FACTOR_RUNS} runs, averaged over all ticks)\n'
         'Each column: one factor swept while others held at base values',
         fontsize=12, fontweight='bold'
     )
@@ -503,9 +509,12 @@ def plot_factor_comparison(rumor_res, disaster_res, mix_res, save_dir):
          EXPLOITATIVE_SWEEP, mix_res),
     ]
     row_metrics = [
-        ('Steady-state SECI\n(negative = social bubble)', 'seci_exploit', (-1.1, 1.1)),
-        ('Steady-state MAE\n(lower = accurate beliefs)',  'mae_exploit',  (0, None)),
-        ('Final unmet needs\n(lower = better response)',  'unmet_needs',  (0, None)),
+        ('SECI — averaged over all ticks\n(negative = social bubble, 0 = neutral)',
+         'seci_exploit', (-1.1, 1.1)),
+        ('Belief MAE — averaged over all ticks\n(lower = beliefs closer to ground truth)',
+         'mae_exploit',  (0, None)),
+        ('Unmet high-need cells — averaged over all ticks\n(lower = better disaster response)',
+         'unmet_needs',  (0, None)),
     ]
     bar_colors = ['#2196F3', '#FF9800', '#4CAF50']
 
@@ -515,8 +524,8 @@ def plot_factor_comparison(rumor_res, disaster_res, mix_res, save_dir):
             means, stds = [], []
             for lv in factor_levels:
                 res = res_dict[lv]
-                m = ss(res[f'{metric_key}_mean'])
-                s = ss(res[f'{metric_key}_std'])
+                m = float(np.nanmean(res[f'{metric_key}_mean'])) if res[f'{metric_key}_mean'] else float('nan')
+                s = float(np.nanmean(res[f'{metric_key}_std']))  if res[f'{metric_key}_std']  else float('nan')
                 means.append(m)
                 stds.append(s if not np.isnan(s) else 0.0)
 
@@ -553,72 +562,85 @@ def plot_factor_comparison(rumor_res, disaster_res, mix_res, save_dir):
 # ---------------------------------------------------------------------------
 
 def plot_transition_timing(all_results, save_dir):
-    """2×2 figure: when key behavioral shifts first occur, per alignment level.
+    """2×2 figure: fraction of runs where key behavioral shifts occur, per alignment level.
 
-    Uses first-crossing scalars stored by run_one_sim() — NOT cumulative end-counts,
-    which are meaningless when the threshold is never reached within the run.
-    A value equal to n_ticks means "transition never observed in this run".
+    Each bar = fraction of replications where the threshold was crossed during the
+    simulation.  Bar labels show the mean tick at which crossing happened (only shown
+    when the fraction is > 0).  A missing bar means the event never occurred in any run.
     """
     alphas = ALIGNMENT_SWEEP
-    n_ticks = all_results[0]['n_ticks']
+    x      = np.arange(len(alphas))
+    w      = 0.35
+    x_str  = [str(a) for a in alphas]
 
-    def _eb(ax, key_e, key_r, c_e, c_r, label_e, label_r, title):
-        means_e = [r[f'{key_e}_mean'] for r in all_results]
-        stds_e  = [r[f'{key_e}_std']  for r in all_results]
-        means_r = [r[f'{key_r}_mean'] for r in all_results]
-        stds_r  = [r[f'{key_r}_std']  for r in all_results]
-        ax.errorbar(alphas, means_e, yerr=stds_e, fmt='-o', color=c_e,
-                    linewidth=2, capsize=5, capthick=1.5, label=label_e)
-        ax.errorbar(alphas, means_r, yerr=stds_r, fmt='-o', color=c_r,
-                    alpha=0.65, linewidth=2, capsize=5, capthick=1.5, label=label_r)
+    def _annotate(ax, bars, cond_vals):
+        for bar, tick in zip(bars, cond_vals):
+            h = bar.get_height()
+            if not np.isnan(tick) and h > 0.04:
+                ax.text(bar.get_x() + bar.get_width() / 2, h + 0.02,
+                        f't={tick:.0f}', ha='center', va='bottom', fontsize=7)
+
+    def _bar(ax, key_e, key_r, c_e, c_r, label_e, label_r, title):
+        frac_e = [r.get(f'{key_e}_frac', float('nan')) for r in all_results]
+        frac_r = [r.get(f'{key_r}_frac', float('nan')) for r in all_results]
+        cond_e = [r.get(f'{key_e}_cond_mean', float('nan')) for r in all_results]
+        cond_r = [r.get(f'{key_r}_cond_mean', float('nan')) for r in all_results]
+        b_e = ax.bar(x - w / 2, frac_e, w, color=c_e, alpha=0.85, label=label_e)
+        b_r = ax.bar(x + w / 2, frac_r, w, color=c_r, alpha=0.65, label=label_r)
+        _annotate(ax, b_e, cond_e)
+        _annotate(ax, b_r, cond_r)
         ax.set_xlabel('AI Alignment')
-        ax.set_ylabel('Tick (when transition occurs)')
+        ax.set_ylabel('Fraction of runs\nwhere event occurs')
         ax.set_title(title)
-        ax.set_ylim(0, n_ticks * 1.05)
+        ax.set_ylim(0, 1.25)
+        ax.set_xticks(x)
+        ax.set_xticklabels(x_str)
         ax.legend(fontsize=9)
-        ax.grid(True, alpha=0.3)
+        ax.grid(True, alpha=0.3, axis='y')
 
     fig, axes = plt.subplots(2, 2, figsize=(14, 10))
     fig.suptitle(
-        'Transition Timing vs AI Alignment\n'
-        '(When do behavioral shifts occur during simulation?)',
+        'Transition Occurrence vs AI Alignment\n'
+        '(Bar height = fraction of runs where shift occurs; label = mean tick when it does)',
         fontsize=13, fontweight='bold',
     )
 
-    _eb(axes[0, 0],
-        'trust_cross_exploit', 'trust_cross_explor',
-        '#8B0000', '#FA8072',
-        'Exploitative', 'Exploratory',
-        'AI Trust Overtakes Friend Trust')
+    _bar(axes[0, 0],
+         'trust_cross_exploit', 'trust_cross_explor',
+         '#8B0000', '#FA8072',
+         'Exploitative', 'Exploratory',
+         'AI Trust Overtakes Friend Trust')
 
-    _eb(axes[0, 1],
-        'seci_break_exploit', 'seci_break_explor',
-        '#1A3A6B', '#6BAED6',
-        'Exploitative', 'Exploratory',
-        'Social Echo Chamber Breaks (SECI → 0)')
+    _bar(axes[0, 1],
+         'seci_break_exploit', 'seci_break_explor',
+         '#1A3A6B', '#6BAED6',
+         'Exploitative', 'Exploratory',
+         'Social Echo Chamber Breaks (SECI → 0)')
 
-    _eb(axes[1, 0],
-        'ai_query50_exploit', 'ai_query50_explor',
-        '#1B5E20', '#66BB6A',
-        'Exploitative', 'Exploratory',
-        'AI Query Ratio > 50%')
+    _bar(axes[1, 0],
+         'ai_query50_exploit', 'ai_query50_explor',
+         '#1B5E20', '#66BB6A',
+         'Exploitative', 'Exploratory',
+         'AI Query Ratio > 50%')
 
-    # Bottom-right: system-wide scalars (single series each)
+    # Bottom-right: system-wide scalars
     ax = axes[1, 1]
-    aeci_var_means = [r['aeci_var_zero_mean'] for r in all_results]
-    aeci_var_stds  = [r['aeci_var_zero_std']  for r in all_results]
-    info_means     = [r['info_surge_tick_mean'] for r in all_results]
-    info_stds      = [r['info_surge_tick_std']  for r in all_results]
-    ax.errorbar(alphas, aeci_var_means, yerr=aeci_var_stds, fmt='-o', color='magenta',
-                linewidth=2, capsize=5, capthick=1.5, label='AECI-Var → 0')
-    ax.errorbar(alphas, info_means, yerr=info_stds, fmt='-o', color='darkorange',
-                linewidth=2, capsize=5, capthick=1.5, label='Info Div Surge')
+    frac_aeci = [r.get('aeci_var_zero_frac', float('nan')) for r in all_results]
+    frac_info  = [r.get('info_surge_tick_frac', float('nan')) for r in all_results]
+    cond_aeci  = [r.get('aeci_var_zero_cond_mean', float('nan')) for r in all_results]
+    cond_info  = [r.get('info_surge_tick_cond_mean', float('nan')) for r in all_results]
+    b_a = ax.bar(x - w / 2, frac_aeci, w, color='magenta',    alpha=0.85, label='AECI-Var → 0')
+    b_i = ax.bar(x + w / 2, frac_info,  w, color='darkorange', alpha=0.85, label='Info Div Surge')
+    _annotate(ax, b_a, cond_aeci)
+    _annotate(ax, b_i, cond_info)
     ax.set_xlabel('AI Alignment')
-    ax.set_ylabel('Tick (when transition occurs)')
+    ax.set_ylabel('Fraction of runs\nwhere event occurs')
     ax.set_title('System-Wide Transitions')
-    ax.set_ylim(0, n_ticks * 1.05)
+    ax.set_ylim(0, 1.25)
+    ax.set_xticks(x)
+    ax.set_xticklabels(x_str)
     ax.legend(fontsize=9)
-    ax.grid(True, alpha=0.3)
+    ax.grid(True, alpha=0.3, axis='y')
 
     plt.tight_layout()
     os.makedirs(save_dir, exist_ok=True)
