@@ -20,10 +20,11 @@ Metrics:
   * -1 = Strong echo chamber (friends very similar)
   *  0 = No echo chamber effect
   * +1 = Anti-echo chamber (friends more diverse)
-- AECI (AI Echo Chamber Index): 0 to 1
-  * 0 = Only queries humans
-  * 1 = Only queries AI
-- total_bubble = |SECI| + AECI  (minimise both)
+- AECI (AI Echo Chamber Index): -1 to +1  (same variance formula as SECI)
+  * -1 = AI-reliant agents have much lower belief variance than global (AI bubble)
+  *  0 = No AI echo chamber effect
+  * +1 = AI-reliant agents are more belief-diverse than global
+- total_bubble = |SECI| + |AECI|  (minimise both)
 - Belief MAE: accuracy cost at each alignment level
 
 Goldilocks detection: argmin of total_bubble across alignment sweep
@@ -77,20 +78,10 @@ def run_alignment_condition(ai_alignment, label):
             seci_exploit.append(s[1])
             seci_explor.append(s[2])
 
-        # Compute AECI as call-fraction ratio (0–1) directly from agents.
-        # model.aeci_data uses a variance formula that can go negative; we
-        # want accum_calls_ai / accum_calls_total per agent type.
-        exp_vals, expl_vals = [], []
-        for agent in model.agent_list:
-            if not isinstance(agent, HumanAgent) or agent.accum_calls_total == 0:
-                continue
-            ratio = agent.accum_calls_ai / agent.accum_calls_total
-            if agent.agent_type == "exploitative":
-                exp_vals.append(ratio)
-            else:
-                expl_vals.append(ratio)
-        aeci_exploit.append(np.mean(exp_vals) if exp_vals else 0.0)
-        aeci_explor.append(np.mean(expl_vals) if expl_vals else 0.0)
+        if model.aeci_data:
+            a = model.aeci_data[-1]
+            aeci_exploit.append(a[1])
+            aeci_explor.append(a[2])
 
         if tick % 10 == 0:
             ex_errors, er_errors = [], []
@@ -126,8 +117,8 @@ def steady_state_mean(series, window=STEADY_STATE_WINDOW):
 def compute_goldilocks_metrics(all_results):
     """
     For each alignment level, compute steady-state SECI, AECI, and total_bubble.
-    total_bubble = |SECI_combined| + AECI_combined  (minimise)
-    SECI < 0 means echo chamber → higher |SECI| = worse
+    Both SECI and AECI use the same variance formula (-1 to +1).
+    total_bubble = |SECI| + |AECI|  (minimise — both measure echo chamber intensity)
     """
     metrics = {}
     for alpha, res in zip(ALIGNMENT_SWEEP, all_results):
@@ -137,7 +128,7 @@ def compute_goldilocks_metrics(all_results):
                    steady_state_mean(res['aeci_explor'])) / 2
         mae_ss = (steady_state_mean(res['mae_exploit']) +
                   steady_state_mean(res['mae_explor'])) / 2
-        total_bubble = abs(seci_ss) + aeci_ss
+        total_bubble = abs(seci_ss) + abs(aeci_ss)
         metrics[alpha] = {
             'seci': seci_ss,
             'aeci': aeci_ss,
@@ -181,21 +172,22 @@ def plot_goldilocks(metrics, all_results, save_dir):
     ax = axes[0, 1]
     ax.plot(alphas, aeci_vals, 'r-o', linewidth=2, label='AECI (combined)')
     ax.axvline(best_alpha, color='gold', linestyle='--', linewidth=2, label=f'α*={best_alpha}')
-    ax.set_title('AI Echo Chamber Index vs Alignment\n(Higher = more AI reliance / AI bubble)')
+    ax.set_title('AI Echo Chamber Index vs Alignment\n(More negative = stronger AI-induced bubble)')
     ax.set_xlabel('AI Alignment Level (α)')
-    ax.set_ylabel('AECI (0 to 1)')
-    ax.set_ylim(-0.05, 1.05)
+    ax.set_ylabel('AECI (-1 to +1)')
+    ax.set_ylim(-1.1, 1.1)
+    ax.axhline(0, color='k', linestyle=':', alpha=0.5)
     ax.legend(fontsize=9)
     ax.grid(True, alpha=0.3)
 
     # Panel 3: Total bubble + goldilocks
     ax = axes[1, 0]
-    ax.plot(alphas, total_vals, 'k-o', linewidth=2.5, label='total_bubble = |SECI| + AECI')
+    ax.plot(alphas, total_vals, 'k-o', linewidth=2.5, label='total_bubble = |SECI| + |AECI|')
     ax.plot(best_alpha, min(total_vals), 'g*', markersize=18, zorder=5, label=f'Goldilocks α*={best_alpha}')
     ax.fill_between(alphas, total_vals, alpha=0.15, color='purple')
     ax.set_title('Total Bubble Intensity vs Alignment\n(Minimise to find goldilocks zone)')
     ax.set_xlabel('AI Alignment Level (α)')
-    ax.set_ylabel('|SECI| + AECI')
+    ax.set_ylabel('|SECI| + |AECI|')
     ax.legend(fontsize=9)
     ax.grid(True, alpha=0.3)
 
@@ -291,7 +283,7 @@ if __name__ == "__main__":
     print("=" * 70)
     print("\nInterpretation guide:")
     print("  SECI < 0 : social echo chamber active (friends more similar than random)")
-    print("  AECI > 0.5 : agents over-rely on AI (AI bubble risk)")
-    print("  total_bubble = |SECI| + AECI : composite measure to minimise")
+    print("  AECI < 0 : AI-induced bubble (AI-reliant agents more homogeneous than global)")
+    print("  total_bubble = |SECI| + |AECI| : composite measure to minimise")
     print("  Goldilocks α* : minimises total_bubble")
     print("  Check MAE at α* : alignment gain should not sacrifice belief accuracy")
