@@ -1769,12 +1769,10 @@ class HumanAgent(Agent):
                 scaled_reward = max(-1.0, min(1.0, batch_reward / 5.0))
                 target_trust = (scaled_reward + 1.0) / 2.0  # Map to [0,1] for trust
 
-                # Update Q-table and trust - KEY CHANGE: Adjust learning rates by agent type
+                # Uniform Q-update: agent-type differences emerge from D/delta, not learning rate
                 if mode == "self_action":
                     old_q = self.q_table.get("self_action", 0.0)
-                    # Explorers learn faster from self-action outcomes
-                    effective_learning_rate = self.learning_rate * (1.5 if self.agent_type == "exploratory" else 1.0)
-                    new_q = old_q + effective_learning_rate * (scaled_reward - old_q)
+                    new_q = old_q + self.learning_rate * (scaled_reward - old_q)
                     self.q_table["self_action"] = new_q
 
                 elif source_ids:
@@ -1782,25 +1780,14 @@ class HumanAgent(Agent):
                     # mode is what's used in action selection (e.g., "human", "A_0")
                     if mode in self.q_table:
                         old_mode_q = self.q_table[mode]
-                        if self.agent_type == "exploratory":
-                            effective_learning_rate = self.learning_rate * 1.5
-                        else:
-                            effective_learning_rate = self.learning_rate
-                        new_mode_q = old_mode_q + effective_learning_rate * (scaled_reward - old_mode_q)
+                        new_mode_q = old_mode_q + self.learning_rate * (scaled_reward - old_mode_q)
                         self.q_table[mode] = new_mode_q
 
                     # Also update specific source Q-values (for tracking individual sources)
                     for source_id in source_ids:
                         if source_id in self.q_table:
                             old_q = self.q_table[source_id]
-                            # Pure Q-learning: same learning rate for all sources
-                            # Let feedback naturally teach agents which sources are valuable
-                            if self.agent_type == "exploratory":
-                                effective_learning_rate = self.learning_rate * 1.5  # Explorers learn faster
-                            else:
-                                effective_learning_rate = self.learning_rate
-
-                            new_q = old_q + effective_learning_rate * (scaled_reward - old_q)
+                            new_q = old_q + self.learning_rate * (scaled_reward - old_q)
                             self.q_table[source_id] = new_q
 
                         if source_id in self.trust:
