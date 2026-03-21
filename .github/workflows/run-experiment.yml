@@ -5,6 +5,10 @@ on:
     branches: ["**"]
   workflow_dispatch:
 
+env:
+  MPLBACKEND: Agg
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   experiment:
     runs-on: ubuntu-latest
