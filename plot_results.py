@@ -127,7 +127,7 @@ def infer_n_runs(result_dict):
 # ---------------------------------------------------------------------------
 
 def _eb(ax, x, means, stds, color, fmt='-o', **kw):
-    ax.errorbar(x, means, yerr=stds, fmt=f'{color}{fmt}',
+    ax.errorbar(x, means, yerr=stds, fmt=fmt, color=color,
                 linewidth=2, capsize=5, capthick=1.5, **kw)
 
 
