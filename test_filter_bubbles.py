@@ -69,6 +69,8 @@ def run_alignment_condition(ai_alignment, label):
     seci_exploit, seci_explor = [], []
     aeci_exploit, aeci_explor = [], []
     mae_exploit, mae_explor = [], []
+    prec_exploit, prec_explor = [], []  # targeting precision per agent type
+    metric_ticks = []                  # tick values for sampled metrics
 
     for tick in range(params['ticks']):
         model.step()
@@ -83,8 +85,10 @@ def run_alignment_condition(ai_alignment, label):
             aeci_exploit.append(a[1])
             aeci_explor.append(a[2])
 
-        if tick % 10 == 0:
+        if tick % 5 == 0:
             ex_errors, er_errors = [], []
+            ex_correct = ex_total = 0
+            er_correct = er_total = 0
             for agent in model.agent_list:
                 if not isinstance(agent, HumanAgent):
                     continue
@@ -93,9 +97,20 @@ def run_alignment_condition(ai_alignment, label):
                     for c, b in agent.beliefs.items()
                     if isinstance(b, dict)
                 ]) if agent.beliefs else 0
-                (ex_errors if agent.agent_type == "exploitative" else er_errors).append(err)
+                total = agent.correct_targets + agent.incorrect_targets
+                if agent.agent_type == "exploitative":
+                    ex_errors.append(err)
+                    ex_correct += agent.correct_targets
+                    ex_total += total
+                else:
+                    er_errors.append(err)
+                    er_correct += agent.correct_targets
+                    er_total += total
             mae_exploit.append(np.mean(ex_errors) if ex_errors else 0)
             mae_explor.append(np.mean(er_errors) if er_errors else 0)
+            prec_exploit.append(ex_correct / ex_total if ex_total > 0 else float('nan'))
+            prec_explor.append(er_correct / er_total if er_total > 0 else float('nan'))
+            metric_ticks.append(tick)
 
     return {
         'seci_exploit': seci_exploit,
@@ -104,6 +119,9 @@ def run_alignment_condition(ai_alignment, label):
         'aeci_explor': aeci_explor,
         'mae_exploit': mae_exploit,
         'mae_explor': mae_explor,
+        'prec_exploit': prec_exploit,
+        'prec_explor': prec_explor,
+        'metric_ticks': metric_ticks,
     }
 
 
@@ -213,37 +231,80 @@ def plot_goldilocks(metrics, all_results, save_dir):
 
 
 def _plot_timeseries(all_results, save_dir):
-    """Time-series SECI/AECI for selected alignment levels."""
-    key_idxs = [0, 1, 2, 3, 4, 5]  # 0.0, 0.2, 0.4, 0.6, 0.8, 1.0
+    """Time-series SECI/AECI/MAE/precision for all alignment levels."""
+    key_idxs = [0, 1, 2, 3, 4, 5]  # 0.0 … 1.0
     colors = plt.cm.viridis(np.linspace(0, 1, len(key_idxs)))
 
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
-    fig.suptitle('SECI and AECI Time-Series for Key Alignment Levels', fontsize=12)
+    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+    fig.suptitle('Filter Bubble & Delivery Metrics Over Time', fontsize=13, fontweight='bold')
+
+    ax_seci, ax_aeci = axes[0, 0], axes[0, 1]
+    ax_mae, ax_prec = axes[1, 0], axes[1, 1]
 
     for color, idx in zip(colors, key_idxs):
         alpha = ALIGNMENT_SWEEP[idx]
         res = all_results[idx]
         label = f'α={alpha}'
+        ticks = res['metric_ticks']
+
         seci_comb = [(e + r) / 2 for e, r in zip(res['seci_exploit'], res['seci_explor'])]
         aeci_comb = [(e + r) / 2 for e, r in zip(res['aeci_exploit'], res['aeci_explor'])]
-        ax1.plot(seci_comb, label=label, color=color, linewidth=1.8)
-        ax2.plot(aeci_comb, label=label, color=color, linewidth=1.8)
+        mae_comb  = [(e + r) / 2 for e, r in zip(res['mae_exploit'],  res['mae_explor'])]
 
-    ax1.axhline(0, color='k', linestyle=':', alpha=0.4)
-    ax1.set_title('SECI (Social Bubble) Over Time')
-    ax1.set_xlabel('Tick')
-    ax1.set_ylabel('SECI')
-    ax1.set_ylim(-1.1, 1.1)
-    ax1.legend(fontsize=9)
-    ax1.grid(True, alpha=0.3)
+        # SECI and AECI share the same tick count as the full run
+        ax_seci.plot(seci_comb, label=label, color=color, linewidth=1.8)
+        ax_aeci.plot(aeci_comb, label=label, color=color, linewidth=1.8)
+        ax_mae.plot(ticks, mae_comb, label=label, color=color, linewidth=1.8)
 
-    ax2.set_title('AECI (AI Bubble) Over Time')
-    ax2.set_xlabel('Tick')
-    ax2.set_ylabel('AECI (-1 to +1)')
-    ax2.axhline(0, color='k', linestyle=':', alpha=0.4)
-    ax2.set_ylim(-1.1, 1.1)
-    ax2.legend(fontsize=9)
-    ax2.grid(True, alpha=0.3)
+        # Precision: plot exploit (dashed) and explor (solid) separately
+        prec_e = [v for v in res['prec_exploit']]
+        prec_r = [v for v in res['prec_explor']]
+        valid_e = [(t, p) for t, p in zip(ticks, prec_e) if not np.isnan(p)]
+        valid_r = [(t, p) for t, p in zip(ticks, prec_r) if not np.isnan(p)]
+        if valid_e:
+            te, pe = zip(*valid_e)
+            ax_prec.plot(te, pe, linestyle='--', color=color, linewidth=1.5, alpha=0.85,
+                         label=f'α={alpha} exploit')
+        if valid_r:
+            tr, pr = zip(*valid_r)
+            ax_prec.plot(tr, pr, linestyle='-', color=color, linewidth=1.5, alpha=0.85,
+                         label=f'α={alpha} explor')
+
+    ax_seci.axhline(0, color='k', linestyle=':', alpha=0.4)
+    ax_seci.set_title('SECI (Social Bubble) Over Time')
+    ax_seci.set_xlabel('Tick')
+    ax_seci.set_ylabel('SECI (-1 to +1)')
+    ax_seci.set_ylim(-1.1, 1.1)
+    ax_seci.legend(fontsize=9)
+    ax_seci.grid(True, alpha=0.3)
+
+    ax_aeci.axhline(0, color='k', linestyle=':', alpha=0.4)
+    ax_aeci.set_title('AECI (AI Bubble) Over Time')
+    ax_aeci.set_xlabel('Tick')
+    ax_aeci.set_ylabel('AECI (-1 to +1)')
+    ax_aeci.set_ylim(-1.1, 1.1)
+    ax_aeci.legend(fontsize=9)
+    ax_aeci.grid(True, alpha=0.3)
+
+    ax_mae.set_title('Belief MAE Over Time\n(lower = beliefs closer to ground truth)')
+    ax_mae.set_xlabel('Tick')
+    ax_mae.set_ylabel('Mean Absolute Error')
+    ax_mae.set_ylim(bottom=0)
+    ax_mae.legend(fontsize=9)
+    ax_mae.grid(True, alpha=0.3)
+
+    ax_prec.axhline(0.6, color='k', linestyle=':', alpha=0.4, label='60% precision')
+    ax_prec.set_title('Relief Targeting Precision Over Time\n'
+                      'solid=exploratory, dashed=exploitative\n'
+                      '(fraction of relief tokens sent to disaster level ≥3 cells)')
+    ax_prec.set_xlabel('Tick')
+    ax_prec.set_ylabel('Correct Targets / Total Targets')
+    ax_prec.set_ylim(0, 1.05)
+    # Legend: one entry per α only (suppress per-type duplication)
+    handles, labels_ = ax_prec.get_legend_handles_labels()
+    # Keep only exploit entries for the legend (halve the entries)
+    ax_prec.legend(handles[::2], [l.replace(' exploit', '') for l in labels_[::2]], fontsize=9)
+    ax_prec.grid(True, alpha=0.3)
 
     plt.tight_layout()
     path = os.path.join(save_dir, 'bubble_timeseries.png')

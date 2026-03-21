@@ -31,6 +31,12 @@ jobs:
           mkdir -p test_results
           python3 test_filter_bubbles.py
 
+      - name: Run dual-feedback test
+        run: python3 test_dual_feedback.py
+
+      - name: Run agent improvement tests
+        run: python3 test_agent_improvements.py
+
       - name: Upload plots as artifacts
         uses: actions/upload-artifact@v4
         if: always()
