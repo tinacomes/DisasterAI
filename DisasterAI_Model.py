@@ -2434,23 +2434,18 @@ class DisasterModel(Model):
         
         aeci_variance = 0.0  # Default neutral value
         
-        # Define AI-reliant agents with adjusted threshold for observed behavior
-        # With equal +0.2 biases for human/ai and friend selection effects,
-        # agents query ~70% human / ~30% AI in practice (not 50/50)
-        # Threshold set to 25% to capture agents using AI significantly
-        min_calls_threshold = 10   # Need stable sample size
-        min_ai_ratio = 0.25        # Above 25% indicates meaningful AI usage
-        
+        # Classify AI-reliant agents by accepted_ai (actual belief influence),
+        # not query ratio. The feedback loop means agents that validated AI info
+        # as accurate will have built trust and accepted more AI updates. Using
+        # accepted_ai captures this: a query counter (accum_calls_ai) inflated by
+        # low-trust probing does not reflect real AI influence on beliefs.
+        min_accepted_ai = 3  # At least 3 accepted AI belief updates to qualify
+
         ai_reliant_agents = []
         for agent in self.humans.values():
-            # Safety checks for valid counters
-            if not hasattr(agent, 'accum_calls_total') or not hasattr(agent, 'accum_calls_ai'):
+            if not hasattr(agent, 'accepted_ai'):
                 continue
-                
-            total_calls = max(1, agent.accum_calls_total)  # Prevent division by zero
-            ai_ratio = agent.accum_calls_ai / total_calls
-            
-            if total_calls >= min_calls_threshold and ai_ratio >= min_ai_ratio:
+            if agent.accepted_ai >= min_accepted_ai:
                 ai_reliant_agents.append(agent)
         
         # Debug print
@@ -3207,51 +3202,72 @@ class DisasterModel(Model):
 
             self.belief_variance_data.append((self.tick, var_exploit, var_explor))
 
-            # --- AECI Calculation (Variance-based, matching SECI methodology) ---
-            # For each AI-reliant agent, compare their belief variance against
-            # global variance. Negative = AI reduces diversity (echo chamber),
-            # Positive = AI increases diversity. Same normalization as SECI.
+            # --- AECI Calculation (SECI-style peer-group methodology) ---
+            # Mirrors SECI exactly, but "friend network" → "AI-peer network".
+            # AI-reliant agents are classified by accepted_ai (actual belief
+            # updates accepted from AI), not query count. The feedback loop
+            # means agents that validated AI info as accurate build higher AI
+            # trust and accept more AI updates — so accepted_ai is the correct
+            # measure of AI influence on beliefs.
+            #
+            # For each AI-reliant agent, we look at the beliefs held by all
+            # other AI-reliant agents (their "AI-peer group") and compute the
+            # variance of that peer group's beliefs. Compare to global variance:
+            #   peer_var < global_var → AI-reliant agents hold similar beliefs
+            #                           → AI created an echo chamber (negative)
+            #   peer_var > global_var → AI-reliant agents hold diverse beliefs
+            #                           → AI broadened perspectives (positive)
             aeci_exp = []
             aeci_expl = []
 
-            min_ai_calls = 5  # Need some AI usage to be meaningful
+            min_accepted_ai = 3  # Minimum accepted AI belief updates to classify as AI-reliant
 
+            # Partition AI-reliant agents by type
+            ai_reliant_exp = []
+            ai_reliant_expl = []
             for agent in self.humans.values():
-                if not hasattr(agent, 'accum_calls_ai') or not hasattr(agent, 'accum_calls_total'):
+                if not hasattr(agent, 'accepted_ai'):
+                    continue
+                if agent.accepted_ai >= min_accepted_ai:
+                    if agent.agent_type == "exploitative":
+                        ai_reliant_exp.append(agent)
+                    else:
+                        ai_reliant_expl.append(agent)
+
+            # Collect group-level beliefs for each type (all peers in the AI-reliant set)
+            def _peer_beliefs(agents):
+                levels = []
+                for a in agents:
+                    for belief_info in a.beliefs.values():
+                        if isinstance(belief_info, dict):
+                            level = belief_info.get('level', 0)
+                            if not np.isnan(level):
+                                levels.append(level)
+                return levels
+
+            for agent_type_label, ai_reliant_group in [("exploitative", ai_reliant_exp),
+                                                        ("exploratory", ai_reliant_expl)]:
+                if len(ai_reliant_group) < 2:
+                    # Not enough AI-reliant agents to form a peer group
                     continue
 
-                agent.accum_calls_ai = max(0, agent.accum_calls_ai)
-                agent.accum_calls_total = max(0, agent.accum_calls_total)
-
-                # Only include agents that have used AI meaningfully
-                if agent.accum_calls_ai < min_ai_calls:
+                peer_belief_levels = _peer_beliefs(ai_reliant_group)
+                if len(peer_belief_levels) < 2:
                     continue
 
-                # Collect this agent's belief levels
-                agent_belief_levels = []
-                for belief_info in agent.beliefs.values():
-                    if isinstance(belief_info, dict):
-                        level = belief_info.get('level', 0)
-                        if not np.isnan(level):
-                            agent_belief_levels.append(level)
+                peer_var = np.var(peer_belief_levels)
 
-                if len(agent_belief_levels) < 2:
-                    continue
-
-                agent_var = np.var(agent_belief_levels)
-
-                # Calculate AECI same way as SECI: variance diff normalized
                 if global_var > 1e-9:
-                    var_diff = agent_var - global_var
-                    if var_diff < 0:  # Variance reduction (echo chamber)
+                    var_diff = peer_var - global_var
+                    if var_diff < 0:  # Echo chamber: AI-reliant agents hold similar beliefs
                         aeci_val = max(-1, var_diff / global_var)
-                    else:  # Variance increase (diversification)
+                    else:  # Diversification: AI-reliant agents hold more varied beliefs
                         max_possible_var = 5.0
                         aeci_val = min(1, var_diff / (max_possible_var - global_var))
                 else:
                     aeci_val = 0.0
 
-                if agent.agent_type == "exploitative":
+                if agent_type_label == "exploitative":
                     aeci_exp.append(aeci_val)
                 else:
                     aeci_expl.append(aeci_val)
@@ -3278,8 +3294,8 @@ class DisasterModel(Model):
                 self.running_aeci_expl = avg_aeci_expl
             else:
                 # Apply exponential moving average with safety bounds
-                self.running_aeci_exp = max(0.0, min(1.0, self.running_aeci_exp * 0.8 + avg_aeci_exp * 0.2))
-                self.running_aeci_expl = max(0.0, min(1.0, self.running_aeci_expl * 0.8 + avg_aeci_expl * 0.2))
+                self.running_aeci_exp = max(-1.0, min(1.0, self.running_aeci_exp * 0.8 + avg_aeci_exp * 0.2))
+                self.running_aeci_expl = max(-1.0, min(1.0, self.running_aeci_expl * 0.8 + avg_aeci_expl * 0.2))
 
             # Update last metrics
             self._last_metrics['running_aeci'] = {
