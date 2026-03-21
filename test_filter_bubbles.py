@@ -44,15 +44,15 @@ base_params = {
     'disaster_dynamics': 2,
     'width': 30,
     'height': 30,
-    'ticks': 200,
+    'ticks': 80,   # 80 ticks: 60 warmup + 20 steady-state window; was 200
     'learning_rate': 0.1,
     'epsilon': 0.3,
     'exploit_trust_lr': 0.015,
     'explor_trust_lr': 0.03,
 }
 
-ALIGNMENT_SWEEP = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
-STEADY_STATE_WINDOW = 30  # last N ticks for final metrics
+ALIGNMENT_SWEEP = [0.0, 0.2, 0.4, 0.6, 0.8, 1.0]  # 6 levels; halved from 11 to cut runtime ~45%
+STEADY_STATE_WINDOW = 20  # last N ticks for final metrics
 
 
 def run_alignment_condition(ai_alignment, label):
@@ -212,7 +212,7 @@ def plot_goldilocks(metrics, all_results, save_dir):
 
 def _plot_timeseries(all_results, save_dir):
     """Time-series SECI/AECI for selected alignment levels."""
-    key_idxs = [0, 2, 5, 8, 10]  # 0.0, 0.2, 0.5, 0.8, 1.0
+    key_idxs = [0, 1, 2, 3, 4, 5]  # 0.0, 0.2, 0.4, 0.6, 0.8, 1.0
     colors = plt.cm.viridis(np.linspace(0, 1, len(key_idxs)))
 
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
