@@ -37,6 +37,8 @@ Run locally (3 replications, ~15 min):
 For large-N CI runs use simulate.py + plot_results.py instead.
 """
 
+import argparse
+import json
 import numpy as np
 import matplotlib.pyplot as plt
 from DisasterAI_Model import DisasterModel, HumanAgent
@@ -810,27 +812,114 @@ def plot_echo_chamber_lifecycle(all_results, save_dir):
 
 
 # ---------------------------------------------------------------------------
+# Results persistence
+# ---------------------------------------------------------------------------
+
+RESULTS_FILE = 'test_results/experiment_results.json'
+
+
+def _factor_key(v):
+    """JSON keys are always strings; restore original numeric type on load."""
+    try:
+        i = int(v)
+        return i if str(i) == str(v) else float(v)
+    except (ValueError, TypeError):
+        return float(v)
+
+
+def save_results(all_results, rumor_results, disaster_results, mix_results, path=RESULTS_FILE):
+    """Persist all aggregated results to JSON for later plot-only reruns."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    data = {
+        'alignment_sweep': ALIGNMENT_SWEEP,
+        'all_results': all_results,
+        'rumor_results':    {str(k): v for k, v in rumor_results.items()},
+        'disaster_results': {str(k): v for k, v in disaster_results.items()},
+        'mix_results':      {str(k): v for k, v in mix_results.items()},
+    }
+    with open(path, 'w') as f:
+        json.dump(data, f)
+    print(f"Results saved → {path}")
+
+
+def load_results(path=RESULTS_FILE):
+    """Load previously saved aggregated results; returns the four result dicts."""
+    with open(path) as f:
+        data = json.load(f)
+    all_results     = data['all_results']
+    rumor_results   = {_factor_key(k): v for k, v in data['rumor_results'].items()}
+    disaster_results = {_factor_key(k): v for k, v in data['disaster_results'].items()}
+    mix_results     = {_factor_key(k): v for k, v in data['mix_results'].items()}
+    return all_results, rumor_results, disaster_results, mix_results
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
 if __name__ == '__main__':
-    print('=' * 70)
-    print('GOLDILOCKS ALIGNMENT EXPERIMENT: SOCIAL vs. AI FILTER BUBBLE INTERPLAY')
-    print('=' * 70)
-    print(f'Sweeping alignment levels: {ALIGNMENT_SWEEP}')
-    print(f'Ticks per run: {base_params["ticks"]}')
-    print(f'Replications (primary sweep): {N_RUNS}')
-    print(f'Replications (factor sweeps): {N_FACTOR_RUNS}')
-    print(f'Steady-state window: last {STEADY_STATE_WINDOW} ticks\n')
+    parser = argparse.ArgumentParser(
+        description='Goldilocks AI alignment experiment — run simulations and/or plot results.'
+    )
+    parser.add_argument(
+        '--plots-only', action='store_true',
+        help=f'Skip simulations and regenerate all plots from {RESULTS_FILE}',
+    )
+    parser.add_argument(
+        '--results-file', default=RESULTS_FILE,
+        help='Path to load/save aggregated results JSON (default: %(default)s)',
+    )
+    parser.add_argument(
+        '--save-dir', default='test_results',
+        help='Directory for output PNG files (default: %(default)s)',
+    )
+    args = parser.parse_args()
 
-    save_dir = 'test_results'
+    save_dir = args.save_dir
 
-    # 1. Primary alignment sweep
-    all_results = []
-    for alpha in ALIGNMENT_SWEEP:
-        params = {**base_params, 'ai_alignment_level': alpha}
-        all_results.append(run_replicated(params, N_RUNS, f'Alignment α={alpha:.1f}'))
+    if args.plots_only:
+        print(f"Loading results from {args.results_file} …")
+        all_results, rumor_results, disaster_results, mix_results = load_results(args.results_file)
+        print("Loaded. Regenerating plots …\n")
+    else:
+        print('=' * 70)
+        print('GOLDILOCKS ALIGNMENT EXPERIMENT: SOCIAL vs. AI FILTER BUBBLE INTERPLAY')
+        print('=' * 70)
+        print(f'Sweeping alignment levels: {ALIGNMENT_SWEEP}')
+        print(f'Ticks per run: {base_params["ticks"]}')
+        print(f'Replications (primary sweep): {N_RUNS}')
+        print(f'Replications (factor sweeps): {N_FACTOR_RUNS}')
+        print(f'Steady-state window: last {STEADY_STATE_WINDOW} ticks\n')
 
+        # 1. Primary alignment sweep
+        all_results = []
+        for alpha in ALIGNMENT_SWEEP:
+            params = {**base_params, 'ai_alignment_level': alpha}
+            all_results.append(run_replicated(params, N_RUNS, f'Alignment α={alpha:.1f}'))
+
+        # 2. Factor sweeps (at fixed α = FACTOR_ALPHA)
+        print('\n' + '=' * 70)
+        print(f'FACTOR SWEEPS  (all at α={FACTOR_ALPHA})')
+        print('=' * 70)
+
+        rumor_results = {}
+        for rp in RUMOR_SWEEP:
+            params = {**base_params, 'ai_alignment_level': FACTOR_ALPHA, 'rumor_probability': rp}
+            rumor_results[rp] = run_replicated(params, N_FACTOR_RUNS, f'Rumour p={rp}')
+
+        disaster_results = {}
+        for dd in DISASTER_SWEEP:
+            params = {**base_params, 'ai_alignment_level': FACTOR_ALPHA, 'disaster_dynamics': dd}
+            disaster_results[dd] = run_replicated(params, N_FACTOR_RUNS, f'Disaster dynamics={dd}')
+
+        mix_results = {}
+        for se in EXPLOITATIVE_SWEEP:
+            params = {**base_params, 'ai_alignment_level': FACTOR_ALPHA, 'share_exploitative': se}
+            mix_results[se] = run_replicated(params, N_FACTOR_RUNS, f'Exploitative share={se}')
+
+        save_results(all_results, rumor_results, disaster_results, mix_results, args.results_file)
+
+    # --- Plotting (shared by both paths) ---
     metrics = compute_goldilocks_metrics(all_results)
 
     print('\n' + '=' * 70)
@@ -846,30 +935,7 @@ if __name__ == '__main__':
               f"{m['total_bubble']:>8.3f}  {m['mae']:>7.3f}  {m['unmet']:>7.1f}{tag}")
 
     plot_goldilocks(metrics, all_results, save_dir)
-
-    # 2. Factor sweeps (at fixed α = FACTOR_ALPHA)
-    print('\n' + '=' * 70)
-    print(f'FACTOR SWEEPS  (all at α={FACTOR_ALPHA})')
-    print('=' * 70)
-
-    rumor_results = {}
-    for rp in RUMOR_SWEEP:
-        params = {**base_params, 'ai_alignment_level': FACTOR_ALPHA, 'rumor_probability': rp}
-        rumor_results[rp] = run_replicated(params, N_FACTOR_RUNS, f'Rumour p={rp}')
-
-    disaster_results = {}
-    for dd in DISASTER_SWEEP:
-        params = {**base_params, 'ai_alignment_level': FACTOR_ALPHA, 'disaster_dynamics': dd}
-        disaster_results[dd] = run_replicated(params, N_FACTOR_RUNS, f'Disaster dynamics={dd}')
-
-    mix_results = {}
-    for se in EXPLOITATIVE_SWEEP:
-        params = {**base_params, 'ai_alignment_level': FACTOR_ALPHA, 'share_exploitative': se}
-        mix_results[se] = run_replicated(params, N_FACTOR_RUNS, f'Exploitative share={se}')
-
     plot_factor_comparison(rumor_results, disaster_results, mix_results, save_dir)
-
-    # 3. Dynamics figures (use all_results from alignment sweep)
     plot_transition_timing(all_results, save_dir)
     plot_aeci_evolution(all_results, save_dir)
     plot_echo_chamber_lifecycle(all_results, save_dir)
@@ -883,3 +949,6 @@ if __name__ == '__main__':
     print('  total_bubble: |SECI| + |AECI| — minimise to find Goldilocks α*')
     print('  unmet_needs : cells at disaster L4+ with zero relief — measures response failure')
     print('  precision   : fraction of relief correctly sent to high-need cells')
+    if not args.plots_only:
+        print(f'\nResults saved to {args.results_file} — replot anytime with:')
+        print(f'  python3 test_filter_bubbles.py --plots-only')
