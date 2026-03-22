@@ -50,7 +50,9 @@ class HumanAgent(Agent):
                  learning_rate=0.1, epsilon=0.3,
                  trust_learning_rate=0.05,
                  exploit_trust_lr=0.03,
-                 explor_trust_lr=0.06):
+                 explor_trust_lr=0.06,
+                 d_exploit=2.0, delta_exploit=3.5,
+                 d_explor=4.0, delta_explor=1.2):
 
         # Use workaround: call parent initializer with model only, then set attributes.
         super(HumanAgent, self).__init__(model)
@@ -97,8 +99,8 @@ class HumanAgent(Agent):
 
         # --- Belief Update Parameters ---
         # These control how beliefs change when info is ACCEPTED (separate from Q-learning)
-        self.D = 2.0 if agent_type == "exploitative" else 4 # Acceptance threshold parameter
-        self.delta = 3.5 if agent_type == "exploitative" else 1.2 # Acceptance sensitivity parameter
+        self.D = d_exploit if agent_type == "exploitative" else d_explor       # Acceptance threshold parameter
+        self.delta = delta_exploit if agent_type == "exploitative" else delta_explor  # Acceptance sensitivity parameter
         self.belief_learning_rate = 0.9 if agent_type == "exploratory" else 0.4 # How much belief shifts towards accepted info
 
         # --- Other Parameters & Counters ---
@@ -2322,7 +2324,11 @@ class DisasterModel(Model):
                  exploit_trust_lr=0.03, # Default value matching base_params
                  explor_trust_lr=0.05,
                  exploit_friend_bias=0.1, # Default value matching base_params
-                 exploit_self_bias=0.1  # Default value matching base_params
+                 exploit_self_bias=0.1,  # Default value matching base_params
+                 d_exploit=2.0,          # Gap-scalar: acceptance threshold for exploitative agents
+                 delta_exploit=3.5,      # Gap-scalar: acceptance sensitivity for exploitative agents
+                 d_explor=4.0,           # Gap-scalar: acceptance threshold for exploratory agents
+                 delta_explor=1.2        # Gap-scalar: acceptance sensitivity for exploratory agents
                  ):
         super(DisasterModel, self).__init__()
         self.share_exploitative = share_exploitative
@@ -2351,6 +2357,10 @@ class DisasterModel(Model):
         self.explor_trust_lr = explor_trust_lr
         self.exploit_friend_bias = exploit_friend_bias
         self.exploit_self_bias = exploit_self_bias
+        self.d_exploit = d_exploit
+        self.delta_exploit = delta_exploit
+        self.d_explor = d_explor
+        self.delta_explor = delta_explor
 
         self.grid = MultiGrid(width, height, torus=False)
         self.tick = 0
@@ -2423,6 +2433,10 @@ class DisasterModel(Model):
                              learning_rate=self.learning_rate,
                              epsilon=self.epsilon,
                              trust_learning_rate=current_trust_lr,
+                             d_exploit=self.d_exploit,
+                             delta_exploit=self.delta_exploit,
+                             d_explor=self.d_explor,
+                             delta_explor=self.delta_explor,
                              )
             self.humans[f"H_{i}"] = agent
             self.agent_list.append(agent)

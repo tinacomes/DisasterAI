@@ -76,6 +76,27 @@ RUMOR_SWEEP        = [0.0, 0.5, 1.0]
 DISASTER_SWEEP     = [0, 2, 3]
 EXPLOITATIVE_SWEEP = [0.2, 0.5, 0.8]
 
+# Gap-scalar sweep for D/δ cognitive polarisation experiment.
+# g=0: both agent types identical (cognitive homogeneity null)
+# g=1: baseline (D_exploit=2.0, D_explor=4.0, δ_exploit=3.5, δ_explor=1.2)
+# Invariant maintained for any g>0: D_exploit < D_explor AND δ_exploit > δ_explor
+GAP_SWEEP = [0.0, 0.5, 1.0, 1.5]
+
+_D_MID     = 3.0   # (2.0 + 4.0) / 2
+_D_HALF    = 1.0   # (4.0 - 2.0) / 2
+_DELTA_MID = 2.35  # (3.5 + 1.2) / 2
+_DELTA_HALF = 1.15 # (3.5 - 1.2) / 2
+
+
+def _gap_d_delta(g):
+    """Return (d_exploit, delta_exploit, d_explor, delta_explor) for gap scalar g."""
+    return (
+        max(_D_MID - g * _D_HALF, 0.1),           # d_exploit  — floor at 0.1
+        max(_DELTA_MID + g * _DELTA_HALF, 0.1),    # delta_exploit
+        _D_MID + g * _D_HALF,                      # d_explor
+        max(_DELTA_MID - g * _DELTA_HALF, 0.1),    # delta_explor — floor at 0.1
+    )
+
 
 # ---------------------------------------------------------------------------
 # Simulation
@@ -120,8 +141,19 @@ def run_one_sim(params):
     prec_exploit, prec_explor       = [], []
     metric_ticks = []
 
+    W, H = params['width'], params['height']
+    cum_aid_grid      = np.zeros((W, H), dtype=float)
+    cum_disaster_grid = np.zeros((W, H), dtype=float)
+
     for tick in range(params['ticks']):
         model.step()
+
+        # Accumulate spatial aid and disaster grids
+        tok = np.zeros((W, H), dtype=float)
+        for pos, cnt in model.tokens_this_tick.items():
+            tok[pos[0], pos[1]] = cnt.get('exploit', 0) + cnt.get('explor', 0)
+        cum_aid_grid      += tok
+        cum_disaster_grid += model.disaster_grid.astype(float)
 
         if model.seci_data:
             s = model.seci_data[-1]
@@ -176,6 +208,67 @@ def run_one_sim(params):
 
     n = len(seci_exploit)
 
+    # ------------------------------------------------------------------ #
+    # Spatial coverage & network-periphery metrics (computed post-loop)   #
+    # ------------------------------------------------------------------ #
+    ticks_run = params['ticks']
+    avg_disaster = cum_disaster_grid / ticks_run
+    avg_aid      = cum_aid_grid      / ticks_run
+    # Positive = high need but little aid; negative = more aid than disaster level
+    coverage_deficit = avg_disaster - avg_aid
+
+    G       = model.social_network
+    degrees = dict(G.degree())          # {node_id(int): degree}
+    deg_vals = sorted(degrees.values())
+    n_agents = len(deg_vals)
+    lo_thresh = deg_vals[max(0, n_agents // 4 - 1)]
+    hi_thresh = deg_vals[min(n_agents - 1, 3 * n_agents // 4)]
+
+    ex, ey = model.epicenter           # grid coords of disaster centre
+    all_dists  = []
+    agent_data = []                    # (dist, degree, mae, ai_frac, aid_sent)
+    for agent in model.agent_list:
+        if not isinstance(agent, HumanAgent):
+            continue
+        node_id = int(agent.unique_id.split('_')[1])
+        deg     = degrees.get(node_id, 0)
+        ax, ay  = agent.pos
+        dist    = float(np.sqrt((ax - ex) ** 2 + (ay - ey) ** 2))
+        all_dists.append(dist)
+        err = float(np.mean([
+            abs(b.get('level', 0) - model.disaster_grid[c])
+            for c, b in agent.beliefs.items()
+            if isinstance(b, dict)
+        ])) if agent.beliefs else 0.0
+        ai_frac  = (agent.accum_calls_ai /
+                    max(agent.accum_calls_total, 1))
+        aid_sent = float(agent.correct_targets + agent.incorrect_targets)
+        agent_data.append((dist, deg, err, ai_frac, aid_sent))
+
+    # Split by spatial distance quartile (Q1 = near, Q4 = far)
+    if all_dists:
+        dist_q1 = np.percentile(all_dists, 25)
+        dist_q3 = np.percentile(all_dists, 75)
+    else:
+        dist_q1 = dist_q3 = 0.0
+
+    near_mae, near_ai, near_aid = [], [], []
+    far_mae,  far_ai,  far_aid  = [], [], []
+    lodeg_mae, lodeg_ai, lodeg_aid = [], [], []
+    hideg_mae, hideg_ai, hideg_aid = [], [], []
+
+    for dist, deg, err, ai_frac, aid_sent in agent_data:
+        if dist <= dist_q1:
+            near_mae.append(err); near_ai.append(ai_frac); near_aid.append(aid_sent)
+        elif dist >= dist_q3:
+            far_mae.append(err);  far_ai.append(ai_frac);  far_aid.append(aid_sent)
+        if deg <= lo_thresh:
+            lodeg_mae.append(err); lodeg_ai.append(ai_frac); lodeg_aid.append(aid_sent)
+        elif deg >= hi_thresh:
+            hideg_mae.append(err); hideg_ai.append(ai_frac); hideg_aid.append(aid_sent)
+
+    def _m(lst): return float(np.nanmean(lst)) if lst else float('nan')
+
     # --- Transition timing: first-crossing scalars (not cumulative end-counts) ---
     # 1. First tick AI trust overtakes friend trust (per agent type)
     trust_cross_exploit = next(
@@ -229,6 +322,19 @@ def run_one_sim(params):
         'ai_query50_explor':    float(ai_query50_explor),
         'aeci_var_zero':        float(aeci_var_zero),
         'info_surge_tick':      float(info_surge),
+        # Spatial coverage maps (averaged across ticks)
+        'coverage_deficit_map': coverage_deficit.tolist(),
+        'avg_disaster_map':     avg_disaster.tolist(),
+        'avg_aid_map':          avg_aid.tolist(),
+        'epicenter':            list(model.epicenter),
+        # Network-periphery scalars (spatial distance: near Q1 vs far Q4)
+        'near_mae':   _m(near_mae),  'far_mae':   _m(far_mae),
+        'near_ai':    _m(near_ai),   'far_ai':    _m(far_ai),
+        'near_aid':   _m(near_aid),  'far_aid':   _m(far_aid),
+        # Network-periphery scalars (graph degree: low Q1 vs high Q4)
+        'lodeg_mae':  _m(lodeg_mae), 'hideg_mae':  _m(hideg_mae),
+        'lodeg_ai':   _m(lodeg_ai),  'hideg_ai':   _m(hideg_ai),
+        'lodeg_aid':  _m(lodeg_aid), 'hideg_aid':  _m(hideg_aid),
     }
 
 
@@ -246,6 +352,9 @@ def _aggregate(runs):
         'seci_break_exploit',  'seci_break_explor',
         'ai_query50_exploit',  'ai_query50_explor',
         'aeci_var_zero',       'info_surge_tick',
+        # Spatial / network-periphery scalars
+        'near_mae', 'far_mae', 'near_ai', 'far_ai', 'near_aid', 'far_aid',
+        'lodeg_mae', 'hideg_mae', 'lodeg_ai', 'hideg_ai', 'lodeg_aid', 'hideg_aid',
     ]
     result = {
         'metric_ticks': runs[0]['metric_ticks'],
@@ -276,6 +385,12 @@ def _aggregate(runs):
         occurred = valid[valid < n_ticks_val] if n_ticks_val > 0 else np.array([])
         result[f'{key}_frac']      = float(len(occurred) / max(len(valid), 1))
         result[f'{key}_cond_mean'] = float(np.nanmean(occurred)) if len(occurred) > 0 else float('nan')
+    # Spatial maps: mean across replications (2-D arrays stored as list-of-lists)
+    for map_key in ('coverage_deficit_map', 'avg_disaster_map', 'avg_aid_map'):
+        maps = [np.array(r[map_key]) for r in runs if map_key in r and r[map_key]]
+        if maps:
+            result[f'{map_key}_mean'] = np.mean(maps, axis=0).tolist()
+    result['epicenter'] = runs[0].get('epicenter', [0, 0])
     return result
 
 
@@ -343,7 +458,8 @@ def plot_goldilocks(metrics, all_results, save_dir):
 
     fig, axes = plt.subplots(2, 3, figsize=(18, 10))
     fig.suptitle(
-        f'Goldilocks AI Alignment (α*={best_alpha}) — mean ± std, N={N_RUNS} replications',
+        f'Goldilocks AI Alignment (α*={best_alpha}) — mean ± std, N={N_RUNS} replications\n'
+        f'Steady state = mean of last {STEADY_STATE_WINDOW} ticks of each run',
         fontsize=13, fontweight='bold'
     )
 
@@ -401,32 +517,50 @@ def plot_goldilocks(metrics, all_results, save_dir):
 
 
 def _plot_timeseries(all_results, save_dir, best_alpha=None):
-    """2×3 timeseries with ± std shading per alignment level."""
+    """3×3 timeseries with ± std shading per alignment level.
+
+    SECI and AECI are shown in separate panels for exploitative and exploratory
+    agents so the two agent types can be compared without overlaying lines.
+    Layout:
+      Row 0: SECI (exploitative) | SECI (exploratory)   | Belief MAE
+      Row 1: AECI (exploitative) | AECI (exploratory)   | Unmet needs
+      Row 2: Relief precision    | (spare)               | (spare)
+    """
     colors = plt.cm.viridis(np.linspace(0, 1, len(ALIGNMENT_SWEEP)))
 
-    fig, axes = plt.subplots(2, 3, figsize=(18, 10))
+    fig, axes = plt.subplots(3, 3, figsize=(18, 14))
     fig.suptitle(
         f'Filter Bubble & Delivery Metrics Over Time  (mean ± std, N={N_RUNS})',
         fontsize=13, fontweight='bold'
     )
-    ax_seci, ax_aeci, ax_mae   = axes[0]
-    ax_prec, ax_unmet, ax_spare = axes[1]
-    ax_spare.axis('off')
+    ax_seci_ex, ax_seci_er, ax_mae    = axes[0]
+    ax_aeci_ex, ax_aeci_er, ax_unmet  = axes[1]
+    ax_prec,    ax_sp1,     ax_sp2    = axes[2]
+    ax_sp1.axis('off')
+    ax_sp2.axis('off')
 
     for color, (res, alpha) in zip(colors, zip(all_results, ALIGNMENT_SWEEP)):
         tf    = list(range(res['n_ticks']))
         ts    = res['metric_ticks']
         label = f'α={alpha}' + (' ★' if alpha == best_alpha else '')
 
-        # SECI / AECI — combined exploit+explor, per tick
-        for mk, ax_d in [('seci', ax_seci), ('aeci', ax_aeci)]:
-            m = (np.array(res[f'{mk}_exploit_mean']) + np.array(res[f'{mk}_explor_mean'])) / 2
-            s = (np.array(res[f'{mk}_exploit_std'])  + np.array(res[f'{mk}_explor_std']))  / 2
+        # SECI — separate panels per agent type
+        for mk, ax_d in [('seci_exploit', ax_seci_ex), ('seci_explor', ax_seci_er)]:
+            m = np.array(res[f'{mk}_mean'])
+            s = np.array(res[f'{mk}_std'])
             x = tf[:len(m)]
             ax_d.plot(x, m, color=color, linewidth=1.8, label=label)
             ax_d.fill_between(x, m - s, m + s, color=color, alpha=0.2)
 
-        # MAE — combined, sampled every 5 ticks
+        # AECI — separate panels per agent type
+        for mk, ax_d in [('aeci_exploit', ax_aeci_ex), ('aeci_explor', ax_aeci_er)]:
+            m = np.array(res[f'{mk}_mean'])
+            s = np.array(res[f'{mk}_std'])
+            x = tf[:len(m)]
+            ax_d.plot(x, m, color=color, linewidth=1.8, label=label)
+            ax_d.fill_between(x, m - s, m + s, color=color, alpha=0.2)
+
+        # MAE — combined exploit+explor, sampled every 5 ticks
         mae_m = (np.array(res['mae_exploit_mean']) + np.array(res['mae_explor_mean'])) / 2
         mae_s = (np.array(res['mae_exploit_std'])  + np.array(res['mae_explor_std']))  / 2
         x = ts[:len(mae_m)]
@@ -453,15 +587,19 @@ def _plot_timeseries(all_results, save_dir, best_alpha=None):
         ax_unmet.fill_between(x, un_m - un_s, un_m + un_s, color=color, alpha=0.2)
 
     for ax, title, ylabel, ylim, hl in [
-        (ax_seci,  'SECI Over Time',
+        (ax_seci_ex, 'SECI Over Time — Exploitative Agents\n(confirmation-biased, narrow acceptance)',
          'SECI (-1 to +1)', (-1.1, 1.1), 0),
-        (ax_aeci,  'AECI Over Time',
+        (ax_seci_er, 'SECI Over Time — Exploratory Agents\n(open, wide acceptance)',
+         'SECI (-1 to +1)', (-1.1, 1.1), 0),
+        (ax_aeci_ex, 'AECI Over Time — Exploitative Agents',
          'AECI (-1 to +1)', (-1.1, 1.1), 0),
-        (ax_mae,   'Belief MAE Over Time',
+        (ax_aeci_er, 'AECI Over Time — Exploratory Agents',
+         'AECI (-1 to +1)', (-1.1, 1.1), 0),
+        (ax_mae,   'Belief MAE Over Time  (exploit + explor avg)',
          'Mean Absolute Error', (0, None), None),
         (ax_prec,  'Relief Targeting Precision\n(solid=exploratory, dashed=exploitative)',
          'Correct / Total', (0, 1.05), 0.6),
-        (ax_unmet, 'Unmet High-Need Cells (level ≥4, 0 tokens)',
+        (ax_unmet, 'Unmet High-Need Cells per Tick (level ≥4, 0 tokens)',
          'Count', (0, None), None),
     ]:
         ax.set_xlabel('Tick')
@@ -476,10 +614,8 @@ def _plot_timeseries(all_results, save_dir, best_alpha=None):
         if hl is not None:
             ax.axhline(hl, color='k', linestyle=':', alpha=0.4)
 
-    ax_seci.legend(fontsize=8)
-    ax_aeci.legend(fontsize=8)
-    ax_mae.legend(fontsize=8)
-    ax_unmet.legend(fontsize=8)
+    for ax in [ax_seci_ex, ax_seci_er, ax_aeci_ex, ax_aeci_er, ax_mae, ax_unmet]:
+        ax.legend(fontsize=8)
     # Precision legend: deduplicate (keep one entry per α)
     hs, ls = ax_prec.get_legend_handles_labels()
     ax_prec.legend(hs[::2], [l.replace(' exploit', '') for l in ls[::2]], fontsize=8)
@@ -495,7 +631,8 @@ def plot_factor_comparison(rumor_res, disaster_res, mix_res, save_dir):
     """3×3 bar chart comparing factor effects on bubble & response metrics."""
     fig, axes = plt.subplots(3, 3, figsize=(16, 12))
     fig.suptitle(
-        f'Factor Effects at α={FACTOR_ALPHA}  (mean ± std across {N_FACTOR_RUNS} runs, averaged over all ticks)\n'
+        f'Factor Effects at α={FACTOR_ALPHA}  (mean ± std across {N_FACTOR_RUNS} runs)\n'
+        f'SECI & MAE: mean over all ticks;  Unmet needs: cumulative sum over all {base_params["ticks"]} ticks\n'
         'Each column: one factor swept while others held at base values',
         fontsize=12, fontweight='bold'
     )
@@ -509,23 +646,28 @@ def plot_factor_comparison(rumor_res, disaster_res, mix_res, save_dir):
          EXPLOITATIVE_SWEEP, mix_res),
     ]
     row_metrics = [
-        ('SECI — averaged over all ticks\n(negative = social bubble, 0 = neutral)',
-         'seci_exploit', (-1.1, 1.1)),
-        ('Belief MAE — averaged over all ticks\n(lower = beliefs closer to ground truth)',
-         'mae_exploit',  (0, None)),
-        ('Unmet high-need cells — averaged over all ticks\n(lower = better disaster response)',
-         'unmet_needs',  (0, None)),
+        ('SECI — mean over all ticks\n(negative = social bubble, 0 = neutral)',
+         'seci_exploit', 'mean', (-1.1, 1.1)),
+        ('Belief MAE — mean over all ticks\n(lower = beliefs closer to ground truth)',
+         'mae_exploit',  'mean', (0, None)),
+        (f'Total unmet high-need events — sum over all {base_params["ticks"]} ticks\n'
+         '(cells at level ≥4 with zero relief; lower = better response)',
+         'unmet_needs',  'sum',  (0, None)),
     ]
     bar_colors = ['#2196F3', '#FF9800', '#4CAF50']
 
     for col, (factor_label, factor_levels, res_dict) in enumerate(factor_cols):
-        for row, (metric_label, metric_key, ylim) in enumerate(row_metrics):
+        for row, (metric_label, metric_key, agg, ylim) in enumerate(row_metrics):
             ax = axes[row, col]
             means, stds = [], []
             for lv in factor_levels:
                 res = res_dict[lv]
-                m = float(np.nanmean(res[f'{metric_key}_mean'])) if res[f'{metric_key}_mean'] else float('nan')
-                s = float(np.nanmean(res[f'{metric_key}_std']))  if res[f'{metric_key}_std']  else float('nan')
+                if agg == 'sum':
+                    m = float(np.nansum(res[f'{metric_key}_mean'])) if res[f'{metric_key}_mean'] else float('nan')
+                    s = float(np.nansum(res[f'{metric_key}_std']))  if res[f'{metric_key}_std']  else float('nan')
+                else:
+                    m = float(np.nanmean(res[f'{metric_key}_mean'])) if res[f'{metric_key}_mean'] else float('nan')
+                    s = float(np.nanmean(res[f'{metric_key}_std']))  if res[f'{metric_key}_std']  else float('nan')
                 means.append(m)
                 stds.append(s if not np.isnan(s) else 0.0)
 
@@ -834,6 +976,268 @@ def plot_echo_chamber_lifecycle(all_results, save_dir):
 
 
 # ---------------------------------------------------------------------------
+# Spatial coverage & periphery-gap plots
+# ---------------------------------------------------------------------------
+
+def plot_spatial_coverage(all_results, metrics, save_dir):
+    """
+    2-row × 3-col figure comparing spatial coverage across three α levels.
+
+    Row 1 — Coverage Deficit (avg_disaster − avg_aid): red = chronically
+             under-served; blue = over-served relative to local severity.
+    Row 2 — Average Aid Density: how many tokens per tick reached each cell.
+
+    The epicenter is marked with a white star on every panel.
+    """
+    alphas = ALIGNMENT_SWEEP
+    total_vals = [metrics[a]['total_bubble'] for a in alphas]
+    best_alpha  = alphas[int(np.argmin(total_vals))]
+
+    # Choose three representative α values
+    show_alphas = [0.0, best_alpha, 1.0]
+    # De-duplicate while preserving order
+    seen = set()
+    show_alphas = [a for a in show_alphas if not (a in seen or seen.add(a))]
+    ncols = len(show_alphas)
+
+    fig, axes = plt.subplots(2, ncols, figsize=(5 * ncols, 9))
+    fig.suptitle(
+        'Spatial Coverage Analysis  (avg over full run)\n'
+        'Top: coverage deficit (disaster − aid)  |  Bottom: aid density',
+        fontsize=12, fontweight='bold'
+    )
+
+    # Gather colour-scale limits across all shown results for consistency
+    all_deficits = []
+    all_aids     = []
+    result_map   = {}
+    for alpha, res in zip(alphas, all_results):
+        if alpha not in show_alphas:
+            continue
+        if 'coverage_deficit_map_mean' in res:
+            all_deficits.append(np.array(res['coverage_deficit_map_mean']))
+            all_aids.append(    np.array(res['avg_aid_map_mean']))
+        result_map[alpha] = res
+
+    vdef = max(abs(np.nanmax(all_deficits)), abs(np.nanmin(all_deficits))) if all_deficits else 1.0
+    vaid = np.nanmax(all_aids) if all_aids else 1.0
+
+    for col, alpha in enumerate(show_alphas):
+        res = result_map.get(alpha)
+        ex, ey = res['epicenter'] if res else [0, 0]
+
+        ax_def = axes[0, col] if ncols > 1 else axes[0]
+        ax_aid = axes[1, col] if ncols > 1 else axes[1]
+
+        label = f'α={alpha:.1f}'
+        if alpha == best_alpha:
+            label += '  ← α*'
+
+        if res and 'coverage_deficit_map_mean' in res:
+            deficit = np.array(res['coverage_deficit_map_mean']).T  # transpose: x→col, y→row
+            aid_map = np.array(res['avg_aid_map_mean']).T
+
+            im1 = ax_def.imshow(deficit, origin='lower', cmap='RdBu_r',
+                                vmin=-vdef, vmax=vdef, aspect='auto')
+            ax_def.plot(ex, ey, '*', color='white', markersize=14,
+                        markeredgecolor='black', markeredgewidth=0.8,
+                        label='Epicentre')
+            plt.colorbar(im1, ax=ax_def, fraction=0.046, pad=0.04,
+                         label='Deficit (disaster − aid)')
+
+            im2 = ax_aid.imshow(aid_map, origin='lower', cmap='Blues',
+                                vmin=0, vmax=vaid, aspect='auto')
+            ax_aid.plot(ex, ey, '*', color='gold', markersize=14,
+                        markeredgecolor='black', markeredgewidth=0.8)
+            plt.colorbar(im2, ax=ax_aid, fraction=0.046, pad=0.04,
+                         label='Avg tokens / tick')
+        else:
+            ax_def.text(0.5, 0.5, 'No data', ha='center', va='center',
+                        transform=ax_def.transAxes)
+            ax_aid.text(0.5, 0.5, 'No data', ha='center', va='center',
+                        transform=ax_aid.transAxes)
+
+        ax_def.set_title(label, fontsize=11)
+        ax_def.set_xlabel('Grid x'); ax_def.set_ylabel('Grid y')
+        ax_aid.set_xlabel('Grid x'); ax_aid.set_ylabel('Grid y')
+
+    plt.tight_layout()
+    os.makedirs(save_dir, exist_ok=True)
+    path = os.path.join(save_dir, 'spatial_coverage.png')
+    plt.savefig(path, dpi=150, bbox_inches='tight')
+    plt.close()
+    print(f"Spatial coverage figure saved: {path}")
+
+
+def plot_periphery_gap(all_results, metrics, save_dir):
+    """
+    2-row × 2-col figure showing how the periphery gap varies with α.
+
+    Left column  — spatial periphery (far Q4 vs near Q1 agents by distance
+                   to the disaster epicentre).
+    Right column — network periphery (low-degree Q1 vs high-degree Q4 agents
+                   in the Watts–Strogatz social network).
+
+    Row 1 — Belief MAE: are periphery agents less accurate?
+    Row 2 — AI-query fraction: do periphery agents compensate via AI?
+
+    A gap that shrinks toward α* is evidence that Goldilocks alignment
+    reduces structural inequality in situational awareness.
+    """
+    alphas = ALIGNMENT_SWEEP
+    total_vals  = [metrics[a]['total_bubble'] for a in alphas]
+    best_alpha  = alphas[int(np.argmin(total_vals))]
+
+    def _get(res, key):
+        return float(res.get(f'{key}_mean', float('nan')))
+
+    near_mae  = [_get(r, 'near_mae')  for r in all_results]
+    far_mae   = [_get(r, 'far_mae')   for r in all_results]
+    near_ai   = [_get(r, 'near_ai')   for r in all_results]
+    far_ai    = [_get(r, 'far_ai')    for r in all_results]
+
+    lodeg_mae = [_get(r, 'lodeg_mae') for r in all_results]
+    hideg_mae = [_get(r, 'hideg_mae') for r in all_results]
+    lodeg_ai  = [_get(r, 'lodeg_ai')  for r in all_results]
+    hideg_ai  = [_get(r, 'hideg_ai')  for r in all_results]
+
+    fig, axes = plt.subplots(2, 2, figsize=(13, 9))
+    fig.suptitle(
+        'Periphery Gap across AI Alignment (α)\n'
+        'Left: spatial (far vs near epicentre)  |  Right: network degree (low vs high)',
+        fontsize=12, fontweight='bold'
+    )
+
+    def _panel(ax, core_vals, periph_vals, core_label, periph_label,
+                ylabel, title, ylim=None):
+        ax.plot(alphas, core_vals,   'o-', color='steelblue',  linewidth=2,
+                label=core_label,   markersize=7)
+        ax.plot(alphas, periph_vals, 's--', color='firebrick', linewidth=2,
+                label=periph_label, markersize=7)
+        # Shade the gap
+        ax.fill_between(alphas, core_vals, periph_vals, alpha=0.12, color='orange',
+                         label='Gap')
+        ax.axvline(best_alpha, color='gold', linestyle='--', linewidth=2,
+                   label=f'α*={best_alpha}')
+        ax.set_xlabel('AI Alignment Level (α)')
+        ax.set_ylabel(ylabel)
+        ax.set_title(title)
+        if ylim:
+            ax.set_ylim(*ylim)
+        ax.legend(fontsize=8)
+        ax.grid(True, alpha=0.3)
+
+    _panel(axes[0, 0], near_mae, far_mae,
+           'Near epicentre (Q1)', 'Far epicentre (Q4)',
+           'Belief MAE', 'Spatial periphery — Belief Accuracy\n(lower = better)')
+
+    _panel(axes[0, 1], hideg_mae, lodeg_mae,
+           'High degree (Q4)', 'Low degree (Q1)',
+           'Belief MAE', 'Network periphery — Belief Accuracy\n(lower = better)')
+
+    _panel(axes[1, 0], near_ai, far_ai,
+           'Near epicentre (Q1)', 'Far epicentre (Q4)',
+           'AI query fraction', 'Spatial periphery — AI Usage\n(higher = more AI queries)',
+           ylim=(0, 1))
+
+    _panel(axes[1, 1], hideg_ai, lodeg_ai,
+           'High degree (Q4)', 'Low degree (Q1)',
+           'AI query fraction', 'Network periphery — AI Usage\n(higher = more AI queries)',
+           ylim=(0, 1))
+
+    plt.tight_layout()
+    os.makedirs(save_dir, exist_ok=True)
+    path = os.path.join(save_dir, 'periphery_gap.png')
+    plt.savefig(path, dpi=150, bbox_inches='tight')
+    plt.close()
+    print(f"Periphery gap figure saved: {path}")
+
+
+# ---------------------------------------------------------------------------
+# Gap-scalar sweep plot
+# ---------------------------------------------------------------------------
+
+def plot_gap_sweep(gap_results, save_dir):
+    """2×2 figure: effect of cognitive polarisation (gap scalar g) at fixed α.
+
+    For each g value we run the full alignment sweep and record α* (the
+    Goldilocks point) plus the minimum total_bubble achieved.  Two additional
+    panels show how steady-state SECI and AECI change with g.
+    """
+    g_values   = sorted(gap_results.keys())
+    best_alphas   = []
+    min_bubbles   = []
+    seci_at_star  = []
+    aeci_at_star  = []
+
+    for g in g_values:
+        results_g = gap_results[g]['all_results']
+        metrics_g = compute_goldilocks_metrics(results_g)
+        total_vals = [metrics_g[a]['total_bubble'] for a in ALIGNMENT_SWEEP]
+        idx = int(np.argmin(total_vals))
+        best_alphas.append(ALIGNMENT_SWEEP[idx])
+        min_bubbles.append(total_vals[idx])
+        seci_at_star.append(metrics_g[ALIGNMENT_SWEEP[idx]]['seci'])
+        aeci_at_star.append(metrics_g[ALIGNMENT_SWEEP[idx]]['aeci'])
+
+    g_labels = [f'g={g}\n(D_ex={_D_MID-g*_D_HALF:.1f}, δ_ex={_DELTA_MID+g*_DELTA_HALF:.2f})'
+                for g in g_values]
+    x = np.arange(len(g_values))
+
+    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+    fig.suptitle(
+        'Cognitive Polarisation Sweep (gap scalar g)\n'
+        'g=0: no heterogeneity  |  g=1: baseline  |  g=1.5: strongly polarised',
+        fontsize=13, fontweight='bold',
+    )
+
+    # Panel 1: α* vs g
+    ax = axes[0, 0]
+    ax.bar(x, best_alphas, color='steelblue', alpha=0.85, edgecolor='white')
+    ax.set_xticks(x); ax.set_xticklabels(g_labels, fontsize=8)
+    ax.set_ylabel('Goldilocks α*')
+    ax.set_title('Goldilocks Point α* vs Cognitive Polarisation')
+    ax.set_ylim(0, 1.05)
+    ax.axhline(0.5, color='gray', linestyle=':', alpha=0.6, label='α=0.5')
+    ax.legend(fontsize=9); ax.grid(True, alpha=0.3, axis='y')
+
+    # Panel 2: min total_bubble vs g
+    ax = axes[0, 1]
+    ax.bar(x, min_bubbles, color='purple', alpha=0.75, edgecolor='white')
+    ax.set_xticks(x); ax.set_xticklabels(g_labels, fontsize=8)
+    ax.set_ylabel('min(|SECI| + |AECI|)')
+    ax.set_title('Minimum Total Bubble at α*\n(lower = Goldilocks zone is more effective)')
+    ax.grid(True, alpha=0.3, axis='y')
+
+    # Panel 3: SECI at α* vs g
+    ax = axes[1, 0]
+    ax.plot(g_values, seci_at_star, 'b-o', linewidth=2, markersize=8)
+    ax.axhline(0, color='k', linestyle=':', alpha=0.5)
+    ax.set_xlabel('Gap scalar g')
+    ax.set_ylabel('SECI at α*')
+    ax.set_title('Social Echo Chamber Strength at α*\n(negative = stronger bubble)')
+    ax.set_ylim(-1.1, 0.5)
+    ax.grid(True, alpha=0.3)
+
+    # Panel 4: AECI at α* vs g
+    ax = axes[1, 1]
+    ax.plot(g_values, aeci_at_star, 'r-o', linewidth=2, markersize=8)
+    ax.axhline(0, color='k', linestyle=':', alpha=0.5)
+    ax.set_xlabel('Gap scalar g')
+    ax.set_ylabel('AECI at α*')
+    ax.set_title('AI-Induced Bubble Strength at α*\n(negative = stronger AI bubble)')
+    ax.set_ylim(-1.1, 0.5)
+    ax.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    os.makedirs(save_dir, exist_ok=True)
+    path = os.path.join(save_dir, 'gap_sweep.png')
+    plt.savefig(path, dpi=150, bbox_inches='tight')
+    plt.close()
+    print(f"Gap sweep figure saved: {path}")
+
+
+# ---------------------------------------------------------------------------
 # Results persistence
 # ---------------------------------------------------------------------------
 
@@ -849,7 +1253,8 @@ def _factor_key(v):
         return float(v)
 
 
-def save_results(all_results, rumor_results, disaster_results, mix_results, path=RESULTS_FILE):
+def save_results(all_results, rumor_results, disaster_results, mix_results,
+                 gap_results=None, path=RESULTS_FILE):
     """Persist all aggregated results to JSON for later plot-only reruns."""
     os.makedirs(os.path.dirname(path), exist_ok=True)
     data = {
@@ -858,6 +1263,7 @@ def save_results(all_results, rumor_results, disaster_results, mix_results, path
         'rumor_results':    {str(k): v for k, v in rumor_results.items()},
         'disaster_results': {str(k): v for k, v in disaster_results.items()},
         'mix_results':      {str(k): v for k, v in mix_results.items()},
+        'gap_results':      {str(k): v for k, v in (gap_results or {}).items()},
     }
     with open(path, 'w') as f:
         json.dump(data, f)
@@ -865,14 +1271,15 @@ def save_results(all_results, rumor_results, disaster_results, mix_results, path
 
 
 def load_results(path=RESULTS_FILE):
-    """Load previously saved aggregated results; returns the four result dicts."""
+    """Load previously saved aggregated results; returns the five result dicts."""
     with open(path) as f:
         data = json.load(f)
-    all_results     = data['all_results']
-    rumor_results   = {_factor_key(k): v for k, v in data['rumor_results'].items()}
+    all_results      = data['all_results']
+    rumor_results    = {_factor_key(k): v for k, v in data['rumor_results'].items()}
     disaster_results = {_factor_key(k): v for k, v in data['disaster_results'].items()}
-    mix_results     = {_factor_key(k): v for k, v in data['mix_results'].items()}
-    return all_results, rumor_results, disaster_results, mix_results
+    mix_results      = {_factor_key(k): v for k, v in data['mix_results'].items()}
+    gap_results      = {_factor_key(k): v for k, v in data.get('gap_results', {}).items()}
+    return all_results, rumor_results, disaster_results, mix_results, gap_results
 
 
 # ---------------------------------------------------------------------------
@@ -895,13 +1302,18 @@ if __name__ == '__main__':
         '--save-dir', default='test_results',
         help='Directory for output PNG files (default: %(default)s)',
     )
+    parser.add_argument(
+        '--skip-gap', action='store_true',
+        help='Skip the gap-scalar sweep (4g × 6α × N_FACTOR_RUNS runs); '
+             'use when running the gap sweep in a separate parallel CI job.',
+    )
     args = parser.parse_args()
 
     save_dir = args.save_dir
 
     if args.plots_only:
         print(f"Loading results from {args.results_file} …")
-        all_results, rumor_results, disaster_results, mix_results = load_results(args.results_file)
+        all_results, rumor_results, disaster_results, mix_results, gap_results = load_results(args.results_file)
         print("Loaded. Regenerating plots …\n")
     else:
         print('=' * 70)
@@ -939,7 +1351,38 @@ if __name__ == '__main__':
             params = {**base_params, 'ai_alignment_level': FACTOR_ALPHA, 'share_exploitative': se}
             mix_results[se] = run_replicated(params, N_FACTOR_RUNS, f'Exploitative share={se}')
 
-        save_results(all_results, rumor_results, disaster_results, mix_results, args.results_file)
+        # 3. Gap-scalar sweep (skipped when --skip-gap is set so CI can run it
+        #    in a parallel job and avoid hitting the per-job timeout).
+        if args.skip_gap:
+            print('\nSkipping gap-scalar sweep (--skip-gap); run separately.')
+            gap_results = {}
+        else:
+            print('\n' + '=' * 70)
+            print('GAP-SCALAR SWEEP  (cognitive polarisation: g ∈ ' + str(GAP_SWEEP) + ')')
+            print('=' * 70)
+            gap_results = {}
+            for g in GAP_SWEEP:
+                d_ex, dlt_ex, d_er, dlt_er = _gap_d_delta(g)
+                print(f"\n--- g={g}: D_exploit={d_ex:.2f}, δ_exploit={dlt_ex:.2f}, "
+                      f"D_explor={d_er:.2f}, δ_explor={dlt_er:.2f} ---")
+                g_alpha_results = []
+                for alpha in ALIGNMENT_SWEEP:
+                    params = {
+                        **base_params,
+                        'ai_alignment_level': alpha,
+                        'd_exploit':    d_ex,
+                        'delta_exploit': dlt_ex,
+                        'd_explor':     d_er,
+                        'delta_explor': dlt_er,
+                    }
+                    g_alpha_results.append(
+                        run_replicated(params, N_FACTOR_RUNS,
+                                       f'g={g} α={alpha:.1f}')
+                    )
+                gap_results[g] = {'all_results': g_alpha_results}
+
+        save_results(all_results, rumor_results, disaster_results, mix_results,
+                     gap_results, args.results_file)
 
     # --- Plotting (shared by both paths) ---
     metrics = compute_goldilocks_metrics(all_results)
@@ -961,6 +1404,10 @@ if __name__ == '__main__':
     plot_transition_timing(all_results, save_dir)
     plot_aeci_evolution(all_results, save_dir)
     plot_echo_chamber_lifecycle(all_results, save_dir)
+    plot_spatial_coverage(all_results, metrics, save_dir)
+    plot_periphery_gap(all_results, metrics, save_dir)
+    if gap_results:
+        plot_gap_sweep(gap_results, save_dir)
 
     print('\n' + '=' * 70)
     print('EXPERIMENT COMPLETE')
