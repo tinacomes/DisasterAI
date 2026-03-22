@@ -158,6 +158,7 @@ def run_one_sim(params):
     trust_ai_explor,  trust_fri_explor  = [], []
     ai_query_ratio_exploit              = []   # per-tick fraction of queries sent to AI
     ai_query_ratio_explor               = []
+    aeci_var                            = []   # AECI-Var timeseries (used in lifecycle plot)
     info_div_exploit, info_div_explor   = [], []
     mae_exploit,  mae_explor            = [], []
     prec_exploit, prec_explor           = [], []
@@ -214,7 +215,8 @@ def run_one_sim(params):
             trust_ai_explor.append(float(ts[4]))
             trust_fri_explor.append(float(ts[5]))
 
-        # aeci_variance_data not used for transition metrics (always triggered at tick 0)
+        if model.aeci_variance_data:
+            aeci_var.append(float(model.aeci_variance_data[-1][1]))
 
         if model.info_diversity_data:
             d = model.info_diversity_data[-1]
@@ -337,6 +339,7 @@ def run_one_sim(params):
         'trust_fri_explor':        trust_fri_explor,
         'ai_query_ratio_exploit':  ai_query_ratio_exploit,
         'ai_query_ratio_explor':   ai_query_ratio_explor,
+        'aeci_var':                aeci_var,
         'info_div_exploit':        info_div_exploit,
         'info_div_explor':         info_div_explor,
         'mae_exploit':             mae_exploit,
@@ -374,6 +377,7 @@ def _aggregate(runs):
         'seci_exploit', 'seci_explor', 'aeci_exploit', 'aeci_explor',
         'trust_ai_exploit', 'trust_fri_exploit', 'trust_ai_explor', 'trust_fri_explor',
         'ai_query_ratio_exploit', 'ai_query_ratio_explor',
+        'aeci_var',
         'info_div_exploit', 'info_div_explor',
         'mae_exploit', 'mae_explor', 'prec_exploit', 'prec_explor',
         'unmet_needs',
@@ -934,9 +938,12 @@ def plot_echo_chamber_lifecycle(all_results, save_dir):
         peak_exp.append(float(np.nanmax(np.abs(se_mean))) if len(se_mean) else 0.0)
         peak_expl.append(float(np.nanmax(np.abs(sr_mean))) if len(sr_mean) else 0.0)
 
-        # When peak (tick of max |SECI|)
-        when_exp.append(int(np.nanargmax(np.abs(se_mean))) if len(se_mean) else 0)
-        when_expl.append(int(np.nanargmax(np.abs(sr_mean))) if len(sr_mean) else 0)
+        # When recovery: first tick the mean SECI rises back above CHAMBER_THRESH
+        # after forming below it.  This varies by α (high alignment → slower recovery).
+        # The formation peak is always ~tick 4 (initial belief formation), so we show
+        # recovery instead — a meaningful discriminator across alignment levels.
+        when_exp.append(_first_sustained_break(list(se_mean), sustain=3))
+        when_expl.append(_first_sustained_break(list(sr_mean), sustain=3))
 
         # Duration = fraction of ticks with SECI < CHAMBER_THRESH (scale-invariant)
         dur_exp.append(float(np.mean(se_mean < CHAMBER_THRESH)) if len(se_mean) else 0.0)
@@ -981,10 +988,21 @@ def plot_echo_chamber_lifecycle(all_results, save_dir):
     ax_peak.set_xlabel('AI Alignment')
     ax_peak.legend(fontsize=9); ax_peak.grid(True, alpha=0.3, axis='y')
 
-    ax_when.bar(x - w/2, when_exp,  w, label='Exploitative', color='#1A3A6B', alpha=0.85)
-    ax_when.bar(x + w/2, when_expl, w, label='Exploratory',  color='#6BAED6', alpha=0.85)
-    ax_when.set_title('When Do Chambers Peak?', fontsize=10)
-    ax_when.set_ylabel('Time to Peak (ticks)')
+    n_ticks_val = all_results[0]['n_ticks']
+    # Cap at n_ticks so "never recovered" bars still render clearly
+    when_exp_plot  = [min(v, n_ticks_val) for v in when_exp]
+    when_expl_plot = [min(v, n_ticks_val) for v in when_expl]
+    ax_when.bar(x - w/2, when_exp_plot,  w, label='Exploitative', color='#1A3A6B', alpha=0.85)
+    ax_when.bar(x + w/2, when_expl_plot, w, label='Exploratory',  color='#6BAED6', alpha=0.85)
+    # Annotate bars that never recovered with a "✗"
+    for xi, (ve, vr) in enumerate(zip(when_exp, when_expl)):
+        if ve >= n_ticks_val:
+            ax_when.text(xi - w/2, min(ve, n_ticks_val) + 1, '✗', ha='center', fontsize=9)
+        if vr >= n_ticks_val:
+            ax_when.text(xi + w/2, min(vr, n_ticks_val) + 1, '✗', ha='center', fontsize=9)
+    ax_when.set_title('When Does Echo Chamber Recover?\n(first tick SECI sustains > −0.1)', fontsize=10)
+    ax_when.set_ylabel('Tick of first recovery (✗ = never)')
+    ax_when.set_ylim(0, n_ticks_val * 1.15)
     ax_when.set_xticks(x); ax_when.set_xticklabels(x_str)
     ax_when.set_xlabel('AI Alignment')
     ax_when.legend(fontsize=9); ax_when.grid(True, alpha=0.3, axis='y')

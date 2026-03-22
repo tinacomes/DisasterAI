@@ -85,6 +85,9 @@ jobs:
           fb.plot_transition_timing(all_results, save_dir)
           fb.plot_aeci_evolution(all_results, save_dir)
           fb.plot_echo_chamber_lifecycle(all_results, save_dir)
+          metrics = fb.compute_goldilocks_metrics(all_results)
+          fb.plot_spatial_coverage(all_results, metrics, save_dir)
+          fb.plot_periphery_gap(all_results, metrics, save_dir)
           print('test_filter_bubbles.py: OK')
           "
 
