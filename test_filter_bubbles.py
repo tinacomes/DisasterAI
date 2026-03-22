@@ -68,7 +68,7 @@ base_params = {
 ALIGNMENT_SWEEP    = [0.0, 0.2, 0.4, 0.6, 0.8, 1.0]
 STEADY_STATE_WINDOW = 15
 
-N_RUNS        = 3    # replications for primary alignment sweep
+N_RUNS        = 10   # replications for primary alignment sweep
 N_FACTOR_RUNS = 2    # replications for factor sweeps
 
 FACTOR_ALPHA       = 0.5
@@ -1356,6 +1356,12 @@ if __name__ == '__main__':
         help='Skip the gap-scalar sweep (4g × 6α × N_FACTOR_RUNS runs); '
              'use when running the gap sweep in a separate parallel CI job.',
     )
+    parser.add_argument(
+        '--primary-only', action='store_true',
+        help='Re-run only the primary alignment sweep (N_RUNS replications); '
+             'reuse factor/gap results from --results-file. Useful for bumping '
+             'N_RUNS without repeating the factor/gap sweeps.',
+    )
     args = parser.parse_args()
 
     save_dir = args.save_dir
@@ -1364,6 +1370,22 @@ if __name__ == '__main__':
         print(f"Loading results from {args.results_file} …")
         all_results, rumor_results, disaster_results, mix_results, gap_results = load_results(args.results_file)
         print("Loaded. Regenerating plots …\n")
+    elif args.primary_only:
+        print(f"Loading existing factor/gap results from {args.results_file} …")
+        _, rumor_results, disaster_results, mix_results, gap_results = load_results(args.results_file)
+        print("Loaded. Re-running primary alignment sweep only.\n")
+        print('=' * 70)
+        print('PRIMARY ALIGNMENT SWEEP ONLY')
+        print('=' * 70)
+        print(f'Sweeping alignment levels: {ALIGNMENT_SWEEP}')
+        print(f'Ticks per run: {base_params["ticks"]}')
+        print(f'Replications: {N_RUNS}\n')
+        all_results = []
+        for alpha in ALIGNMENT_SWEEP:
+            params = {**base_params, 'ai_alignment_level': alpha}
+            all_results.append(run_replicated(params, N_RUNS, f'Alignment α={alpha:.1f}'))
+        save_results(all_results, rumor_results, disaster_results, mix_results,
+                     gap_results, args.results_file)
     else:
         print('=' * 70)
         print('GOLDILOCKS ALIGNMENT EXPERIMENT: SOCIAL vs. AI FILTER BUBBLE INTERPLAY')
