@@ -1371,9 +1371,13 @@ if __name__ == '__main__':
         all_results, rumor_results, disaster_results, mix_results, gap_results = load_results(args.results_file)
         print("Loaded. Regenerating plots …\n")
     elif args.primary_only:
-        print(f"Loading existing factor/gap results from {args.results_file} …")
-        _, rumor_results, disaster_results, mix_results, gap_results = load_results(args.results_file)
-        print("Loaded. Re-running primary alignment sweep only.\n")
+        if os.path.exists(args.results_file):
+            print(f"Loading existing factor/gap results from {args.results_file} …")
+            _, rumor_results, disaster_results, mix_results, gap_results = load_results(args.results_file)
+            print("Loaded. Re-running primary alignment sweep only.\n")
+        else:
+            print("No existing results file — factor/gap plots will be skipped.\n")
+            rumor_results, disaster_results, mix_results, gap_results = {}, {}, {}, {}
         print('=' * 70)
         print('PRIMARY ALIGNMENT SWEEP ONLY')
         print('=' * 70)
