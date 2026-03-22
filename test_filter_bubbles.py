@@ -1302,6 +1302,11 @@ if __name__ == '__main__':
         '--save-dir', default='test_results',
         help='Directory for output PNG files (default: %(default)s)',
     )
+    parser.add_argument(
+        '--skip-gap', action='store_true',
+        help='Skip the gap-scalar sweep (4g × 6α × N_FACTOR_RUNS runs); '
+             'use when running the gap sweep in a separate parallel CI job.',
+    )
     args = parser.parse_args()
 
     save_dir = args.save_dir
@@ -1346,31 +1351,35 @@ if __name__ == '__main__':
             params = {**base_params, 'ai_alignment_level': FACTOR_ALPHA, 'share_exploitative': se}
             mix_results[se] = run_replicated(params, N_FACTOR_RUNS, f'Exploitative share={se}')
 
-        # 3. Gap-scalar sweep: vary cognitive polarisation (D/δ) at each g,
-        #    running the full alignment sweep so α* can be detected per g level.
-        print('\n' + '=' * 70)
-        print('GAP-SCALAR SWEEP  (cognitive polarisation: g ∈ ' + str(GAP_SWEEP) + ')')
-        print('=' * 70)
-        gap_results = {}
-        for g in GAP_SWEEP:
-            d_ex, dlt_ex, d_er, dlt_er = _gap_d_delta(g)
-            print(f"\n--- g={g}: D_exploit={d_ex:.2f}, δ_exploit={dlt_ex:.2f}, "
-                  f"D_explor={d_er:.2f}, δ_explor={dlt_er:.2f} ---")
-            g_alpha_results = []
-            for alpha in ALIGNMENT_SWEEP:
-                params = {
-                    **base_params,
-                    'ai_alignment_level': alpha,
-                    'd_exploit':    d_ex,
-                    'delta_exploit': dlt_ex,
-                    'd_explor':     d_er,
-                    'delta_explor': dlt_er,
-                }
-                g_alpha_results.append(
-                    run_replicated(params, N_FACTOR_RUNS,
-                                   f'g={g} α={alpha:.1f}')
-                )
-            gap_results[g] = {'all_results': g_alpha_results}
+        # 3. Gap-scalar sweep (skipped when --skip-gap is set so CI can run it
+        #    in a parallel job and avoid hitting the per-job timeout).
+        if args.skip_gap:
+            print('\nSkipping gap-scalar sweep (--skip-gap); run separately.')
+            gap_results = {}
+        else:
+            print('\n' + '=' * 70)
+            print('GAP-SCALAR SWEEP  (cognitive polarisation: g ∈ ' + str(GAP_SWEEP) + ')')
+            print('=' * 70)
+            gap_results = {}
+            for g in GAP_SWEEP:
+                d_ex, dlt_ex, d_er, dlt_er = _gap_d_delta(g)
+                print(f"\n--- g={g}: D_exploit={d_ex:.2f}, δ_exploit={dlt_ex:.2f}, "
+                      f"D_explor={d_er:.2f}, δ_explor={dlt_er:.2f} ---")
+                g_alpha_results = []
+                for alpha in ALIGNMENT_SWEEP:
+                    params = {
+                        **base_params,
+                        'ai_alignment_level': alpha,
+                        'd_exploit':    d_ex,
+                        'delta_exploit': dlt_ex,
+                        'd_explor':     d_er,
+                        'delta_explor': dlt_er,
+                    }
+                    g_alpha_results.append(
+                        run_replicated(params, N_FACTOR_RUNS,
+                                       f'g={g} α={alpha:.1f}')
+                    )
+                gap_results[g] = {'all_results': g_alpha_results}
 
         save_results(all_results, rumor_results, disaster_results, mix_results,
                      gap_results, args.results_file)
