@@ -114,16 +114,37 @@ def _first_cross(series, threshold, direction='up'):
     return len(series)
 
 
-def _first_break(series, form_thresh=-0.1, break_thresh=-0.05):
-    """First index where series recovers above break_thresh after forming below form_thresh."""
+def _first_sustained_break(series, form_thresh=-0.1, break_thresh=-0.05, sustain=5):
+    """First index where series recovers above break_thresh *and stays there* for
+    `sustain` consecutive non-NaN ticks after having formed below form_thresh.
+    Returns len(series) if the condition is never met.
+    """
     formed = False
     for i, v in enumerate(series):
         if np.isnan(v):
             continue
         if not formed and v < form_thresh:
             formed = True
-        elif formed and v > break_thresh:
-            return i
+        elif formed:
+            window = [w for w in series[i:i + sustain] if not np.isnan(w)]
+            if len(window) == sustain and all(w > break_thresh for w in window):
+                return i
+    return len(series)
+
+
+def _first_sustained_cross(series, threshold, sustain=5, direction='up'):
+    """First index where series crosses threshold and stays there for `sustain` ticks."""
+    for i, v in enumerate(series):
+        if np.isnan(v):
+            continue
+        if direction == 'up' and v >= threshold:
+            window = [w for w in series[i:i + sustain] if not np.isnan(w)]
+            if len(window) == sustain and all(w >= threshold for w in window):
+                return i
+        elif direction == 'down' and v <= threshold:
+            window = [w for w in series[i:i + sustain] if not np.isnan(w)]
+            if len(window) == sustain and all(w <= threshold for w in window):
+                return i
     return len(series)
 
 
@@ -131,15 +152,18 @@ def run_one_sim(params):
     """Run a single simulation and return per-tick metrics dict."""
     model = DisasterModel(**params)
 
-    seci_exploit, seci_explor       = [], []
-    aeci_exploit, aeci_explor       = [], []
+    seci_exploit, seci_explor           = [], []
+    aeci_exploit, aeci_explor           = [], []
     trust_ai_exploit, trust_fri_exploit = [], []
     trust_ai_explor,  trust_fri_explor  = [], []
-    aeci_var                        = []
+    ai_query_ratio_exploit              = []   # per-tick fraction of queries sent to AI
+    ai_query_ratio_explor               = []
     info_div_exploit, info_div_explor   = [], []
-    mae_exploit,  mae_explor        = [], []
-    prec_exploit, prec_explor       = [], []
+    mae_exploit,  mae_explor            = [], []
+    prec_exploit, prec_explor           = [], []
     metric_ticks = []
+    # Cumulative call counters for computing per-tick deltas
+    _prev_ai_ex = _prev_tot_ex = _prev_ai_er = _prev_tot_er = 0
 
     W, H = params['width'], params['height']
     cum_aid_grid      = np.zeros((W, H), dtype=float)
@@ -154,6 +178,24 @@ def run_one_sim(params):
             tok[pos[0], pos[1]] = cnt.get('exploit', 0) + cnt.get('explor', 0)
         cum_aid_grid      += tok
         cum_disaster_grid += model.disaster_grid.astype(float)
+
+        # --- Per-tick AI query ratio (delta of cumulative accum_calls counters) ---
+        ai_ex = tot_ex = ai_er = tot_er = 0
+        for _ag in model.agent_list:
+            if not isinstance(_ag, HumanAgent):
+                continue
+            _ai  = getattr(_ag, 'accum_calls_ai',    0)
+            _tot = getattr(_ag, 'accum_calls_total',  0)
+            if _ag.agent_type == 'exploitative':
+                ai_ex += _ai;  tot_ex += _tot
+            else:
+                ai_er += _ai;  tot_er += _tot
+        d_ai_ex,  _prev_ai_ex  = ai_ex  - _prev_ai_ex,  ai_ex
+        d_tot_ex, _prev_tot_ex = tot_ex - _prev_tot_ex, tot_ex
+        d_ai_er,  _prev_ai_er  = ai_er  - _prev_ai_er,  ai_er
+        d_tot_er, _prev_tot_er = tot_er - _prev_tot_er, tot_er
+        ai_query_ratio_exploit.append(d_ai_ex / d_tot_ex if d_tot_ex > 0 else float('nan'))
+        ai_query_ratio_explor.append( d_ai_er / d_tot_er if d_tot_er > 0 else float('nan'))
 
         if model.seci_data:
             s = model.seci_data[-1]
@@ -172,8 +214,7 @@ def run_one_sim(params):
             trust_ai_explor.append(float(ts[4]))
             trust_fri_explor.append(float(ts[5]))
 
-        if model.aeci_variance_data:
-            aeci_var.append(float(model.aeci_variance_data[-1][1]))
+        # aeci_variance_data not used for transition metrics (always triggered at tick 0)
 
         if model.info_diversity_data:
             d = model.info_diversity_data[-1]
@@ -269,50 +310,41 @@ def run_one_sim(params):
 
     def _m(lst): return float(np.nanmean(lst)) if lst else float('nan')
 
-    # --- Transition timing: first-crossing scalars (not cumulative end-counts) ---
-    # 1. First tick AI trust overtakes friend trust (per agent type)
-    trust_cross_exploit = next(
-        (i for i, (a, f) in enumerate(zip(trust_ai_exploit, trust_fri_exploit)) if a > f), n)
-    trust_cross_explor = next(
-        (i for i, (a, f) in enumerate(zip(trust_ai_explor, trust_fri_explor)) if a > f), n)
+    # --- Transition timing: first-crossing scalars ---
+    # 1. First tick AI trust *sustains* lead over friend trust for ≥5 consecutive ticks.
+    #    Using sustained crossing prevents spurious detections from noisy trust updates.
+    trust_cross_exploit = _first_sustained_cross(
+        [a - f for a, f in zip(trust_ai_exploit, trust_fri_exploit)], 0.0, sustain=5)
+    trust_cross_explor = _first_sustained_cross(
+        [a - f for a, f in zip(trust_ai_explor, trust_fri_explor)], 0.0, sustain=5)
 
-    # 2. SECI breaks: first tick SECI recovers to > -0.05 after forming below -0.1
-    seci_break_exploit = _first_break(seci_exploit)
-    seci_break_explor  = _first_break(seci_explor)
+    # 2. SECI sustained break: SECI stays above -0.05 for ≥5 ticks after forming < -0.1
+    seci_break_exploit = _first_sustained_break(seci_exploit)
+    seci_break_explor  = _first_sustained_break(seci_explor)
 
-    # 3. First tick AI query ratio > 50%
-    ai_query50_exploit = _first_cross(aeci_exploit, 0.5)
-    ai_query50_explor  = _first_cross(aeci_explor,  0.5)
-
-    # 4. First tick AECI-Var approaches 0 (> -0.05)
-    aeci_var_zero = _first_cross(aeci_var, -0.05) if aeci_var else n
-
-    # 5. Info diversity surge: first tick where 1-step increase > 0.1
-    info_surge = n
-    if len(info_div_exploit) > 1:
-        info_surge = next(
-            (i + 1 for i in range(len(info_div_exploit) - 1)
-             if info_div_exploit[i + 1] - info_div_exploit[i] > 0.1),
-            n)
+    # 3. First tick AI query ratio (real calls, not AECI proxy) sustains > 50% for ≥5 ticks
+    ai_query50_exploit = _first_sustained_cross(ai_query_ratio_exploit, 0.5, sustain=5)
+    ai_query50_explor  = _first_sustained_cross(ai_query_ratio_explor,  0.5, sustain=5)
 
     return {
-        'seci_exploit':       seci_exploit,
-        'seci_explor':        seci_explor,
-        'aeci_exploit':       aeci_exploit,
-        'aeci_explor':        aeci_explor,
-        'trust_ai_exploit':   trust_ai_exploit,
-        'trust_fri_exploit':  trust_fri_exploit,
-        'trust_ai_explor':    trust_ai_explor,
-        'trust_fri_explor':   trust_fri_explor,
-        'aeci_var':           aeci_var,
-        'info_div_exploit':   info_div_exploit,
-        'info_div_explor':    info_div_explor,
-        'mae_exploit':        mae_exploit,
-        'mae_explor':         mae_explor,
-        'prec_exploit':       prec_exploit,
-        'prec_explor':        prec_explor,
-        'unmet_needs':        [float(v) for v in model.unmet_needs_evolution],
-        'metric_ticks':       metric_ticks,
+        'seci_exploit':            seci_exploit,
+        'seci_explor':             seci_explor,
+        'aeci_exploit':            aeci_exploit,
+        'aeci_explor':             aeci_explor,
+        'trust_ai_exploit':        trust_ai_exploit,
+        'trust_fri_exploit':       trust_fri_exploit,
+        'trust_ai_explor':         trust_ai_explor,
+        'trust_fri_explor':        trust_fri_explor,
+        'ai_query_ratio_exploit':  ai_query_ratio_exploit,
+        'ai_query_ratio_explor':   ai_query_ratio_explor,
+        'info_div_exploit':        info_div_exploit,
+        'info_div_explor':         info_div_explor,
+        'mae_exploit':             mae_exploit,
+        'mae_explor':              mae_explor,
+        'prec_exploit':            prec_exploit,
+        'prec_explor':             prec_explor,
+        'unmet_needs':             [float(v) for v in model.unmet_needs_evolution],
+        'metric_ticks':            metric_ticks,
         # Scalar timing values (one per replication, aggregated across reps later)
         'trust_cross_exploit':  float(trust_cross_exploit),
         'trust_cross_explor':   float(trust_cross_explor),
@@ -320,8 +352,6 @@ def run_one_sim(params):
         'seci_break_explor':    float(seci_break_explor),
         'ai_query50_exploit':   float(ai_query50_exploit),
         'ai_query50_explor':    float(ai_query50_explor),
-        'aeci_var_zero':        float(aeci_var_zero),
-        'info_surge_tick':      float(info_surge),
         # Spatial coverage maps (averaged across ticks)
         'coverage_deficit_map': coverage_deficit.tolist(),
         'avg_disaster_map':     avg_disaster.tolist(),
@@ -343,7 +373,8 @@ def _aggregate(runs):
     ts_keys = [
         'seci_exploit', 'seci_explor', 'aeci_exploit', 'aeci_explor',
         'trust_ai_exploit', 'trust_fri_exploit', 'trust_ai_explor', 'trust_fri_explor',
-        'aeci_var', 'info_div_exploit', 'info_div_explor',
+        'ai_query_ratio_exploit', 'ai_query_ratio_explor',
+        'info_div_exploit', 'info_div_explor',
         'mae_exploit', 'mae_explor', 'prec_exploit', 'prec_explor',
         'unmet_needs',
     ]
@@ -351,7 +382,6 @@ def _aggregate(runs):
         'trust_cross_exploit', 'trust_cross_explor',
         'seci_break_exploit',  'seci_break_explor',
         'ai_query50_exploit',  'ai_query50_explor',
-        'aeci_var_zero',       'info_surge_tick',
         # Spatial / network-periphery scalars
         'near_mae', 'far_mae', 'near_ai', 'far_ai', 'near_aid', 'far_aid',
         'lodeg_mae', 'hideg_mae', 'lodeg_ai', 'hideg_ai', 'lodeg_aid', 'hideg_aid',
@@ -751,34 +781,35 @@ def plot_transition_timing(all_results, save_dir):
          'trust_cross_exploit', 'trust_cross_explor',
          '#8B0000', '#FA8072',
          'Exploitative', 'Exploratory',
-         'AI Trust Overtakes Friend Trust')
+         'AI Trust Sustains Lead Over Friend Trust\n(≥5 consecutive ticks)')
 
     _bar(axes[0, 1],
          'seci_break_exploit', 'seci_break_explor',
          '#1A3A6B', '#6BAED6',
          'Exploitative', 'Exploratory',
-         'Social Echo Chamber Breaks (SECI → 0)')
+         'Social Echo Chamber Breaks (SECI → 0)\n(sustained ≥5 ticks above −0.05)')
 
     _bar(axes[1, 0],
          'ai_query50_exploit', 'ai_query50_explor',
          '#1B5E20', '#66BB6A',
          'Exploitative', 'Exploratory',
-         'AI Query Ratio > 50%')
+         'AI Queries > 50% of Total Queries\n(real call counts, sustained ≥5 ticks)')
 
-    # Bottom-right: system-wide scalars
+    # Bottom-right: steady-state AI query ratio by alignment level
     ax = axes[1, 1]
-    frac_aeci = [r.get('aeci_var_zero_frac', float('nan')) for r in all_results]
-    frac_info  = [r.get('info_surge_tick_frac', float('nan')) for r in all_results]
-    cond_aeci  = [r.get('aeci_var_zero_cond_mean', float('nan')) for r in all_results]
-    cond_info  = [r.get('info_surge_tick_cond_mean', float('nan')) for r in all_results]
-    b_a = ax.bar(x - w / 2, frac_aeci, w, color='magenta',    alpha=0.85, label='AECI-Var → 0')
-    b_i = ax.bar(x + w / 2, frac_info,  w, color='darkorange', alpha=0.85, label='Info Div Surge')
-    _annotate(ax, b_a, cond_aeci)
-    _annotate(ax, b_i, cond_info)
+    ss_ex  = [ss(r.get('ai_query_ratio_exploit_mean', [])) for r in all_results]
+    ss_er  = [ss(r.get('ai_query_ratio_explor_mean',  [])) for r in all_results]
+    std_ex = [ss(r.get('ai_query_ratio_exploit_std',  [])) for r in all_results]
+    std_er = [ss(r.get('ai_query_ratio_explor_std',   [])) for r in all_results]
+    ax.errorbar(alphas, ss_ex, yerr=std_ex, fmt='-o', color='#8B0000',
+                linewidth=2, capsize=5, label='Exploitative')
+    ax.errorbar(alphas, ss_er, yerr=std_er, fmt='-s', color='#FA8072',
+                linewidth=2, capsize=5, label='Exploratory')
+    ax.axhline(0.5, color='gray', linestyle='--', alpha=0.6, label='50% threshold')
     ax.set_xlabel('AI Alignment')
-    ax.set_ylabel('Fraction of runs\nwhere event occurs')
-    ax.set_title('System-Wide Transitions')
-    ax.set_ylim(0, 1.25)
+    ax.set_ylabel('AI query share\n(mean ± std, last 15 ticks)')
+    ax.set_title(f'Steady-State AI Query Ratio\n(last {STEADY_STATE_WINDOW} ticks avg)')
+    ax.set_ylim(0, 1.05)
     ax.set_xticks(x)
     ax.set_xticklabels(x_str)
     ax.legend(fontsize=9)
