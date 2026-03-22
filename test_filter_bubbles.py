@@ -76,6 +76,27 @@ RUMOR_SWEEP        = [0.0, 0.5, 1.0]
 DISASTER_SWEEP     = [0, 2, 3]
 EXPLOITATIVE_SWEEP = [0.2, 0.5, 0.8]
 
+# Gap-scalar sweep for D/δ cognitive polarisation experiment.
+# g=0: both agent types identical (cognitive homogeneity null)
+# g=1: baseline (D_exploit=2.0, D_explor=4.0, δ_exploit=3.5, δ_explor=1.2)
+# Invariant maintained for any g>0: D_exploit < D_explor AND δ_exploit > δ_explor
+GAP_SWEEP = [0.0, 0.5, 1.0, 1.5]
+
+_D_MID     = 3.0   # (2.0 + 4.0) / 2
+_D_HALF    = 1.0   # (4.0 - 2.0) / 2
+_DELTA_MID = 2.35  # (3.5 + 1.2) / 2
+_DELTA_HALF = 1.15 # (3.5 - 1.2) / 2
+
+
+def _gap_d_delta(g):
+    """Return (d_exploit, delta_exploit, d_explor, delta_explor) for gap scalar g."""
+    return (
+        max(_D_MID - g * _D_HALF, 0.1),           # d_exploit  — floor at 0.1
+        max(_DELTA_MID + g * _DELTA_HALF, 0.1),    # delta_exploit
+        _D_MID + g * _D_HALF,                      # d_explor
+        max(_DELTA_MID - g * _DELTA_HALF, 0.1),    # delta_explor — floor at 0.1
+    )
+
 
 # ---------------------------------------------------------------------------
 # Simulation
@@ -1106,6 +1127,90 @@ def plot_periphery_gap(all_results, metrics, save_dir):
 
 
 # ---------------------------------------------------------------------------
+# Gap-scalar sweep plot
+# ---------------------------------------------------------------------------
+
+def plot_gap_sweep(gap_results, save_dir):
+    """2×2 figure: effect of cognitive polarisation (gap scalar g) at fixed α.
+
+    For each g value we run the full alignment sweep and record α* (the
+    Goldilocks point) plus the minimum total_bubble achieved.  Two additional
+    panels show how steady-state SECI and AECI change with g.
+    """
+    g_values   = sorted(gap_results.keys())
+    best_alphas   = []
+    min_bubbles   = []
+    seci_at_star  = []
+    aeci_at_star  = []
+
+    for g in g_values:
+        results_g = gap_results[g]['all_results']
+        metrics_g = compute_goldilocks_metrics(results_g)
+        total_vals = [metrics_g[a]['total_bubble'] for a in ALIGNMENT_SWEEP]
+        idx = int(np.argmin(total_vals))
+        best_alphas.append(ALIGNMENT_SWEEP[idx])
+        min_bubbles.append(total_vals[idx])
+        seci_at_star.append(metrics_g[ALIGNMENT_SWEEP[idx]]['seci'])
+        aeci_at_star.append(metrics_g[ALIGNMENT_SWEEP[idx]]['aeci'])
+
+    g_labels = [f'g={g}\n(D_ex={_D_MID-g*_D_HALF:.1f}, δ_ex={_DELTA_MID+g*_DELTA_HALF:.2f})'
+                for g in g_values]
+    x = np.arange(len(g_values))
+
+    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+    fig.suptitle(
+        'Cognitive Polarisation Sweep (gap scalar g)\n'
+        'g=0: no heterogeneity  |  g=1: baseline  |  g=1.5: strongly polarised',
+        fontsize=13, fontweight='bold',
+    )
+
+    # Panel 1: α* vs g
+    ax = axes[0, 0]
+    ax.bar(x, best_alphas, color='steelblue', alpha=0.85, edgecolor='white')
+    ax.set_xticks(x); ax.set_xticklabels(g_labels, fontsize=8)
+    ax.set_ylabel('Goldilocks α*')
+    ax.set_title('Goldilocks Point α* vs Cognitive Polarisation')
+    ax.set_ylim(0, 1.05)
+    ax.axhline(0.5, color='gray', linestyle=':', alpha=0.6, label='α=0.5')
+    ax.legend(fontsize=9); ax.grid(True, alpha=0.3, axis='y')
+
+    # Panel 2: min total_bubble vs g
+    ax = axes[0, 1]
+    ax.bar(x, min_bubbles, color='purple', alpha=0.75, edgecolor='white')
+    ax.set_xticks(x); ax.set_xticklabels(g_labels, fontsize=8)
+    ax.set_ylabel('min(|SECI| + |AECI|)')
+    ax.set_title('Minimum Total Bubble at α*\n(lower = Goldilocks zone is more effective)')
+    ax.grid(True, alpha=0.3, axis='y')
+
+    # Panel 3: SECI at α* vs g
+    ax = axes[1, 0]
+    ax.plot(g_values, seci_at_star, 'b-o', linewidth=2, markersize=8)
+    ax.axhline(0, color='k', linestyle=':', alpha=0.5)
+    ax.set_xlabel('Gap scalar g')
+    ax.set_ylabel('SECI at α*')
+    ax.set_title('Social Echo Chamber Strength at α*\n(negative = stronger bubble)')
+    ax.set_ylim(-1.1, 0.5)
+    ax.grid(True, alpha=0.3)
+
+    # Panel 4: AECI at α* vs g
+    ax = axes[1, 1]
+    ax.plot(g_values, aeci_at_star, 'r-o', linewidth=2, markersize=8)
+    ax.axhline(0, color='k', linestyle=':', alpha=0.5)
+    ax.set_xlabel('Gap scalar g')
+    ax.set_ylabel('AECI at α*')
+    ax.set_title('AI-Induced Bubble Strength at α*\n(negative = stronger AI bubble)')
+    ax.set_ylim(-1.1, 0.5)
+    ax.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    os.makedirs(save_dir, exist_ok=True)
+    path = os.path.join(save_dir, 'gap_sweep.png')
+    plt.savefig(path, dpi=150, bbox_inches='tight')
+    plt.close()
+    print(f"Gap sweep figure saved: {path}")
+
+
+# ---------------------------------------------------------------------------
 # Results persistence
 # ---------------------------------------------------------------------------
 
@@ -1121,7 +1226,8 @@ def _factor_key(v):
         return float(v)
 
 
-def save_results(all_results, rumor_results, disaster_results, mix_results, path=RESULTS_FILE):
+def save_results(all_results, rumor_results, disaster_results, mix_results,
+                 gap_results=None, path=RESULTS_FILE):
     """Persist all aggregated results to JSON for later plot-only reruns."""
     os.makedirs(os.path.dirname(path), exist_ok=True)
     data = {
@@ -1130,6 +1236,7 @@ def save_results(all_results, rumor_results, disaster_results, mix_results, path
         'rumor_results':    {str(k): v for k, v in rumor_results.items()},
         'disaster_results': {str(k): v for k, v in disaster_results.items()},
         'mix_results':      {str(k): v for k, v in mix_results.items()},
+        'gap_results':      {str(k): v for k, v in (gap_results or {}).items()},
     }
     with open(path, 'w') as f:
         json.dump(data, f)
@@ -1137,14 +1244,15 @@ def save_results(all_results, rumor_results, disaster_results, mix_results, path
 
 
 def load_results(path=RESULTS_FILE):
-    """Load previously saved aggregated results; returns the four result dicts."""
+    """Load previously saved aggregated results; returns the five result dicts."""
     with open(path) as f:
         data = json.load(f)
-    all_results     = data['all_results']
-    rumor_results   = {_factor_key(k): v for k, v in data['rumor_results'].items()}
+    all_results      = data['all_results']
+    rumor_results    = {_factor_key(k): v for k, v in data['rumor_results'].items()}
     disaster_results = {_factor_key(k): v for k, v in data['disaster_results'].items()}
-    mix_results     = {_factor_key(k): v for k, v in data['mix_results'].items()}
-    return all_results, rumor_results, disaster_results, mix_results
+    mix_results      = {_factor_key(k): v for k, v in data['mix_results'].items()}
+    gap_results      = {_factor_key(k): v for k, v in data.get('gap_results', {}).items()}
+    return all_results, rumor_results, disaster_results, mix_results, gap_results
 
 
 # ---------------------------------------------------------------------------
@@ -1173,7 +1281,7 @@ if __name__ == '__main__':
 
     if args.plots_only:
         print(f"Loading results from {args.results_file} …")
-        all_results, rumor_results, disaster_results, mix_results = load_results(args.results_file)
+        all_results, rumor_results, disaster_results, mix_results, gap_results = load_results(args.results_file)
         print("Loaded. Regenerating plots …\n")
     else:
         print('=' * 70)
@@ -1211,7 +1319,34 @@ if __name__ == '__main__':
             params = {**base_params, 'ai_alignment_level': FACTOR_ALPHA, 'share_exploitative': se}
             mix_results[se] = run_replicated(params, N_FACTOR_RUNS, f'Exploitative share={se}')
 
-        save_results(all_results, rumor_results, disaster_results, mix_results, args.results_file)
+        # 3. Gap-scalar sweep: vary cognitive polarisation (D/δ) at each g,
+        #    running the full alignment sweep so α* can be detected per g level.
+        print('\n' + '=' * 70)
+        print('GAP-SCALAR SWEEP  (cognitive polarisation: g ∈ ' + str(GAP_SWEEP) + ')')
+        print('=' * 70)
+        gap_results = {}
+        for g in GAP_SWEEP:
+            d_ex, dlt_ex, d_er, dlt_er = _gap_d_delta(g)
+            print(f"\n--- g={g}: D_exploit={d_ex:.2f}, δ_exploit={dlt_ex:.2f}, "
+                  f"D_explor={d_er:.2f}, δ_explor={dlt_er:.2f} ---")
+            g_alpha_results = []
+            for alpha in ALIGNMENT_SWEEP:
+                params = {
+                    **base_params,
+                    'ai_alignment_level': alpha,
+                    'd_exploit':    d_ex,
+                    'delta_exploit': dlt_ex,
+                    'd_explor':     d_er,
+                    'delta_explor': dlt_er,
+                }
+                g_alpha_results.append(
+                    run_replicated(params, N_FACTOR_RUNS,
+                                   f'g={g} α={alpha:.1f}')
+                )
+            gap_results[g] = {'all_results': g_alpha_results}
+
+        save_results(all_results, rumor_results, disaster_results, mix_results,
+                     gap_results, args.results_file)
 
     # --- Plotting (shared by both paths) ---
     metrics = compute_goldilocks_metrics(all_results)
@@ -1235,6 +1370,8 @@ if __name__ == '__main__':
     plot_echo_chamber_lifecycle(all_results, save_dir)
     plot_spatial_coverage(all_results, metrics, save_dir)
     plot_periphery_gap(all_results, metrics, save_dir)
+    if gap_results:
+        plot_gap_sweep(gap_results, save_dir)
 
     print('\n' + '=' * 70)
     print('EXPERIMENT COMPLETE')
