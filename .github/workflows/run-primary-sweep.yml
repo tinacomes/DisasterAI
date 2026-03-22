@@ -1,0 +1,31 @@
+name: Run Primary Alignment Sweep only
+
+# Re-runs only the 6α × N_RUNS primary sweep — no factor/gap sweeps.
+# Use this after bumping N_RUNS or tweaking primary-sweep parameters.
+on:
+  workflow_dispatch:
+
+env:
+  MPLBACKEND: Agg
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  filter-bubbles-primary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11", cache: "pip"}
+      - run: pip install -r requirements.txt
+      - run: |
+          mkdir -p filter_bubble_results
+          python3 test_filter_bubbles.py \
+            --primary-only \
+            --save-dir filter_bubble_results/
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: filter-bubble-primary-plots
+          path: filter_bubble_results/*.png
+          retention-days: 30
