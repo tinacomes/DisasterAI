@@ -458,7 +458,8 @@ def plot_goldilocks(metrics, all_results, save_dir):
 
     fig, axes = plt.subplots(2, 3, figsize=(18, 10))
     fig.suptitle(
-        f'Goldilocks AI Alignment (α*={best_alpha}) — mean ± std, N={N_RUNS} replications',
+        f'Goldilocks AI Alignment (α*={best_alpha}) — mean ± std, N={N_RUNS} replications\n'
+        f'Steady state = mean of last {STEADY_STATE_WINDOW} ticks of each run',
         fontsize=13, fontweight='bold'
     )
 
@@ -516,32 +517,50 @@ def plot_goldilocks(metrics, all_results, save_dir):
 
 
 def _plot_timeseries(all_results, save_dir, best_alpha=None):
-    """2×3 timeseries with ± std shading per alignment level."""
+    """3×3 timeseries with ± std shading per alignment level.
+
+    SECI and AECI are shown in separate panels for exploitative and exploratory
+    agents so the two agent types can be compared without overlaying lines.
+    Layout:
+      Row 0: SECI (exploitative) | SECI (exploratory)   | Belief MAE
+      Row 1: AECI (exploitative) | AECI (exploratory)   | Unmet needs
+      Row 2: Relief precision    | (spare)               | (spare)
+    """
     colors = plt.cm.viridis(np.linspace(0, 1, len(ALIGNMENT_SWEEP)))
 
-    fig, axes = plt.subplots(2, 3, figsize=(18, 10))
+    fig, axes = plt.subplots(3, 3, figsize=(18, 14))
     fig.suptitle(
         f'Filter Bubble & Delivery Metrics Over Time  (mean ± std, N={N_RUNS})',
         fontsize=13, fontweight='bold'
     )
-    ax_seci, ax_aeci, ax_mae   = axes[0]
-    ax_prec, ax_unmet, ax_spare = axes[1]
-    ax_spare.axis('off')
+    ax_seci_ex, ax_seci_er, ax_mae    = axes[0]
+    ax_aeci_ex, ax_aeci_er, ax_unmet  = axes[1]
+    ax_prec,    ax_sp1,     ax_sp2    = axes[2]
+    ax_sp1.axis('off')
+    ax_sp2.axis('off')
 
     for color, (res, alpha) in zip(colors, zip(all_results, ALIGNMENT_SWEEP)):
         tf    = list(range(res['n_ticks']))
         ts    = res['metric_ticks']
         label = f'α={alpha}' + (' ★' if alpha == best_alpha else '')
 
-        # SECI / AECI — combined exploit+explor, per tick
-        for mk, ax_d in [('seci', ax_seci), ('aeci', ax_aeci)]:
-            m = (np.array(res[f'{mk}_exploit_mean']) + np.array(res[f'{mk}_explor_mean'])) / 2
-            s = (np.array(res[f'{mk}_exploit_std'])  + np.array(res[f'{mk}_explor_std']))  / 2
+        # SECI — separate panels per agent type
+        for mk, ax_d in [('seci_exploit', ax_seci_ex), ('seci_explor', ax_seci_er)]:
+            m = np.array(res[f'{mk}_mean'])
+            s = np.array(res[f'{mk}_std'])
             x = tf[:len(m)]
             ax_d.plot(x, m, color=color, linewidth=1.8, label=label)
             ax_d.fill_between(x, m - s, m + s, color=color, alpha=0.2)
 
-        # MAE — combined, sampled every 5 ticks
+        # AECI — separate panels per agent type
+        for mk, ax_d in [('aeci_exploit', ax_aeci_ex), ('aeci_explor', ax_aeci_er)]:
+            m = np.array(res[f'{mk}_mean'])
+            s = np.array(res[f'{mk}_std'])
+            x = tf[:len(m)]
+            ax_d.plot(x, m, color=color, linewidth=1.8, label=label)
+            ax_d.fill_between(x, m - s, m + s, color=color, alpha=0.2)
+
+        # MAE — combined exploit+explor, sampled every 5 ticks
         mae_m = (np.array(res['mae_exploit_mean']) + np.array(res['mae_explor_mean'])) / 2
         mae_s = (np.array(res['mae_exploit_std'])  + np.array(res['mae_explor_std']))  / 2
         x = ts[:len(mae_m)]
@@ -568,15 +587,19 @@ def _plot_timeseries(all_results, save_dir, best_alpha=None):
         ax_unmet.fill_between(x, un_m - un_s, un_m + un_s, color=color, alpha=0.2)
 
     for ax, title, ylabel, ylim, hl in [
-        (ax_seci,  'SECI Over Time',
+        (ax_seci_ex, 'SECI Over Time — Exploitative Agents\n(confirmation-biased, narrow acceptance)',
          'SECI (-1 to +1)', (-1.1, 1.1), 0),
-        (ax_aeci,  'AECI Over Time',
+        (ax_seci_er, 'SECI Over Time — Exploratory Agents\n(open, wide acceptance)',
+         'SECI (-1 to +1)', (-1.1, 1.1), 0),
+        (ax_aeci_ex, 'AECI Over Time — Exploitative Agents',
          'AECI (-1 to +1)', (-1.1, 1.1), 0),
-        (ax_mae,   'Belief MAE Over Time',
+        (ax_aeci_er, 'AECI Over Time — Exploratory Agents',
+         'AECI (-1 to +1)', (-1.1, 1.1), 0),
+        (ax_mae,   'Belief MAE Over Time  (exploit + explor avg)',
          'Mean Absolute Error', (0, None), None),
         (ax_prec,  'Relief Targeting Precision\n(solid=exploratory, dashed=exploitative)',
          'Correct / Total', (0, 1.05), 0.6),
-        (ax_unmet, 'Unmet High-Need Cells (level ≥4, 0 tokens)',
+        (ax_unmet, 'Unmet High-Need Cells per Tick (level ≥4, 0 tokens)',
          'Count', (0, None), None),
     ]:
         ax.set_xlabel('Tick')
@@ -591,10 +614,8 @@ def _plot_timeseries(all_results, save_dir, best_alpha=None):
         if hl is not None:
             ax.axhline(hl, color='k', linestyle=':', alpha=0.4)
 
-    ax_seci.legend(fontsize=8)
-    ax_aeci.legend(fontsize=8)
-    ax_mae.legend(fontsize=8)
-    ax_unmet.legend(fontsize=8)
+    for ax in [ax_seci_ex, ax_seci_er, ax_aeci_ex, ax_aeci_er, ax_mae, ax_unmet]:
+        ax.legend(fontsize=8)
     # Precision legend: deduplicate (keep one entry per α)
     hs, ls = ax_prec.get_legend_handles_labels()
     ax_prec.legend(hs[::2], [l.replace(' exploit', '') for l in ls[::2]], fontsize=8)
@@ -610,7 +631,8 @@ def plot_factor_comparison(rumor_res, disaster_res, mix_res, save_dir):
     """3×3 bar chart comparing factor effects on bubble & response metrics."""
     fig, axes = plt.subplots(3, 3, figsize=(16, 12))
     fig.suptitle(
-        f'Factor Effects at α={FACTOR_ALPHA}  (mean ± std across {N_FACTOR_RUNS} runs, averaged over all ticks)\n'
+        f'Factor Effects at α={FACTOR_ALPHA}  (mean ± std across {N_FACTOR_RUNS} runs)\n'
+        f'SECI & MAE: mean over all ticks;  Unmet needs: cumulative sum over all {base_params["ticks"]} ticks\n'
         'Each column: one factor swept while others held at base values',
         fontsize=12, fontweight='bold'
     )
@@ -624,23 +646,28 @@ def plot_factor_comparison(rumor_res, disaster_res, mix_res, save_dir):
          EXPLOITATIVE_SWEEP, mix_res),
     ]
     row_metrics = [
-        ('SECI — averaged over all ticks\n(negative = social bubble, 0 = neutral)',
-         'seci_exploit', (-1.1, 1.1)),
-        ('Belief MAE — averaged over all ticks\n(lower = beliefs closer to ground truth)',
-         'mae_exploit',  (0, None)),
-        ('Unmet high-need cells — averaged over all ticks\n(lower = better disaster response)',
-         'unmet_needs',  (0, None)),
+        ('SECI — mean over all ticks\n(negative = social bubble, 0 = neutral)',
+         'seci_exploit', 'mean', (-1.1, 1.1)),
+        ('Belief MAE — mean over all ticks\n(lower = beliefs closer to ground truth)',
+         'mae_exploit',  'mean', (0, None)),
+        (f'Total unmet high-need events — sum over all {base_params["ticks"]} ticks\n'
+         '(cells at level ≥4 with zero relief; lower = better response)',
+         'unmet_needs',  'sum',  (0, None)),
     ]
     bar_colors = ['#2196F3', '#FF9800', '#4CAF50']
 
     for col, (factor_label, factor_levels, res_dict) in enumerate(factor_cols):
-        for row, (metric_label, metric_key, ylim) in enumerate(row_metrics):
+        for row, (metric_label, metric_key, agg, ylim) in enumerate(row_metrics):
             ax = axes[row, col]
             means, stds = [], []
             for lv in factor_levels:
                 res = res_dict[lv]
-                m = float(np.nanmean(res[f'{metric_key}_mean'])) if res[f'{metric_key}_mean'] else float('nan')
-                s = float(np.nanmean(res[f'{metric_key}_std']))  if res[f'{metric_key}_std']  else float('nan')
+                if agg == 'sum':
+                    m = float(np.nansum(res[f'{metric_key}_mean'])) if res[f'{metric_key}_mean'] else float('nan')
+                    s = float(np.nansum(res[f'{metric_key}_std']))  if res[f'{metric_key}_std']  else float('nan')
+                else:
+                    m = float(np.nanmean(res[f'{metric_key}_mean'])) if res[f'{metric_key}_mean'] else float('nan')
+                    s = float(np.nanmean(res[f'{metric_key}_std']))  if res[f'{metric_key}_std']  else float('nan')
                 means.append(m)
                 stds.append(s if not np.isnan(s) else 0.0)
 
