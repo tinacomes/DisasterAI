@@ -2582,19 +2582,16 @@ class DisasterModel(Model):
         
         aeci_variance = 0.0  # Default neutral value
         
-        # Classify AI-reliant agents by ratio: AI must account for ≥40% of all
-        # accepted updates (AI + human), with a minimum of 5 total acceptances.
-        # An absolute count threshold is too easily triggered by epsilon-greedy
-        # random AI queries — every agent reaches cum_accepted_ai=3 in a few ticks.
-        min_total_accepted = 5
-        min_ai_ratio = 0.4
-
+        # Classify AI-reliant agents by current Q-table preference:
+        # Q["ai"] is the agent's greedy choice iff it exceeds both other modes.
+        # This reflects CURRENT preference (post-learning), not cumulative history
+        # that is biased toward early random AI queries before feedback arrives.
         ai_reliant_agents = []
         for agent in self.humans.values():
-            if not hasattr(agent, 'accepted_ai'):
+            if not hasattr(agent, 'q_table'):
                 continue
-            total = agent.accepted_ai + agent.accepted_human
-            if total >= min_total_accepted and agent.accepted_ai / total >= min_ai_ratio:
+            q = agent.q_table
+            if q.get('ai', 0) > max(q.get('human', 0), q.get('self_action', 0)):
                 ai_reliant_agents.append(agent)
         
         # Debug print
@@ -3345,23 +3342,17 @@ class DisasterModel(Model):
             aeci_exp = []
             aeci_expl = []
 
-            # Classify AI-reliant agents by ratio: AI must account for ≥40% of
-            # cumulative accepted updates (AI + human), with a floor of 5 total.
-            # An absolute count (e.g. cum_accepted_ai >= 3) is triggered by
-            # epsilon-greedy random AI queries in the first few ticks and would
-            # classify nearly every agent as AI-reliant, collapsing AECI.
-            min_total_accepted = 5
-            min_ai_ratio = 0.4
-
-            # Partition AI-reliant agents by type
+            # Classify AI-reliant agents by current Q-table preference:
+            # Q["ai"] > max(Q["human"], Q["self_action"]) means the agent's
+            # greedy choice is AI right now — reflecting post-learning preference,
+            # not cumulative acceptance history biased toward early random queries.
             ai_reliant_exp = []
             ai_reliant_expl = []
             for agent in self.humans.values():
-                if not hasattr(agent, 'cum_accepted_ai'):
+                if not hasattr(agent, 'q_table'):
                     continue
-                cum_h = getattr(agent, 'cum_accepted_human', 0)
-                cum_total = agent.cum_accepted_ai + cum_h
-                if cum_total >= min_total_accepted and agent.cum_accepted_ai / cum_total >= min_ai_ratio:
+                q = agent.q_table
+                if q.get('ai', 0) > max(q.get('human', 0), q.get('self_action', 0)):
                     if agent.agent_type == "exploitative":
                         ai_reliant_exp.append(agent)
                     else:
