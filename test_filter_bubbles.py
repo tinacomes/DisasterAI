@@ -245,8 +245,10 @@ def run_one_sim(params):
                     er_total   += total
             mae_exploit.append(float(np.mean(ex_errors)) if ex_errors else 0.0)
             mae_explor.append( float(np.mean(er_errors)) if er_errors else 0.0)
-            prec_exploit.append(ex_correct / ex_total if ex_total > 0 else float('nan'))
-            prec_explor.append( er_correct / er_total if er_total > 0 else float('nan'))
+            # Use 0.0 (not nan) when no tokens sent yet so the x-axis spans the
+            # full simulation range rather than autoscaling to the first non-NaN point.
+            prec_exploit.append(ex_correct / ex_total if ex_total > 0 else 0.0)
+            prec_explor.append( er_correct / er_total if er_total > 0 else 0.0)
             metric_ticks.append(tick)
 
     n = len(seci_exploit)

@@ -117,7 +117,8 @@ class HumanAgent(Agent):
         self.accum_calls_human = 0
         self.accepted_human = 0
         self.accepted_friend = 0
-        self.accepted_ai = 0
+        self.accepted_ai = 0          # per-period counter (reset every 5 ticks for retain metrics)
+        self.cum_accepted_ai = 0      # cumulative counter (never reset) used for AECI classification
 
         # Performance Counters
         self.correct_targets = 0
@@ -1653,6 +1654,7 @@ class HumanAgent(Agent):
                         elif source_id.startswith("A_"):
                             # INCREMENT AI ACCEPTANCE COUNTER HERE
                             self.accepted_ai += 1
+                            self.cum_accepted_ai += 1  # cumulative; drives AECI classification
 
                             # DEBUG PRINT to track AI info acceptance
                             #if self.model.debug_mode and random.random() < 0.05:  # 5% of the time
@@ -3331,15 +3333,23 @@ class DisasterModel(Model):
             aeci_exp = []
             aeci_expl = []
 
-            min_accepted_ai = 3  # Minimum accepted AI belief updates to classify as AI-reliant
+            # Use cumulative accepted_ai (never reset) so that:
+            # - Explorers (Q["ai"]=0.3, wide D/δ) accumulate acceptances quickly → classified
+            # - Exploiters at low α (truthful AI contradicts their beliefs) reject AI → low
+            #   cum_accepted_ai → not classified → AECI correctly stays near 0
+            # - Exploiters at high α (confirmatory AI matches beliefs) accept frequently →
+            #   high cum_accepted_ai → classified → their convergent beliefs → negative AECI
+            # Threshold of 3 is enough for a 20-tick run (explorers get ~5-7 accepted;
+            # exploiters at low α get <1 accepted on average over 20 ticks).
+            min_accepted_ai = 3
 
             # Partition AI-reliant agents by type
             ai_reliant_exp = []
             ai_reliant_expl = []
             for agent in self.humans.values():
-                if not hasattr(agent, 'accepted_ai'):
+                if not hasattr(agent, 'cum_accepted_ai'):
                     continue
-                if agent.accepted_ai >= min_accepted_ai:
+                if agent.cum_accepted_ai >= min_accepted_ai:
                     if agent.agent_type == "exploitative":
                         ai_reliant_exp.append(agent)
                     else:
