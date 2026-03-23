@@ -2585,8 +2585,9 @@ class DisasterModel(Model):
     def calculate_aeci_variance(self):
         """Calculate aggregate AI Echo Chamber Index on a [-1, +1] scale.
 
-        Uses accuracy-based formula: AECI = -(ai_reliant_MAE - non_ai_MAE) / 5
-        Negative when AI-reliant agents are more wrong than non-AI-reliant agents.
+        AECI = clip(ai_reliant_MAD / global_MAD - 1, -1, 0)
+        Negative when AI-reliant agents' beliefs are more homogeneous than the population.
+        0 when AI-reliant agents are as diverse as the population (no echo chamber).
         """
         aeci_variance = 0.0
 
@@ -2601,19 +2602,27 @@ class DisasterModel(Model):
             else:
                 non_ai.append(agent)
 
-        def _mae(agents):
-            errs = []
+        def _collect_levels(agents):
+            levels = []
             for a in agents:
                 for cell, binfo in a.beliefs.items():
                     if isinstance(binfo, dict):
-                        x, y = cell
-                        if 0 <= x < self.width and 0 <= y < self.height:
-                            errs.append(abs(binfo.get('level', 0) - self.disaster_grid[x, y]))
-            return float(np.mean(errs)) if errs else 0.0
+                        levels.append(binfo.get('level', 0))
+            return levels
 
-        if len(ai_reliant) >= 3:
-            ai_mae = _mae(ai_reliant)
-            aeci_variance = float(np.clip(-ai_mae / 5.0, -1, 0))
+        global_levels = _collect_levels(list(self.humans.values()))
+        if len(global_levels) > 1:
+            g = np.array(global_levels, dtype=float)
+            global_mad = float(np.mean(np.abs(g - np.mean(g))))
+        else:
+            global_mad = 0.0
+
+        if len(ai_reliant) >= 3 and global_mad > 1e-9:
+            ai_levels = _collect_levels(ai_reliant)
+            if len(ai_levels) > 1:
+                a = np.array(ai_levels, dtype=float)
+                local_mad = float(np.mean(np.abs(a - np.mean(a))))
+                aeci_variance = float(np.clip(local_mad / global_mad - 1, -1, 0))
                 
                 #print(f"  AECI variance effect: {aeci_variance:.4f}")
             #else:
@@ -3046,21 +3055,27 @@ class DisasterModel(Model):
         # Every 5 ticks, compute additional metrics.
         if self.tick % 5 == 0:
             # --- SECI Calculation ---
-            # Collect belief levels split by type so each type's SECI is
-            # normalised against its own global variance.  Using a pooled
-            # --- SECI: accuracy-based (belief error vs ground truth) ---
-            # Variance-based SECI could not distinguish "correctly homogeneous"
-            # (α=0 agents converge to truth → low variance, no echo chamber) from
-            # "wrongly homogeneous" (α=1 agents locked in rumor → low variance, echo
-            # chamber). The accuracy formulation directly measures whether the SOCIAL
-            # NETWORK amplifies misinformation.
+            # --- SECI: MAD-ratio (local belief spread vs. global belief spread) ---
             #
-            # Per-agent: SECI = -(friend_MAE - type_global_MAE) / 5
-            #   -1: friends are maximally more wrong than the type average (echo chamber)
-            #    0: friends as wrong as the type average (neutral)
-            #   +1: friends are maximally more accurate (diversifying)
+            # Per-agent SECI = clip(local_MAD / global_MAD - 1, -1, 0)
+            #   local_MAD: mean |friend_belief - mean(friend_beliefs)| — how spread out friends are
+            #   global_MAD: mean |belief - mean(all_beliefs)| — population spread
+            #   -1: friends' beliefs are perfectly homogeneous vs. the population (maximum echo chamber)
+            #    0: friends are as diverse as the population (no echo chamber)
 
-            # Type-specific global MAE (mean absolute error vs. actual disaster grid)
+            # Precompute global MAD once across all agents
+            _all_levels = []
+            for _a in self.humans.values():
+                for _cell, _binfo in _a.beliefs.items():
+                    if isinstance(_binfo, dict):
+                        _all_levels.append(_binfo.get('level', 0))
+            if len(_all_levels) > 1:
+                _g = np.array(_all_levels, dtype=float)
+                global_mad = float(np.mean(np.abs(_g - np.mean(_g))))
+            else:
+                global_mad = 0.0
+
+            # Helper for MAE (kept for belief_error_data below)
             def _agent_mae(agent):
                 errors = []
                 for cell, binfo in agent.beliefs.items():
@@ -3070,43 +3085,27 @@ class DisasterModel(Model):
                             errors.append(abs(binfo.get('level', 0) - self.disaster_grid[x, y]))
                 return float(np.mean(errors)) if errors else 0.0
 
-            exploit_global_mae = np.mean([_agent_mae(a) for a in self.humans.values()
-                                          if a.agent_type == "exploitative"]) or 0.0
-            explor_global_mae  = np.mean([_agent_mae(a) for a in self.humans.values()
-                                          if a.agent_type == "exploratory"]) or 0.0
-
-            # Pooled global_var kept for AECI backward-compat (replaced below)
-            all_belief_levels = []
-            global_var = 0.0  # replaced by accuracy-based AECI
-
             # Initialize metric lists
             seci_exp_list = []
             seci_expl_list = []
 
             for agent in self.humans.values():
-                # Collect friend belief errors vs. ground truth
-                friend_errors = []
+                # Collect friend belief levels (raw values, not errors)
+                friend_levels = []
                 for fid in agent.friends:
                     friend = self.humans.get(fid)
                     if friend and friend.beliefs:
                         for cell, belief_info in friend.beliefs.items():
                             if isinstance(belief_info, dict):
-                                x, y = cell
-                                if 0 <= x < self.width and 0 <= y < self.height:
-                                    err = abs(belief_info.get('level', 0) - self.disaster_grid[x, y])
-                                    friend_errors.append(err)
+                                friend_levels.append(belief_info.get('level', 0))
 
-                type_global_mae = exploit_global_mae if agent.agent_type == "exploitative" else explor_global_mae
-                friend_mae = float(np.mean(friend_errors)) if friend_errors else type_global_mae
+                if len(friend_levels) > 1 and global_mad > 1e-9:
+                    fl = np.array(friend_levels, dtype=float)
+                    local_mad = float(np.mean(np.abs(fl - np.mean(fl))))
+                    seci_val = float(np.clip(local_mad / global_mad - 1, -1, 0))
+                else:
+                    seci_val = 0.0
 
-                # SECI = -(friend_MAE / 5): how wrong are your friends?
-                # Using the relative formula -(friend_mae - type_global_mae)/5 always
-                # cancels to 0 because type_global_mae IS the average of community MAEs
-                # (each community's deviation above the mean is offset by another below).
-                # Direct normalization: SECI = 0 when friends are perfectly correct,
-                # SECI = -1 when friends are maximally wrong (level 5 error everywhere).
-                seci_val = float(np.clip(-friend_mae / 5.0, -1, 0))
-                
                 if agent.agent_type == "exploitative":
                     seci_exp_list.append(seci_val)
                 else:
@@ -3175,21 +3174,12 @@ class DisasterModel(Model):
                 
                 # Only calculate SECI if we have beliefs
                 if len(component_belief_levels) > 0:
-                    # Calculate global variance (all agents)
-                    all_belief_levels = []
-                    for agent in self.humans.values():
-                        for cell, belief_info in agent.beliefs.items():
-                            if isinstance(belief_info, dict):
-                                level = belief_info.get('level', 0)
-                                all_belief_levels.append(level)
-                                
-                    # More robust variance calculation
-                    global_var = np.var(all_belief_levels) if len(all_belief_levels) > 1 else 1e-6
-                    component_var = np.var(component_belief_levels) if len(component_belief_levels) > 1 else global_var
-                    
-                    # Calculate component SECI more robustly
-                    if global_var > 1e-9:  # Avoid division by zero with small threshold
-                        component_seci_val = max(0, min(1, (global_var - component_var) / global_var))
+                    # MAD-based component SECI: 1 - local_MAD/global_MAD
+                    # Positive when the component is more homogeneous than the population
+                    if global_mad > 1e-9:
+                        cl = np.array(component_belief_levels, dtype=float)
+                        local_mad_c = float(np.mean(np.abs(cl - np.mean(cl)))) if len(cl) > 1 else 0.0
+                        component_seci_val = float(np.clip(1.0 - local_mad_c / global_mad, 0, 1))
                         component_seci_list.append(component_seci_val)
                     else:
                         component_seci_list.append(0)
@@ -3292,14 +3282,10 @@ class DisasterModel(Model):
 
             self.belief_variance_data.append((self.tick, var_exploit, var_explor))
 
-            # --- AECI: how wrong are AI-reliant agents? ---
-            # AECI = -(ai_reliant_MAE / 5) per agent type.
-            # The relative formula -(ai_mae - non_ai_mae)/5 cancels to near-zero:
-            # with 94% of exploiters AI-reliant at α=1, the 6% non-AI share the
-            # same community rumor and have the same error → numerator ≈ 0.
-            # Direct normalization: AECI = 0 when AI-reliant agents are correct,
-            # AECI = -1 when they are maximally wrong. Captures whether the AI
-            # echo chamber is ACTIVE (agents using AI have high belief error).
+            # --- AECI: are AI-reliant agents more homogeneous than the population? ---
+            # AECI = clip(ai_reliant_MAD / global_MAD - 1, -1, 0)
+            #   -1: AI-reliant agents have perfectly uniform beliefs (maximum echo chamber)
+            #    0: AI-reliant agents are as diverse as the population (no echo chamber)
             aeci_exp = []
             aeci_expl = []
 
@@ -3319,8 +3305,15 @@ class DisasterModel(Model):
                                              (ai_reliant_expl, aeci_expl)]:
                 if len(ai_group) < 3:
                     continue
-                ai_mae = float(np.mean([_agent_mae(a) for a in ai_group]))
-                target_list.append(float(np.clip(-ai_mae / 5.0, -1, 0)))
+                ai_levels = []
+                for a in ai_group:
+                    for cell, binfo in a.beliefs.items():
+                        if isinstance(binfo, dict):
+                            ai_levels.append(binfo.get('level', 0))
+                if len(ai_levels) > 1 and global_mad > 1e-9:
+                    al = np.array(ai_levels, dtype=float)
+                    local_mad_ai = float(np.mean(np.abs(al - np.mean(al))))
+                    target_list.append(float(np.clip(local_mad_ai / global_mad - 1, -1, 0)))
 
             avg_aeci_exp = float(np.mean(aeci_exp)) if aeci_exp else 0.0
             avg_aeci_expl = float(np.mean(aeci_expl)) if aeci_expl else 0.0
