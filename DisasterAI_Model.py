@@ -423,7 +423,11 @@ class HumanAgent(Agent):
 
     def sense_environment(self):
         pos = self.pos
-        radius = 2  # Same for both agent types - behavioral differences should be in information-seeking, not perception
+        radius = 0  # Only sense current cell (11% grid coverage/tick with 100 agents on 900 cells).
+                   # Radius 1 (9 cells) still gives ~1× full-grid coverage per tick, and
+                   # radius 2 (25 cells) gave 2.8× — both override wrong AI info every tick,
+                   # collapsing all α differences in beliefs, SECI, and aid delivery.
+                   # Radius 0 forces agents to rely on AI/human sources for remote cells.
         cells = self.model.grid.get_neighborhood(pos, moore=True, radius=radius, include_center=True)
         for cell in cells:
             if 0 <= cell[0] < self.model.width and 0 <= cell[1] < self.model.height:
@@ -465,9 +469,11 @@ class HumanAgent(Agent):
                     distance = math.sqrt((cell[0] - pos[0])**2 + (cell[1] - pos[1])**2)
                     distance_factor = max(0.1, 1.0 - (distance / (radius + 1)))
 
-                    # FIXED: More conservative blending weights
-                    # Direct perception has more weight for nearby cells and accurate readings
-                    accuracy_factor = 0.7 if noise_roll >= noise_threshold else 0.5
+                    # Sensing is SUPPLEMENTARY to information sources.
+                    # Low weight (0.15) means direct observation slightly nudges beliefs
+                    # but AI/human queries dominate — wrong AI can sustain misinformation,
+                    # truthful AI corrects it. Previously 0.7 overrode AI in ~3 sensings.
+                    accuracy_factor = 0.15 if noise_roll >= noise_threshold else 0.05
                     sense_weight = accuracy_factor * distance_factor
 
                     # FIXED: Blend both level and confidence
@@ -2577,71 +2583,38 @@ class DisasterModel(Model):
            # print(f"[DEBUG] Tick {self.tick}: {message}")
 
     def calculate_aeci_variance(self):
-        """Calculate AI Echo Chamber Index variance on a [-1, +1] scale."""
-        #print(f"\nDEBUG: Starting AECI variance calculation at tick {self.tick}")
-        
-        aeci_variance = 0.0  # Default neutral value
-        
-        # Classify AI-reliant agents by current Q-table preference:
-        # Q["ai"] is the agent's greedy choice iff it exceeds both other modes.
-        # This reflects CURRENT preference (post-learning), not cumulative history
-        # that is biased toward early random AI queries before feedback arrives.
-        ai_reliant_agents = []
+        """Calculate aggregate AI Echo Chamber Index on a [-1, +1] scale.
+
+        Uses accuracy-based formula: AECI = -(ai_reliant_MAE - non_ai_MAE) / 5
+        Negative when AI-reliant agents are more wrong than non-AI-reliant agents.
+        """
+        aeci_variance = 0.0
+
+        # Classify agents by current Q-table AI preference
+        ai_reliant, non_ai = [], []
         for agent in self.humans.values():
             if not hasattr(agent, 'q_table'):
                 continue
             q = agent.q_table
             if q.get('ai', 0) > max(q.get('human', 0), q.get('self_action', 0)):
-                ai_reliant_agents.append(agent)
-        
-        # Debug print
-        #print(f"  Found {len(ai_reliant_agents)}/{len(self.humans)} AI-reliant agents")
-        
-        # Get global belief variance
-        all_beliefs = []
-        for agent in self.humans.values():
-            for belief_info in agent.beliefs.values():
-                if isinstance(belief_info, dict):
-                    level = belief_info.get('level', 0)
-                    if not np.isnan(level):  # Filter out NaN values
-                        all_beliefs.append(level)
-        
-        # Calculate global variance with safety check
-        if len(all_beliefs) > 1:
-            global_var = np.var(all_beliefs)
-            #print(f"  Global belief variance: {global_var:.4f}")
-        else:
-            global_var = 0.0
-            #print("  WARNING: Not enough global beliefs to calculate variance")
-            
-        # Only proceed if we have a valid global variance and AI-reliant agents
-        if global_var > 0 and ai_reliant_agents:
-            # Get AI-reliant agents' beliefs
-            ai_reliant_beliefs = []
-            for agent in ai_reliant_agents:
-                for belief_info in agent.beliefs.values():
-                    if isinstance(belief_info, dict):
-                        level = belief_info.get('level', 0)
-                        if not np.isnan(level):  # Filter out NaN values
-                            ai_reliant_beliefs.append(level)
-            
-            # Calculate AI-reliant variance with safety check
-            if len(ai_reliant_beliefs) > 1:
-                ai_reliant_var = np.var(ai_reliant_beliefs)
-                #print(f"  AI-reliant beliefs variance: {ai_reliant_var:.4f}")
-                
-                # Calculate variance effect
-                # Negative means AI reduces variance (echo chamber)
-                # Positive means AI increases variance (diversification)
-                var_diff = ai_reliant_var - global_var
-                
-                # Normalize to [-1, +1] range
-                if var_diff < 0:  # Variance reduction (echo chamber)
-                    aeci_variance = max(-1, var_diff / global_var)  # Normalize by global variance
-                else:  # Variance increase (diversification)
-                    # Find a reasonable upper bound for normalization
-                    max_possible_var = 5.0  # Given belief levels are 0-5, max variance is around 5
-                    aeci_variance = min(1, var_diff / (max_possible_var - global_var))
+                ai_reliant.append(agent)
+            else:
+                non_ai.append(agent)
+
+        def _mae(agents):
+            errs = []
+            for a in agents:
+                for cell, binfo in a.beliefs.items():
+                    if isinstance(binfo, dict):
+                        x, y = cell
+                        if 0 <= x < self.width and 0 <= y < self.height:
+                            errs.append(abs(binfo.get('level', 0) - self.disaster_grid[x, y]))
+            return float(np.mean(errs)) if errs else 0.0
+
+        if len(ai_reliant) >= 3 and len(non_ai) >= 3:
+            ai_mae  = _mae(ai_reliant)
+            non_mae = _mae(non_ai)
+            aeci_variance = float(np.clip(-(ai_mae - non_mae) / 5.0, -1, 1))
                 
                 #print(f"  AECI variance effect: {aeci_variance:.4f}")
             #else:
@@ -3076,68 +3049,59 @@ class DisasterModel(Model):
             # --- SECI Calculation ---
             # Collect belief levels split by type so each type's SECI is
             # normalised against its own global variance.  Using a pooled
-            # global_var (all agents combined) diluted the signal: because
-            # explorers maintain high belief diversity, the pooled baseline
-            # was always pulled upward, making both types look equally
-            # un-echo-chambered.  Type-specific normalisation lets exploiters
-            # (converging on the false epicenter) show a strongly negative
-            # SECI while explorers (spread across uncertain cells) show a
-            # weaker one.  The pooled global_var is retained for AECI, which
-            # compares AI-reliant agents against the full population.
-            exploit_belief_levels = []
-            explor_belief_levels  = []
+            # --- SECI: accuracy-based (belief error vs ground truth) ---
+            # Variance-based SECI could not distinguish "correctly homogeneous"
+            # (α=0 agents converge to truth → low variance, no echo chamber) from
+            # "wrongly homogeneous" (α=1 agents locked in rumor → low variance, echo
+            # chamber). The accuracy formulation directly measures whether the SOCIAL
+            # NETWORK amplifies misinformation.
+            #
+            # Per-agent: SECI = -(friend_MAE - type_global_MAE) / 5
+            #   -1: friends are maximally more wrong than the type average (echo chamber)
+            #    0: friends as wrong as the type average (neutral)
+            #   +1: friends are maximally more accurate (diversifying)
 
-            for agent in self.humans.values():
-                if agent.beliefs:
-                    levels = [
-                        b.get('level', 0)
-                        for b in agent.beliefs.values()
-                        if isinstance(b, dict)
-                    ]
-                    if agent.agent_type == "exploitative":
-                        exploit_belief_levels.extend(levels)
-                    else:
-                        explor_belief_levels.extend(levels)
+            # Type-specific global MAE (mean absolute error vs. actual disaster grid)
+            def _agent_mae(agent):
+                errors = []
+                for cell, binfo in agent.beliefs.items():
+                    if isinstance(binfo, dict):
+                        x, y = cell
+                        if 0 <= x < self.width and 0 <= y < self.height:
+                            errors.append(abs(binfo.get('level', 0) - self.disaster_grid[x, y]))
+                return float(np.mean(errors)) if errors else 0.0
 
-            exploit_global_var = np.var(exploit_belief_levels) if len(exploit_belief_levels) > 1 else 1e-6
-            explor_global_var  = np.var(explor_belief_levels)  if len(explor_belief_levels)  > 1 else 1e-6
-            # Pooled global_var kept for AECI (compares AI-reliant agents vs whole pop)
-            all_belief_levels = exploit_belief_levels + explor_belief_levels
-            global_var = np.var(all_belief_levels) if len(all_belief_levels) > 1 else 1e-6
+            exploit_global_mae = np.mean([_agent_mae(a) for a in self.humans.values()
+                                          if a.agent_type == "exploitative"]) or 0.0
+            explor_global_mae  = np.mean([_agent_mae(a) for a in self.humans.values()
+                                          if a.agent_type == "exploratory"]) or 0.0
+
+            # Pooled global_var kept for AECI backward-compat (replaced below)
+            all_belief_levels = []
+            global_var = 0.0  # replaced by accuracy-based AECI
 
             # Initialize metric lists
             seci_exp_list = []
             seci_expl_list = []
 
-            # More robust friend belief collection and SECI calculation
             for agent in self.humans.values():
-                # Collect friend beliefs with proper checks
-                friend_belief_levels = []
+                # Collect friend belief errors vs. ground truth
+                friend_errors = []
                 for fid in agent.friends:
                     friend = self.humans.get(fid)
                     if friend and friend.beliefs:
                         for cell, belief_info in friend.beliefs.items():
                             if isinstance(belief_info, dict):
-                                level = belief_info.get('level', 0)
-                                friend_belief_levels.append(level)
+                                x, y = cell
+                                if 0 <= x < self.width and 0 <= y < self.height:
+                                    err = abs(belief_info.get('level', 0) - self.disaster_grid[x, y])
+                                    friend_errors.append(err)
 
-                # Calculate friend variance only if we have enough data
-                type_global_var = exploit_global_var if agent.agent_type == "exploitative" else explor_global_var
-                if len(friend_belief_levels) > 1:
-                    friend_var = np.var(friend_belief_levels)
-                else:
-                    friend_var = type_global_var
+                type_global_mae = exploit_global_mae if agent.agent_type == "exploitative" else explor_global_mae
+                friend_mae = float(np.mean(friend_errors)) if friend_errors else type_global_mae
 
-                # Calculate SECI using type-specific baseline
-                if type_global_var > 1e-9:
-                    var_diff = friend_var - type_global_var
-                    if var_diff < 0:  # Variance reduction (echo chamber)
-                        seci_val = max(-1, var_diff / type_global_var)
-                    else:  # Variance increase (diversification)
-                        max_possible_var = 5.0
-                        seci_val = min(1, var_diff / (max_possible_var - type_global_var))
-                else:
-                    seci_val = 0  # Store by agent type
+                # SECI: negative when friends are more wrong than the type average
+                seci_val = float(np.clip(-(friend_mae - type_global_mae) / 5.0, -1, 1))
                 
                 if agent.agent_type == "exploitative":
                     seci_exp_list.append(seci_val)
@@ -3324,77 +3288,39 @@ class DisasterModel(Model):
 
             self.belief_variance_data.append((self.tick, var_exploit, var_explor))
 
-            # --- AECI Calculation (SECI-style peer-group methodology) ---
-            # Mirrors SECI exactly, but "friend network" → "AI-peer network".
-            # AI-reliant agents are classified by accepted_ai (actual belief
-            # updates accepted from AI), not query count. The feedback loop
-            # means agents that validated AI info as accurate build higher AI
-            # trust and accept more AI updates — so accepted_ai is the correct
-            # measure of AI influence on beliefs.
-            #
-            # For each AI-reliant agent, we look at the beliefs held by all
-            # other AI-reliant agents (their "AI-peer group") and compute the
-            # variance of that peer group's beliefs. Compare to global variance:
-            #   peer_var < global_var → AI-reliant agents hold similar beliefs
-            #                           → AI created an echo chamber (negative)
-            #   peer_var > global_var → AI-reliant agents hold diverse beliefs
-            #                           → AI broadened perspectives (positive)
+            # --- AECI: accuracy-based (AI-reliant vs non-AI-reliant belief error) ---
+            # AECI = -(ai_reliant_MAE - non_ai_MAE) / 5 per agent type.
+            # Negative when AI-reliant agents are more wrong than non-AI-reliant →
+            # the AI source is amplifying misinformation (echo chamber effect).
+            # Zero when AI reliance doesn't systematically increase belief error.
             aeci_exp = []
             aeci_expl = []
 
-            # Classify AI-reliant agents by current Q-table preference:
-            # Q["ai"] > max(Q["human"], Q["self_action"]) means the agent's
-            # greedy choice is AI right now — reflecting post-learning preference,
-            # not cumulative acceptance history biased toward early random queries.
+            # Classify AI-reliant agents by current Q-table preference
             ai_reliant_exp = []
             ai_reliant_expl = []
+            non_ai_exp = []
+            non_ai_expl = []
             for agent in self.humans.values():
                 if not hasattr(agent, 'q_table'):
                     continue
                 q = agent.q_table
-                if q.get('ai', 0) > max(q.get('human', 0), q.get('self_action', 0)):
-                    if agent.agent_type == "exploitative":
-                        ai_reliant_exp.append(agent)
-                    else:
-                        ai_reliant_expl.append(agent)
-
-            # Collect group-level beliefs for each type (all peers in the AI-reliant set)
-            def _peer_beliefs(agents):
-                levels = []
-                for a in agents:
-                    for belief_info in a.beliefs.values():
-                        if isinstance(belief_info, dict):
-                            level = belief_info.get('level', 0)
-                            if not np.isnan(level):
-                                levels.append(level)
-                return levels
-
-            for agent_type_label, ai_reliant_group in [("exploitative", ai_reliant_exp),
-                                                        ("exploratory", ai_reliant_expl)]:
-                if len(ai_reliant_group) < 2:
-                    # Not enough AI-reliant agents to form a peer group
-                    continue
-
-                peer_belief_levels = _peer_beliefs(ai_reliant_group)
-                if len(peer_belief_levels) < 2:
-                    continue
-
-                peer_var = np.var(peer_belief_levels)
-
-                if global_var > 1e-9:
-                    var_diff = peer_var - global_var
-                    if var_diff < 0:  # Echo chamber: AI-reliant agents hold similar beliefs
-                        aeci_val = max(-1, var_diff / global_var)
-                    else:  # Diversification: AI-reliant agents hold more varied beliefs
-                        max_possible_var = 5.0
-                        aeci_val = min(1, var_diff / (max_possible_var - global_var))
+                is_ai = q.get('ai', 0) > max(q.get('human', 0), q.get('self_action', 0))
+                if agent.agent_type == "exploitative":
+                    (ai_reliant_exp if is_ai else non_ai_exp).append(agent)
                 else:
-                    aeci_val = 0.0
+                    (ai_reliant_expl if is_ai else non_ai_expl).append(agent)
 
-                if agent_type_label == "exploitative":
-                    aeci_exp.append(aeci_val)
-                else:
-                    aeci_expl.append(aeci_val)
+            for (ai_group, non_ai_group, target_list) in [
+                    (ai_reliant_exp, non_ai_exp, aeci_exp),
+                    (ai_reliant_expl, non_ai_expl, aeci_expl)]:
+                if len(ai_group) < 3 or len(non_ai_group) < 3:
+                    # Need enough agents in both groups for a stable comparison
+                    continue
+                ai_mae  = float(np.mean([_agent_mae(a) for a in ai_group]))
+                non_mae = float(np.mean([_agent_mae(a) for a in non_ai_group]))
+                aeci_val = float(np.clip(-(ai_mae - non_mae) / 5.0, -1, 1))
+                target_list.append(aeci_val)
 
             avg_aeci_exp = float(np.mean(aeci_exp)) if aeci_exp else 0.0
             avg_aeci_expl = float(np.mean(aeci_expl)) if aeci_expl else 0.0
