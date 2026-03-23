@@ -117,7 +117,8 @@ class HumanAgent(Agent):
         self.accum_calls_human = 0
         self.accepted_human = 0
         self.accepted_friend = 0
-        self.accepted_ai = 0
+        self.accepted_ai = 0          # per-period counter (reset every 5 ticks for retain metrics)
+        self.cum_accepted_ai = 0      # cumulative counter (never reset) used for AECI classification
 
         # Performance Counters
         self.correct_targets = 0
@@ -587,9 +588,18 @@ class HumanAgent(Agent):
             else:
                 source_knowledge_conf = 0.7  # Unknown source type
 
-            # Pure accuracy reward — agent-type differences emerge from D/delta acceptance,
-            # not from different reward functions that would double-count the effect
-            combined_reward = accuracy_score
+            # Reward is TYPE-SPECIFIC:
+            #   Explorers  → accuracy_score: "was the source truthful?"
+            #                This drives them toward sources that report ground truth,
+            #                so at low α (truthful AI) they learn to prefer AI.
+            #   Exploiters → confirmation_score: "did the source agree with my belief?"
+            #                Confirmation bias: they reward sources that confirm their
+            #                prior, not sources that are objectively correct.
+            #                At low α, AI contradicts their beliefs → Q["ai"] falls.
+            #                At high α, AI confirms their beliefs → Q["ai"] rises.
+            # D/δ acceptance still governs whether the info updates the belief;
+            # this reward governs whether the *mode* gets called again.
+            combined_reward = accuracy_score if self.agent_type == "exploratory" else confirmation_score
 
             # Scale to [-0.7, +0.5] range to match existing Q-update expectations
             accuracy_reward = combined_reward * 0.6 - 0.1
@@ -858,12 +868,13 @@ class HumanAgent(Agent):
             else:
                 source_knowledge_conf = 0.7  # Unknown source type
 
-            # Pure accuracy reward for both types — agent-type differences emerge from
-            # D/delta acceptance (what info gets integrated), not from reward shaping
+            # Same type-specific reward logic as evaluate_information_quality:
+            #   Explorers  → accuracy_score  (truth-seeking)
+            #   Exploiters → confirmation_score  (confirmation bias)
             if is_remote_cell and self.agent_type == "exploratory":
                 # Explorer querying remote cell: defer until sensed (ground truth unavailable)
                 continue
-            combined_reward = accuracy_score
+            combined_reward = accuracy_score if self.agent_type == "exploratory" else confirmation_score
 
             accuracy_reward = combined_reward * 0.7 - 0.1  # Slightly larger scale
 
@@ -1653,6 +1664,7 @@ class HumanAgent(Agent):
                         elif source_id.startswith("A_"):
                             # INCREMENT AI ACCEPTANCE COUNTER HERE
                             self.accepted_ai += 1
+                            self.cum_accepted_ai += 1  # cumulative; drives AECI classification
 
                             # DEBUG PRINT to track AI info acceptance
                             #if self.model.debug_mode and random.random() < 0.05:  # 5% of the time
@@ -2260,34 +2272,24 @@ class AIAgent(Agent):
         human_vals = np.array(human_vals_list)
         human_conf = np.array(human_confidence_list)
 
-        # --- Alignment Logic - Stronger effect ---
+        # --- Alignment Logic ---
+        # α = 0  → AI reports pure ground truth (fully informative)
+        # α = 1  → AI reports exactly what the agent already believes (pure confirmation)
+        # α = 0.5 → AI reports the midpoint between truth and belief
+        #
+        # Simple linear interpolation: reported = truth + α * (belief - truth)
+        #   = (1-α)*truth + α*belief
+        #
+        # Previous formula used α*(1 + conf*2 + trust_term) which amplified the
+        # adjustment factor well above 1, causing AI to report PAST the agent's belief
+        # (e.g. belief=4, truth=0, α=0.5 → factor≈1.5 → reported=6→clipped to 5).
+        # That collapsed α=0.5, 0.8, 1.0 into the same clipped report, making the
+        # alignment sweep meaningless and all intermediate α levels look like α=1.
         alignment_strength = self.model.ai_alignment_level
-        low_trust_amplification = getattr(self.model, 'low_trust_amplification_factor', 0.5)
-        clipped_trust = max(0.0, min(1.0, caller_trust_in_ai))
 
-        # If alignment is 0, report pure truth (no adjustments)
-        if alignment_strength == 0:
-            # Ground truth - no adjustments at all
-            corrected = sensed_vals
-        else:
-            # Calculate adjustments based on alignment level
-            alignment_factors = alignment_strength * (1.0 + human_conf * 2.0)
-
-            # Add trust-based effect
-            alignment_factors += alignment_strength * low_trust_amplification * (1.0 - clipped_trust)
-
-            # Cap the maximum alignment factor
-            alignment_factors = np.clip(alignment_factors, 0.0, 3.0)
-
-            # Calculate the difference between human beliefs and AI sensed values
-            belief_differences = human_vals - sensed_vals
-
-            # Apply proportional adjustments based on alignment factors
-            adjustments = alignment_factors * belief_differences
-
-            # Apply adjustments to sensed values
-            corrected = np.round(sensed_vals + adjustments)
-            corrected = np.clip(corrected, 0, 5)  # Keep values in valid range
+        belief_differences = human_vals - sensed_vals
+        corrected = np.round(sensed_vals + alignment_strength * belief_differences)
+        corrected = np.clip(corrected, 0, 5)  # Keep values in valid range
 
         # Build the report dictionary with aligned values
         for i, cell in enumerate(valid_cells_in_query):
@@ -3331,15 +3333,23 @@ class DisasterModel(Model):
             aeci_exp = []
             aeci_expl = []
 
-            min_accepted_ai = 3  # Minimum accepted AI belief updates to classify as AI-reliant
+            # Use cumulative accepted_ai (never reset) so that:
+            # - Explorers (Q["ai"]=0.3, wide D/δ) accumulate acceptances quickly → classified
+            # - Exploiters at low α (truthful AI contradicts their beliefs) reject AI → low
+            #   cum_accepted_ai → not classified → AECI correctly stays near 0
+            # - Exploiters at high α (confirmatory AI matches beliefs) accept frequently →
+            #   high cum_accepted_ai → classified → their convergent beliefs → negative AECI
+            # Threshold of 3 is enough for a 20-tick run (explorers get ~5-7 accepted;
+            # exploiters at low α get <1 accepted on average over 20 ticks).
+            min_accepted_ai = 3
 
             # Partition AI-reliant agents by type
             ai_reliant_exp = []
             ai_reliant_expl = []
             for agent in self.humans.values():
-                if not hasattr(agent, 'accepted_ai'):
+                if not hasattr(agent, 'cum_accepted_ai'):
                     continue
-                if agent.accepted_ai >= min_accepted_ai:
+                if agent.cum_accepted_ai >= min_accepted_ai:
                     if agent.agent_type == "exploitative":
                         ai_reliant_exp.append(agent)
                     else:
