@@ -2611,10 +2611,9 @@ class DisasterModel(Model):
                             errs.append(abs(binfo.get('level', 0) - self.disaster_grid[x, y]))
             return float(np.mean(errs)) if errs else 0.0
 
-        if len(ai_reliant) >= 3 and len(non_ai) >= 3:
-            ai_mae  = _mae(ai_reliant)
-            non_mae = _mae(non_ai)
-            aeci_variance = float(np.clip(-(ai_mae - non_mae) / 5.0, -1, 1))
+        if len(ai_reliant) >= 3:
+            ai_mae = _mae(ai_reliant)
+            aeci_variance = float(np.clip(-ai_mae / 5.0, -1, 0))
                 
                 #print(f"  AECI variance effect: {aeci_variance:.4f}")
             #else:
@@ -3100,8 +3099,13 @@ class DisasterModel(Model):
                 type_global_mae = exploit_global_mae if agent.agent_type == "exploitative" else explor_global_mae
                 friend_mae = float(np.mean(friend_errors)) if friend_errors else type_global_mae
 
-                # SECI: negative when friends are more wrong than the type average
-                seci_val = float(np.clip(-(friend_mae - type_global_mae) / 5.0, -1, 1))
+                # SECI = -(friend_MAE / 5): how wrong are your friends?
+                # Using the relative formula -(friend_mae - type_global_mae)/5 always
+                # cancels to 0 because type_global_mae IS the average of community MAEs
+                # (each community's deviation above the mean is offset by another below).
+                # Direct normalization: SECI = 0 when friends are perfectly correct,
+                # SECI = -1 when friends are maximally wrong (level 5 error everywhere).
+                seci_val = float(np.clip(-friend_mae / 5.0, -1, 0))
                 
                 if agent.agent_type == "exploitative":
                     seci_exp_list.append(seci_val)
@@ -3288,39 +3292,35 @@ class DisasterModel(Model):
 
             self.belief_variance_data.append((self.tick, var_exploit, var_explor))
 
-            # --- AECI: accuracy-based (AI-reliant vs non-AI-reliant belief error) ---
-            # AECI = -(ai_reliant_MAE - non_ai_MAE) / 5 per agent type.
-            # Negative when AI-reliant agents are more wrong than non-AI-reliant →
-            # the AI source is amplifying misinformation (echo chamber effect).
-            # Zero when AI reliance doesn't systematically increase belief error.
+            # --- AECI: how wrong are AI-reliant agents? ---
+            # AECI = -(ai_reliant_MAE / 5) per agent type.
+            # The relative formula -(ai_mae - non_ai_mae)/5 cancels to near-zero:
+            # with 94% of exploiters AI-reliant at α=1, the 6% non-AI share the
+            # same community rumor and have the same error → numerator ≈ 0.
+            # Direct normalization: AECI = 0 when AI-reliant agents are correct,
+            # AECI = -1 when they are maximally wrong. Captures whether the AI
+            # echo chamber is ACTIVE (agents using AI have high belief error).
             aeci_exp = []
             aeci_expl = []
 
-            # Classify AI-reliant agents by current Q-table preference
             ai_reliant_exp = []
             ai_reliant_expl = []
-            non_ai_exp = []
-            non_ai_expl = []
             for agent in self.humans.values():
                 if not hasattr(agent, 'q_table'):
                     continue
                 q = agent.q_table
-                is_ai = q.get('ai', 0) > max(q.get('human', 0), q.get('self_action', 0))
-                if agent.agent_type == "exploitative":
-                    (ai_reliant_exp if is_ai else non_ai_exp).append(agent)
-                else:
-                    (ai_reliant_expl if is_ai else non_ai_expl).append(agent)
+                if q.get('ai', 0) > max(q.get('human', 0), q.get('self_action', 0)):
+                    if agent.agent_type == "exploitative":
+                        ai_reliant_exp.append(agent)
+                    else:
+                        ai_reliant_expl.append(agent)
 
-            for (ai_group, non_ai_group, target_list) in [
-                    (ai_reliant_exp, non_ai_exp, aeci_exp),
-                    (ai_reliant_expl, non_ai_expl, aeci_expl)]:
-                if len(ai_group) < 3 or len(non_ai_group) < 3:
-                    # Need enough agents in both groups for a stable comparison
+            for (ai_group, target_list) in [(ai_reliant_exp, aeci_exp),
+                                             (ai_reliant_expl, aeci_expl)]:
+                if len(ai_group) < 3:
                     continue
-                ai_mae  = float(np.mean([_agent_mae(a) for a in ai_group]))
-                non_mae = float(np.mean([_agent_mae(a) for a in non_ai_group]))
-                aeci_val = float(np.clip(-(ai_mae - non_mae) / 5.0, -1, 1))
-                target_list.append(aeci_val)
+                ai_mae = float(np.mean([_agent_mae(a) for a in ai_group]))
+                target_list.append(float(np.clip(-ai_mae / 5.0, -1, 0)))
 
             avg_aeci_exp = float(np.mean(aeci_exp)) if aeci_exp else 0.0
             avg_aeci_expl = float(np.mean(aeci_expl)) if aeci_expl else 0.0
