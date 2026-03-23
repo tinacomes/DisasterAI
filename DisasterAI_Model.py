@@ -119,6 +119,7 @@ class HumanAgent(Agent):
         self.accepted_friend = 0
         self.accepted_ai = 0          # per-period counter (reset every 5 ticks for retain metrics)
         self.cum_accepted_ai = 0      # cumulative counter (never reset) used for AECI classification
+        self.cum_accepted_human = 0   # cumulative human acceptances (never reset) for AECI ratio
 
         # Performance Counters
         self.correct_targets = 0
@@ -1659,6 +1660,7 @@ class HumanAgent(Agent):
                     if source_id:
                         if source_id.startswith("H_"):
                             self.accepted_human += 1
+                            self.cum_accepted_human += 1  # cumulative; used for AECI ratio
                             if source_id in self.friends:
                                 self.accepted_friend += 1
                         elif source_id.startswith("A_"):
@@ -2580,18 +2582,19 @@ class DisasterModel(Model):
         
         aeci_variance = 0.0  # Default neutral value
         
-        # Classify AI-reliant agents by accepted_ai (actual belief influence),
-        # not query ratio. The feedback loop means agents that validated AI info
-        # as accurate will have built trust and accepted more AI updates. Using
-        # accepted_ai captures this: a query counter (accum_calls_ai) inflated by
-        # low-trust probing does not reflect real AI influence on beliefs.
-        min_accepted_ai = 3  # At least 3 accepted AI belief updates to qualify
+        # Classify AI-reliant agents by ratio: AI must account for ≥40% of all
+        # accepted updates (AI + human), with a minimum of 5 total acceptances.
+        # An absolute count threshold is too easily triggered by epsilon-greedy
+        # random AI queries — every agent reaches cum_accepted_ai=3 in a few ticks.
+        min_total_accepted = 5
+        min_ai_ratio = 0.4
 
         ai_reliant_agents = []
         for agent in self.humans.values():
             if not hasattr(agent, 'accepted_ai'):
                 continue
-            if agent.accepted_ai >= min_accepted_ai:
+            total = agent.accepted_ai + agent.accepted_human
+            if total >= min_total_accepted and agent.accepted_ai / total >= min_ai_ratio:
                 ai_reliant_agents.append(agent)
         
         # Debug print
@@ -3342,15 +3345,13 @@ class DisasterModel(Model):
             aeci_exp = []
             aeci_expl = []
 
-            # Use cumulative accepted_ai (never reset) so that:
-            # - Explorers (Q["ai"]=0.3, wide D/δ) accumulate acceptances quickly → classified
-            # - Exploiters at low α (truthful AI contradicts their beliefs) reject AI → low
-            #   cum_accepted_ai → not classified → AECI correctly stays near 0
-            # - Exploiters at high α (confirmatory AI matches beliefs) accept frequently →
-            #   high cum_accepted_ai → classified → their convergent beliefs → negative AECI
-            # Threshold of 3 is enough for a 20-tick run (explorers get ~5-7 accepted;
-            # exploiters at low α get <1 accepted on average over 20 ticks).
-            min_accepted_ai = 3
+            # Classify AI-reliant agents by ratio: AI must account for ≥40% of
+            # cumulative accepted updates (AI + human), with a floor of 5 total.
+            # An absolute count (e.g. cum_accepted_ai >= 3) is triggered by
+            # epsilon-greedy random AI queries in the first few ticks and would
+            # classify nearly every agent as AI-reliant, collapsing AECI.
+            min_total_accepted = 5
+            min_ai_ratio = 0.4
 
             # Partition AI-reliant agents by type
             ai_reliant_exp = []
@@ -3358,7 +3359,9 @@ class DisasterModel(Model):
             for agent in self.humans.values():
                 if not hasattr(agent, 'cum_accepted_ai'):
                     continue
-                if agent.cum_accepted_ai >= min_accepted_ai:
+                cum_h = getattr(agent, 'cum_accepted_human', 0)
+                cum_total = agent.cum_accepted_ai + cum_h
+                if cum_total >= min_total_accepted and agent.cum_accepted_ai / cum_total >= min_ai_ratio:
                     if agent.agent_type == "exploitative":
                         ai_reliant_exp.append(agent)
                     else:
