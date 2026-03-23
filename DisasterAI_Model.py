@@ -93,7 +93,7 @@ class HumanAgent(Agent):
         # Explorers start with a positive AI affinity to bootstrap the intended
         # mechanism: open agents learn early that AI can be a useful source,
         # while exploiters remain neutral until Q-learning evidence accumulates.
-        self.q_table["ai"] = 0.3 if agent_type == "exploratory" else 0.0
+        self.q_table["ai"] = 0.1 if agent_type == "exploratory" else 0.0
 
         # Track individual sources separately for selection within each mode
         # These are updated alongside mode Q-values for granular tracking
@@ -1721,6 +1721,15 @@ class HumanAgent(Agent):
                         if cell not in self.model.tokens_this_tick:
                             self.model.tokens_this_tick[cell] = {'exploit': 0, 'explor': 0}
                         self.model.tokens_this_tick[cell][agent_type_key] += 1
+
+                # Immediate precision tracking (metric only; Q-learning still uses delayed reward)
+                for cell, belief_level in reward_cells:
+                    if 0 <= cell[0] < self.model.width and 0 <= cell[1] < self.model.height:
+                        actual = self.model.disaster_grid[cell[0], cell[1]]
+                        if actual >= 3:
+                            self.correct_targets += 1
+                        else:
+                            self.incorrect_targets += 1
 
                 # Snapshot pending info evaluations per targeted cell so process_reward can
                 # retroactively evaluate source accuracy against real ground truth (Fix 5).
