@@ -63,6 +63,7 @@ base_params = {
     'epsilon': 0.3,
     'exploit_trust_lr': 0.015,
     'explor_trust_lr': 0.03,
+    'rumor_probability': 1.0,
 }
 
 ALIGNMENT_SWEEP    = [0.0, 0.2, 0.4, 0.6, 0.8, 1.0]
