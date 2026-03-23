@@ -2341,7 +2341,7 @@ class DisasterModel(Model):
                  rumor_probability=0.3, # 30%
                  rumor_intensity=1.0,   # Default peak ~L4 if active
                  rumor_confidence=0.6,  # Default moderate confidence
-                 rumor_radius_factor=0.5, # Default half radius of real disaster
+                 rumor_radius_factor=1.5, # Default 1.5× radius of real disaster — enough cells for SECI/AECI signal
                  min_rumor_separation_factor=0.5,
                  exploit_trust_lr=0.03, # Default value matching base_params
                  explor_trust_lr=0.05,
@@ -2473,7 +2473,7 @@ class DisasterModel(Model):
         rumor_intensity = getattr(self, 'rumor_intensity', 0.0)
         rumor_conf = getattr(self, 'rumor_confidence', 0.6)
         min_sep_dist_sq = (self.disaster_radius * getattr(self, 'min_rumor_separation_factor', 0.7))**2
-        rumor_radius = self.disaster_radius * getattr(self, 'rumor_radius_factor', 0.5) # Needed for init
+        rumor_radius = self.disaster_radius * getattr(self, 'rumor_radius_factor', 1.5) # Needed for init
 
         # Use integer node IDs from network for components
         # Map node ID back to agent ID string 'H_i'
