@@ -588,9 +588,18 @@ class HumanAgent(Agent):
             else:
                 source_knowledge_conf = 0.7  # Unknown source type
 
-            # Pure accuracy reward — agent-type differences emerge from D/delta acceptance,
-            # not from different reward functions that would double-count the effect
-            combined_reward = accuracy_score
+            # Reward is TYPE-SPECIFIC:
+            #   Explorers  → accuracy_score: "was the source truthful?"
+            #                This drives them toward sources that report ground truth,
+            #                so at low α (truthful AI) they learn to prefer AI.
+            #   Exploiters → confirmation_score: "did the source agree with my belief?"
+            #                Confirmation bias: they reward sources that confirm their
+            #                prior, not sources that are objectively correct.
+            #                At low α, AI contradicts their beliefs → Q["ai"] falls.
+            #                At high α, AI confirms their beliefs → Q["ai"] rises.
+            # D/δ acceptance still governs whether the info updates the belief;
+            # this reward governs whether the *mode* gets called again.
+            combined_reward = accuracy_score if self.agent_type == "exploratory" else confirmation_score
 
             # Scale to [-0.7, +0.5] range to match existing Q-update expectations
             accuracy_reward = combined_reward * 0.6 - 0.1
@@ -859,12 +868,13 @@ class HumanAgent(Agent):
             else:
                 source_knowledge_conf = 0.7  # Unknown source type
 
-            # Pure accuracy reward for both types — agent-type differences emerge from
-            # D/delta acceptance (what info gets integrated), not from reward shaping
+            # Same type-specific reward logic as evaluate_information_quality:
+            #   Explorers  → accuracy_score  (truth-seeking)
+            #   Exploiters → confirmation_score  (confirmation bias)
             if is_remote_cell and self.agent_type == "exploratory":
                 # Explorer querying remote cell: defer until sensed (ground truth unavailable)
                 continue
-            combined_reward = accuracy_score
+            combined_reward = accuracy_score if self.agent_type == "exploratory" else confirmation_score
 
             accuracy_reward = combined_reward * 0.7 - 0.1  # Slightly larger scale
 
