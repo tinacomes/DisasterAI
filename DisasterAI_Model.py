@@ -2272,34 +2272,24 @@ class AIAgent(Agent):
         human_vals = np.array(human_vals_list)
         human_conf = np.array(human_confidence_list)
 
-        # --- Alignment Logic - Stronger effect ---
+        # --- Alignment Logic ---
+        # α = 0  → AI reports pure ground truth (fully informative)
+        # α = 1  → AI reports exactly what the agent already believes (pure confirmation)
+        # α = 0.5 → AI reports the midpoint between truth and belief
+        #
+        # Simple linear interpolation: reported = truth + α * (belief - truth)
+        #   = (1-α)*truth + α*belief
+        #
+        # Previous formula used α*(1 + conf*2 + trust_term) which amplified the
+        # adjustment factor well above 1, causing AI to report PAST the agent's belief
+        # (e.g. belief=4, truth=0, α=0.5 → factor≈1.5 → reported=6→clipped to 5).
+        # That collapsed α=0.5, 0.8, 1.0 into the same clipped report, making the
+        # alignment sweep meaningless and all intermediate α levels look like α=1.
         alignment_strength = self.model.ai_alignment_level
-        low_trust_amplification = getattr(self.model, 'low_trust_amplification_factor', 0.5)
-        clipped_trust = max(0.0, min(1.0, caller_trust_in_ai))
 
-        # If alignment is 0, report pure truth (no adjustments)
-        if alignment_strength == 0:
-            # Ground truth - no adjustments at all
-            corrected = sensed_vals
-        else:
-            # Calculate adjustments based on alignment level
-            alignment_factors = alignment_strength * (1.0 + human_conf * 2.0)
-
-            # Add trust-based effect
-            alignment_factors += alignment_strength * low_trust_amplification * (1.0 - clipped_trust)
-
-            # Cap the maximum alignment factor
-            alignment_factors = np.clip(alignment_factors, 0.0, 3.0)
-
-            # Calculate the difference between human beliefs and AI sensed values
-            belief_differences = human_vals - sensed_vals
-
-            # Apply proportional adjustments based on alignment factors
-            adjustments = alignment_factors * belief_differences
-
-            # Apply adjustments to sensed values
-            corrected = np.round(sensed_vals + adjustments)
-            corrected = np.clip(corrected, 0, 5)  # Keep values in valid range
+        belief_differences = human_vals - sensed_vals
+        corrected = np.round(sensed_vals + alignment_strength * belief_differences)
+        corrected = np.clip(corrected, 0, 5)  # Keep values in valid range
 
         # Build the report dictionary with aligned values
         for i, cell in enumerate(valid_cells_in_query):
