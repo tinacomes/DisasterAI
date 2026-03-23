@@ -2662,9 +2662,9 @@ class DisasterModel(Model):
         # Store in the array with consistent format
         self.aeci_variance_data.append(aeci_variance_tuple)
         
-        # Debug: print all values in the array
-        print(f"  Current aeci_variance_data length: {len(self.aeci_variance_data)}")
-        print(f"  Last 3 entries: {self.aeci_variance_data[-3:] if len(self.aeci_variance_data) >= 3 else self.aeci_variance_data}")
+        if getattr(self, 'debug_mode', False):
+            print(f"  Current aeci_variance_data length: {len(self.aeci_variance_data)}")
+            print(f"  Last 3 entries: {self.aeci_variance_data[-3:] if len(self.aeci_variance_data) >= 3 else self.aeci_variance_data}")
         
         return aeci_variance_tuple
 

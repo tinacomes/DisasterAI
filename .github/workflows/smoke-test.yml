@@ -27,13 +27,13 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Smoke-test simulate.py (1 run, 20 ticks)
+      - name: Smoke-test simulate.py (1 run, 40 ticks)
         run: |
           mkdir -p results test_results
           # Override ticks via a tiny wrapper — patch base params at runtime
           python3 -c "
           import simulate, json, os
-          simulate.BASE_PARAMS['ticks'] = 20
+          simulate.BASE_PARAMS['ticks'] = 40
           params = simulate.BASE_PARAMS.copy()
           params['ai_alignment_level'] = 0.5
           run = simulate.run_one(params)
@@ -48,11 +48,11 @@ jobs:
           python3 plot_results.py --results-dir results/ --save-dir test_results/
           echo "plot_results.py: OK"
 
-      - name: Smoke-test test_filter_bubbles.py (1 run, 20 ticks)
+      - name: Smoke-test test_filter_bubbles.py (1 run, 40 ticks)
         run: |
           python3 -c "
           import test_filter_bubbles as fb
-          fb.base_params['ticks'] = 20
+          fb.base_params['ticks'] = 40
           fb.N_RUNS = 1
           fb.N_FACTOR_RUNS = 1
           fb.ALIGNMENT_SWEEP = [0.0, 0.5, 1.0]
