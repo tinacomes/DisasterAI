@@ -1493,7 +1493,10 @@ if __name__ == '__main__':
               f"{m['total_bubble']:>8.3f}  {m['mae']:>7.3f}  {m['unmet']:>7.1f}{tag}")
 
     plot_goldilocks(metrics, all_results, save_dir)
-    plot_factor_comparison(rumor_results, disaster_results, mix_results, save_dir)
+    if rumor_results and disaster_results and mix_results:
+        plot_factor_comparison(rumor_results, disaster_results, mix_results, save_dir)
+    else:
+        print("Factor comparison skipped (no factor-sweep data).")
     plot_transition_timing(all_results, save_dir)
     plot_aeci_evolution(all_results, save_dir)
     plot_echo_chamber_lifecycle(all_results, save_dir)
