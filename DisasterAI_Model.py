@@ -90,7 +90,10 @@ class HumanAgent(Agent):
         self.q_table = {}
         self.q_table["self_action"] = 0.0
         self.q_table["human"] = 0.0  # Generic value of querying humans as a category
-        self.q_table["ai"] = 0.0     # Generic value of querying AI as a category
+        # Explorers start with a positive AI affinity to bootstrap the intended
+        # mechanism: open agents learn early that AI can be a useful source,
+        # while exploiters remain neutral until Q-learning evidence accumulates.
+        self.q_table["ai"] = 0.3 if agent_type == "exploratory" else 0.0
 
         # Track individual sources separately for selection within each mode
         # These are updated alongside mode Q-values for granular tracking
@@ -2717,73 +2720,34 @@ class DisasterModel(Model):
         for i in range(self.num_humans):
             self.social_network.add_node(i)
 
-        # Determine number of communities (2-3 for typical agent counts)
-        num_communities = min(3, max(2, self.num_humans // 15))
-        print(f"Creating {num_communities} substantial communities")
+        # Type-homogeneous community assignment: exploiters cluster with exploiters,
+        # explorers cluster with explorers.  This is the necessary condition for
+        # the D/δ acceptance differences to produce DISTINCT echo-chamber dynamics
+        # (SECI) per type.  Mixed communities caused both types to converge on the
+        # same community consensus, making SECI identical across types.
+        exploitative_agents = list(range(num_exploitative))
+        exploratory_agents  = list(range(num_exploitative, self.num_humans))
+        random.shuffle(exploitative_agents)
+        random.shuffle(exploratory_agents)
 
-        # Divide agents into communities
-        # Ensure each community has at least 5 agents (or appropriate minimum)
-        min_community_size = max(5, self.num_humans // (num_communities * 2))
+        def _split_into_communities(agents, n_comms):
+            """Divide agents into n_comms roughly equal, non-empty lists."""
+            n_comms = max(1, min(n_comms, len(agents)))
+            size = max(1, len(agents) // n_comms)
+            comms = [agents[i * size:(i + 1) * size] for i in range(n_comms - 1)]
+            comms.append(agents[(n_comms - 1) * size:])
+            return [c for c in comms if c]
 
-        all_agents = list(range(self.num_humans))
-        random.shuffle(all_agents)  # Randomize agent assignment
+        # Target ~25 agents per community within each type
+        n_exploit_comms = max(2, num_exploitative  // 25)
+        n_explor_comms  = max(2, num_exploratory   // 25)
 
-        # Create the communities with minimum size constraints
-        communities = []
-        remaining_agents = all_agents.copy()
-
-        for i in range(num_communities - 1):  # Allocate all but the last community
-            # Ensure we leave enough agents for remaining communities
-            agents_needed = min_community_size * (num_communities - i)
-            max_size = len(remaining_agents) - agents_needed + min_community_size
-
-            # Select size between min and max
-            size = random.randint(min_community_size, max(min_community_size, max_size))
-
-            # Create community
-            community = remaining_agents[:size]
-            communities.append(community)
-
-            # Remove assigned agents
-            remaining_agents = remaining_agents[size:]
-
-        # Last community gets all remaining agents
-        if remaining_agents:
-            communities.append(remaining_agents)
-
-        # Ensure type diversity within each community (some mixture of types)
-        for community in communities:
-            exploit_count = sum(1 for a in community if a < num_exploitative)
-            explor_count = len(community) - exploit_count
-
-            # If community is heavily biased to one type, adjust it
-            if exploit_count == 0 and num_exploitative > 0:
-                # Add at least one exploitative agent
-                exploit_to_add = min(2, num_exploitative)
-                for _ in range(exploit_to_add):
-                    # Find an exploitative agent from another community with many exploit agents
-                    for other_comm in communities:
-                        if other_comm != community:
-                            other_exploit = [a for a in other_comm if a < num_exploitative]
-                            if len(other_exploit) > 2:  # Can spare one
-                                agent_to_move = random.choice(other_exploit)
-                                community.append(agent_to_move)
-                                other_comm.remove(agent_to_move)
-                                break
-
-            elif explor_count == 0 and num_exploratory > 0:
-                # Add at least one exploratory agent
-                explor_to_add = min(2, num_exploratory)
-                for _ in range(explor_to_add):
-                    # Similar logic for exploratory agents
-                    for other_comm in communities:
-                        if other_comm != community:
-                            other_explor = [a for a in other_comm if a >= num_exploitative]
-                            if len(other_explor) > 2:  # Can spare one
-                                agent_to_move = random.choice(other_explor)
-                                community.append(agent_to_move)
-                                other_comm.remove(agent_to_move)
-                                break
+        communities = (
+            _split_into_communities(exploitative_agents, n_exploit_comms) +
+            _split_into_communities(exploratory_agents,  n_explor_comms)
+        )
+        print(f"Creating {len(communities)} type-homogeneous communities "
+              f"({n_exploit_comms} exploitative, {n_explor_comms} exploratory)")
 
         # Report community compositions
         print(f"Created {len(communities)} communities:")
@@ -3099,21 +3063,36 @@ class DisasterModel(Model):
         # Every 5 ticks, compute additional metrics.
         if self.tick % 5 == 0:
             # --- SECI Calculation ---
-            all_belief_levels = []
+            # Collect belief levels split by type so each type's SECI is
+            # normalised against its own global variance.  Using a pooled
+            # global_var (all agents combined) diluted the signal: because
+            # explorers maintain high belief diversity, the pooled baseline
+            # was always pulled upward, making both types look equally
+            # un-echo-chambered.  Type-specific normalisation lets exploiters
+            # (converging on the false epicenter) show a strongly negative
+            # SECI while explorers (spread across uncertain cells) show a
+            # weaker one.  The pooled global_var is retained for AECI, which
+            # compares AI-reliant agents against the full population.
+            exploit_belief_levels = []
+            explor_belief_levels  = []
 
-            # Ensure we have beliefs to process
             for agent in self.humans.values():
-                if agent.beliefs:  # Check if any beliefs exist
-                    for cell, belief_info in agent.beliefs.items():
-                        if isinstance(belief_info, dict):
-                            level = belief_info.get('level', 0)
-                            all_belief_levels.append(level)
+                if agent.beliefs:
+                    levels = [
+                        b.get('level', 0)
+                        for b in agent.beliefs.values()
+                        if isinstance(b, dict)
+                    ]
+                    if agent.agent_type == "exploitative":
+                        exploit_belief_levels.extend(levels)
+                    else:
+                        explor_belief_levels.extend(levels)
 
-            # Compute global variance with safety check
-            if len(all_belief_levels) > 1:
-                global_var = np.var(all_belief_levels)
-            else:
-                global_var = 1e-6  # Default to small value if insufficient data
+            exploit_global_var = np.var(exploit_belief_levels) if len(exploit_belief_levels) > 1 else 1e-6
+            explor_global_var  = np.var(explor_belief_levels)  if len(explor_belief_levels)  > 1 else 1e-6
+            # Pooled global_var kept for AECI (compares AI-reliant agents vs whole pop)
+            all_belief_levels = exploit_belief_levels + explor_belief_levels
+            global_var = np.var(all_belief_levels) if len(all_belief_levels) > 1 else 1e-6
 
             # Initialize metric lists
             seci_exp_list = []
@@ -3132,22 +3111,22 @@ class DisasterModel(Model):
                                 friend_belief_levels.append(level)
 
                 # Calculate friend variance only if we have enough data
+                type_global_var = exploit_global_var if agent.agent_type == "exploitative" else explor_global_var
                 if len(friend_belief_levels) > 1:
                     friend_var = np.var(friend_belief_levels)
                 else:
-                    friend_var = global_var  # Default to global var if insufficient friend data
+                    friend_var = type_global_var
 
-                # Calculate SECI safely
-                if global_var > 1e-9:  # Ensure non-zero denominator
-                    var_diff = friend_var - global_var
-                    
+                # Calculate SECI using type-specific baseline
+                if type_global_var > 1e-9:
+                    var_diff = friend_var - type_global_var
                     if var_diff < 0:  # Variance reduction (echo chamber)
-                        seci_val = max(-1, var_diff / global_var)
+                        seci_val = max(-1, var_diff / type_global_var)
                     else:  # Variance increase (diversification)
-                        max_possible_var = 5.0  # Upper bound for normalization
-                        seci_val = min(1, var_diff / (max_possible_var - global_var))
+                        max_possible_var = 5.0
+                        seci_val = min(1, var_diff / (max_possible_var - type_global_var))
                 else:
-                    seci_val = 0  # Default if global variance is essentially zero                # Store by agent type
+                    seci_val = 0  # Store by agent type
                 
                 if agent.agent_type == "exploitative":
                     seci_exp_list.append(seci_val)

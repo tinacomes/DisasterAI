@@ -1213,21 +1213,28 @@ def plot_gap_sweep(gap_results, save_dir):
     Goldilocks point) plus the minimum total_bubble achieved.  Two additional
     panels show how steady-state SECI and AECI change with g.
     """
-    g_values   = sorted(gap_results.keys())
-    best_alphas   = []
-    min_bubbles   = []
-    seci_at_star  = []
-    aeci_at_star  = []
+    g_values        = sorted(gap_results.keys())
+    best_alphas     = []
+    min_bubbles     = []
+    min_bubble_stds = []
+    seci_at_star    = []
+    seci_stds       = []
+    aeci_at_star    = []
+    aeci_stds       = []
 
     for g in g_values:
         results_g = gap_results[g]['all_results']
         metrics_g = compute_goldilocks_metrics(results_g)
         total_vals = [metrics_g[a]['total_bubble'] for a in ALIGNMENT_SWEEP]
         idx = int(np.argmin(total_vals))
-        best_alphas.append(ALIGNMENT_SWEEP[idx])
+        a_star = ALIGNMENT_SWEEP[idx]
+        best_alphas.append(a_star)
         min_bubbles.append(total_vals[idx])
-        seci_at_star.append(metrics_g[ALIGNMENT_SWEEP[idx]]['seci'])
-        aeci_at_star.append(metrics_g[ALIGNMENT_SWEEP[idx]]['aeci'])
+        min_bubble_stds.append(metrics_g[a_star]['seci_std'] + metrics_g[a_star]['aeci_std'])
+        seci_at_star.append(metrics_g[a_star]['seci'])
+        seci_stds.append(metrics_g[a_star]['seci_std'])
+        aeci_at_star.append(metrics_g[a_star]['aeci'])
+        aeci_stds.append(metrics_g[a_star]['aeci_std'])
 
     g_labels = [f'g={g}\n(D_ex={_D_MID-g*_D_HALF:.1f}, δ_ex={_DELTA_MID+g*_DELTA_HALF:.2f})'
                 for g in g_values]
@@ -1252,7 +1259,8 @@ def plot_gap_sweep(gap_results, save_dir):
 
     # Panel 2: min total_bubble vs g
     ax = axes[0, 1]
-    ax.bar(x, min_bubbles, color='purple', alpha=0.75, edgecolor='white')
+    ax.bar(x, min_bubbles, yerr=min_bubble_stds, color='purple', alpha=0.75,
+           edgecolor='white', capsize=5, error_kw={'elinewidth': 1.5, 'ecolor': 'black'})
     ax.set_xticks(x); ax.set_xticklabels(g_labels, fontsize=8)
     ax.set_ylabel('min(|SECI| + |AECI|)')
     ax.set_title('Minimum Total Bubble at α*\n(lower = Goldilocks zone is more effective)')
@@ -1260,22 +1268,32 @@ def plot_gap_sweep(gap_results, save_dir):
 
     # Panel 3: SECI at α* vs g
     ax = axes[1, 0]
-    ax.plot(g_values, seci_at_star, 'b-o', linewidth=2, markersize=8)
+    seci_arr = np.array(seci_at_star)
+    seci_std_arr = np.array(seci_stds)
+    ax.plot(g_values, seci_arr, 'b-o', linewidth=2, markersize=8)
+    ax.fill_between(g_values, seci_arr - seci_std_arr, seci_arr + seci_std_arr,
+                    color='blue', alpha=0.15, label='±1 SD')
     ax.axhline(0, color='k', linestyle=':', alpha=0.5)
     ax.set_xlabel('Gap scalar g')
     ax.set_ylabel('SECI at α*')
     ax.set_title('Social Echo Chamber Strength at α*\n(negative = stronger bubble)')
     ax.set_ylim(-1.1, 0.5)
+    ax.legend(fontsize=9)
     ax.grid(True, alpha=0.3)
 
     # Panel 4: AECI at α* vs g
     ax = axes[1, 1]
-    ax.plot(g_values, aeci_at_star, 'r-o', linewidth=2, markersize=8)
+    aeci_arr = np.array(aeci_at_star)
+    aeci_std_arr = np.array(aeci_stds)
+    ax.plot(g_values, aeci_arr, 'r-o', linewidth=2, markersize=8)
+    ax.fill_between(g_values, aeci_arr - aeci_std_arr, aeci_arr + aeci_std_arr,
+                    color='red', alpha=0.15, label='±1 SD')
     ax.axhline(0, color='k', linestyle=':', alpha=0.5)
     ax.set_xlabel('Gap scalar g')
     ax.set_ylabel('AECI at α*')
     ax.set_title('AI-Induced Bubble Strength at α*\n(negative = stronger AI bubble)')
     ax.set_ylim(-1.1, 0.5)
+    ax.legend(fontsize=9)
     ax.grid(True, alpha=0.3)
 
     plt.tight_layout()
@@ -1475,7 +1493,10 @@ if __name__ == '__main__':
               f"{m['total_bubble']:>8.3f}  {m['mae']:>7.3f}  {m['unmet']:>7.1f}{tag}")
 
     plot_goldilocks(metrics, all_results, save_dir)
-    plot_factor_comparison(rumor_results, disaster_results, mix_results, save_dir)
+    if rumor_results and disaster_results and mix_results:
+        plot_factor_comparison(rumor_results, disaster_results, mix_results, save_dir)
+    else:
+        print("Factor comparison skipped (no factor-sweep data).")
     plot_transition_timing(all_results, save_dir)
     plot_aeci_evolution(all_results, save_dir)
     plot_echo_chamber_lifecycle(all_results, save_dir)
