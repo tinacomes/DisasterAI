@@ -166,6 +166,8 @@ def run_one_sim(params):
     metric_ticks = []
     # Cumulative call counters for computing per-tick deltas
     _prev_ai_ex = _prev_tot_ex = _prev_ai_er = _prev_tot_er = 0
+    # Accumulate relief tokens per 5-tick window for precision calculation
+    _win_ex_correct = _win_ex_total = _win_er_correct = _win_er_total = 0
 
     W, H = params['width'], params['height']
     cum_aid_grid      = np.zeros((W, H), dtype=float)
@@ -224,32 +226,38 @@ def run_one_sim(params):
             info_div_exploit.append(float(d[1]))
             info_div_explor.append(float(d[2]))
 
+        # Accumulate token-based precision counts using current-tick disaster state
+        for pos, cnts in model.tokens_this_tick.items():
+            is_high = model.disaster_grid[pos] >= 3
+            ex_n = cnts.get('exploit', 0)
+            er_n = cnts.get('explor', 0)
+            if is_high:
+                _win_ex_correct += ex_n
+                _win_er_correct += er_n
+            _win_ex_total += ex_n
+            _win_er_total += er_n
+
         if tick % 5 == 0:
             ex_errors, er_errors = [], []
-            ex_correct = ex_total = er_correct = er_total = 0
             for agent in model.agent_list:
                 if not isinstance(agent, HumanAgent):
                     continue
+                # Filter to informed beliefs only (exclude default L0 priors)
+                informed = [(c, b) for c, b in agent.beliefs.items()
+                            if isinstance(b, dict) and b.get('confidence', 0) > 0.1]
                 err = float(np.mean([
                     abs(b.get('level', 0) - model.disaster_grid[c])
-                    for c, b in agent.beliefs.items()
-                    if isinstance(b, dict)
-                ])) if agent.beliefs else 0.0
-                total = agent.correct_targets + agent.incorrect_targets
+                    for c, b in informed
+                ])) if informed else float('nan')
                 if agent.agent_type == 'exploitative':
                     ex_errors.append(err)
-                    ex_correct += agent.correct_targets
-                    ex_total   += total
                 else:
                     er_errors.append(err)
-                    er_correct += agent.correct_targets
-                    er_total   += total
-            mae_exploit.append(float(np.mean(ex_errors)) if ex_errors else 0.0)
-            mae_explor.append( float(np.mean(er_errors)) if er_errors else 0.0)
-            # Use 0.0 (not nan) when no tokens sent yet so the x-axis spans the
-            # full simulation range rather than autoscaling to the first non-NaN point.
-            prec_exploit.append(ex_correct / ex_total if ex_total > 0 else 0.0)
-            prec_explor.append( er_correct / er_total if er_total > 0 else 0.0)
+            mae_exploit.append(float(np.nanmean(ex_errors)) if ex_errors else float('nan'))
+            mae_explor.append( float(np.nanmean(er_errors)) if er_errors else float('nan'))
+            prec_exploit.append(float(_win_ex_correct / _win_ex_total) if _win_ex_total > 0 else 0.0)
+            prec_explor.append( float(_win_er_correct / _win_er_total) if _win_er_total > 0 else 0.0)
+            _win_ex_correct = _win_ex_total = _win_er_correct = _win_er_total = 0
             metric_ticks.append(tick)
 
     n = len(seci_exploit)
