@@ -2657,10 +2657,6 @@ class DisasterModel(Model):
         # Store in the array with consistent format
         self.aeci_variance_data.append(aeci_variance_tuple)
         
-        # Debug: print all values in the array
-        print(f"  Current aeci_variance_data length: {len(self.aeci_variance_data)}")
-        print(f"  Last 3 entries: {self.aeci_variance_data[-3:] if len(self.aeci_variance_data) >= 3 else self.aeci_variance_data}")
-        
         return aeci_variance_tuple
 
     def calculate_info_diversity(self):
@@ -3102,50 +3098,30 @@ class DisasterModel(Model):
             all_belief_levels = exploit_belief_levels + explor_belief_levels
             global_var = np.var(all_belief_levels) if len(all_belief_levels) > 1 else 1e-6
 
-            # Initialize metric lists
-            seci_exp_list = []
-            seci_expl_list = []
+            # SECI: type-vs-global comparison.
+            # Measures whether a type is MORE homogeneous than the full population —
+            # i.e., whether exploiters have converged on a shared (possibly false)
+            # epicenter while explorers remain diverse.  This is stable over time:
+            # exploiters locked on the false epicenter keep low type_var even as their
+            # absolute belief set grows, because the false-epicenter cells dominate.
+            # The old friend-group approach weakened over time as all communities
+            # eventually converged equally, making friend_var ≈ type_global_var → 0.
+            max_possible_var = 5.0
+            def _seci_val(type_var, gvar):
+                if gvar < 1e-9:
+                    return 0.0
+                var_diff = type_var - gvar
+                if var_diff < 0:  # type more homogeneous than global → echo chamber
+                    return max(-1.0, var_diff / gvar)
+                else:             # type more diverse than global → anti-bubble
+                    denom = max_possible_var - gvar
+                    return min(1.0, var_diff / denom) if denom > 1e-9 else 0.0
 
-            # More robust friend belief collection and SECI calculation
-            for agent in self.humans.values():
-                # Collect friend beliefs — L1+ only, consistent with global baseline above
-                friend_belief_levels = []
-                for fid in agent.friends:
-                    friend = self.humans.get(fid)
-                    if friend and friend.beliefs:
-                        for cell, belief_info in friend.beliefs.items():
-                            if isinstance(belief_info, dict):
-                                level = belief_info.get('level', 0)
-                                if level >= 1:
-                                    friend_belief_levels.append(level)
-
-                # Calculate friend variance only if we have enough data
-                type_global_var = exploit_global_var if agent.agent_type == "exploitative" else explor_global_var
-                if len(friend_belief_levels) > 1:
-                    friend_var = np.var(friend_belief_levels)
-                else:
-                    friend_var = type_global_var
-
-                # Calculate SECI using type-specific baseline
-                if type_global_var > 1e-9:
-                    var_diff = friend_var - type_global_var
-                    if var_diff < 0:  # Variance reduction (echo chamber)
-                        seci_val = max(-1, var_diff / type_global_var)
-                    else:  # Variance increase (diversification)
-                        max_possible_var = 5.0
-                        seci_val = min(1, var_diff / (max_possible_var - type_global_var))
-                else:
-                    seci_val = 0  # Store by agent type
-                
-                if agent.agent_type == "exploitative":
-                    seci_exp_list.append(seci_val)
-                else:
-                    seci_expl_list.append(seci_val)
+            seci_exploit_mean = _seci_val(exploit_global_var, global_var)
+            seci_explor_mean  = _seci_val(explor_global_var,  global_var)
 
             # Store results with proper checks
-            if seci_exp_list or seci_expl_list:  # Only store if we have data
-                seci_exploit_mean = np.mean(seci_exp_list) if seci_exp_list else 0
-                seci_explor_mean = np.mean(seci_expl_list) if seci_expl_list else 0
+            if True:
 
                 # Update the last metrics dictionary
                 self._last_metrics['seci'] = {
@@ -3336,82 +3312,70 @@ class DisasterModel(Model):
             # AI-reliant agents are classified by accepted_ai (actual belief
             # updates accepted from AI), not query count. The feedback loop
             # means agents that validated AI info as accurate build higher AI
-            # trust and accept more AI updates — so accepted_ai is the correct
-            # measure of AI influence on beliefs.
+            # trust and accept more AI updates.
             #
-            # For each AI-reliant agent, we look at the beliefs held by all
-            # other AI-reliant agents (their "AI-peer group") and compute the
-            # variance of that peer group's beliefs. Compare to global variance:
-            #   peer_var < global_var → AI-reliant agents hold similar beliefs
-            #                           → AI created an echo chamber (negative)
-            #   peer_var > global_var → AI-reliant agents hold diverse beliefs
-            #                           → AI broadened perspectives (positive)
+            # AECI: within-type AI-heavy vs AI-light comparison.
+            # The old formula compared AI-reliant agents to the global population,
+            # which conflated natural type homogeneity (exploiters have narrow D/δ
+            # so they naturally converge more than explorers) with AI-induced
+            # homogeneity.  The result was AECI negative even at α=0 (truthful AI).
+            #
+            # New formula: for each type, split agents into top-50% and bottom-50%
+            # by cum_accepted_ai.  Compare variance of beliefs in the AI-heavy half
+            # to the AI-light half — both within the same type, so type-level
+            # homogeneity cancels out.  If AI reinforcement (confirming α) is causing
+            # an echo chamber, the AI-heavy agents will have MORE uniform beliefs
+            # (locked on the false epicenter) vs the AI-light agents who explored
+            # more independently.
+            #   AECI < 0 → AI-heavy more homogeneous than AI-light → echo chamber
+            #   AECI ≈ 0 → no AI-driven convergence
+            #   AECI > 0 → AI-heavy more diverse (AI is broadening perspectives)
             aeci_exp = []
             aeci_expl = []
 
-            # Use cumulative accepted_ai (never reset) so that:
-            # - Explorers (Q["ai"]=0.3, wide D/δ) accumulate acceptances quickly → classified
-            # - Exploiters at low α (truthful AI contradicts their beliefs) reject AI → low
-            #   cum_accepted_ai → not classified → AECI correctly stays near 0
-            # - Exploiters at high α (confirmatory AI matches beliefs) accept frequently →
-            #   high cum_accepted_ai → classified → their convergent beliefs → negative AECI
-            # Threshold of 3 is enough for a 20-tick run (explorers get ~5-7 accepted;
-            # exploiters at low α get <1 accepted on average over 20 ticks).
-            min_accepted_ai = 3
-
-            # Partition AI-reliant agents by type
-            ai_reliant_exp = []
-            ai_reliant_expl = []
-            for agent in self.humans.values():
-                if not hasattr(agent, 'cum_accepted_ai'):
-                    continue
-                if agent.cum_accepted_ai >= min_accepted_ai:
-                    if agent.agent_type == "exploitative":
-                        ai_reliant_exp.append(agent)
-                    else:
-                        ai_reliant_expl.append(agent)
-
-            # Collect group-level beliefs for each type (all peers in the AI-reliant set).
-            # Filter to L1+ cells consistent with global_var baseline: the echo chamber
-            # signal lives in disaster-area cells, not the L0 majority.
-            def _peer_beliefs(agents):
+            def _beliefs_l1(agents):
                 levels = []
                 for a in agents:
-                    for belief_info in a.beliefs.values():
-                        if isinstance(belief_info, dict):
-                            level = belief_info.get('level', 0)
-                            if not np.isnan(level) and level >= 1:
-                                levels.append(level)
+                    for binfo in a.beliefs.values():
+                        if isinstance(binfo, dict):
+                            lv = binfo.get('level', 0)
+                            if not np.isnan(lv) and lv >= 1:
+                                levels.append(float(lv))
                 return levels
 
-            for agent_type_label, ai_reliant_group in [("exploitative", ai_reliant_exp),
-                                                        ("exploratory", ai_reliant_expl)]:
-                if len(ai_reliant_group) < 2:
-                    # Not enough AI-reliant agents to form a peer group
+            for agent_type_label, aeci_list in [("exploitative", aeci_exp),
+                                                  ("exploratory",  aeci_expl)]:
+                type_agents = [a for a in self.humans.values()
+                               if a.agent_type == agent_type_label
+                               and hasattr(a, 'cum_accepted_ai')]
+                if len(type_agents) < 4:
+                    continue  # need at least 2 per half
+
+                # Median split by cumulative AI acceptance within this type
+                sorted_agents = sorted(type_agents, key=lambda a: a.cum_accepted_ai)
+                mid = len(sorted_agents) // 2
+                ai_light = sorted_agents[:mid]
+                ai_heavy = sorted_agents[mid:]
+
+                light_beliefs = _beliefs_l1(ai_light)
+                heavy_beliefs = _beliefs_l1(ai_heavy)
+                if len(light_beliefs) < 2 or len(heavy_beliefs) < 2:
                     continue
 
-                peer_belief_levels = _peer_beliefs(ai_reliant_group)
-                if len(peer_belief_levels) < 2:
-                    continue
+                light_var = np.var(light_beliefs)
+                heavy_var = np.var(heavy_beliefs)
+                baseline  = max(light_var, 1e-6)
 
-                peer_var = np.var(peer_belief_levels)
+                var_diff = heavy_var - baseline
+                if var_diff < 0:  # AI-heavy more homogeneous → echo chamber
+                    aeci_val = max(-1.0, var_diff / baseline)
+                else:             # AI-heavy more diverse → diversification
+                    denom = max_possible_var - baseline
+                    aeci_val = min(1.0, var_diff / denom) if denom > 1e-9 else 0.0
 
-                if global_var > 1e-9:
-                    var_diff = peer_var - global_var
-                    if var_diff < 0:  # Echo chamber: AI-reliant agents hold similar beliefs
-                        aeci_val = max(-1, var_diff / global_var)
-                    else:  # Diversification: AI-reliant agents hold more varied beliefs
-                        max_possible_var = 5.0
-                        aeci_val = min(1, var_diff / (max_possible_var - global_var))
-                else:
-                    aeci_val = 0.0
+                aeci_list.append(aeci_val)
 
-                if agent_type_label == "exploitative":
-                    aeci_exp.append(aeci_val)
-                else:
-                    aeci_expl.append(aeci_val)
-
-            avg_aeci_exp = float(np.mean(aeci_exp)) if aeci_exp else 0.0
+            avg_aeci_exp  = float(np.mean(aeci_exp))  if aeci_exp  else 0.0
             avg_aeci_expl = float(np.mean(aeci_expl)) if aeci_expl else 0.0
 
             avg_aeci_exp = max(-1.0, min(1.0, avg_aeci_exp))

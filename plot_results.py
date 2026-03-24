@@ -251,14 +251,17 @@ def plot_timeseries(alpha_r, save_dir):
     colors = plt.cm.viridis(np.linspace(0, 1, len(alphas)))
     n_label = f'  (mean ± std, N={n_runs})' if n_runs else ''
 
-    fig, axes = plt.subplots(2, 3, figsize=(18, 10))
+    # 3×3 layout: separate exploit/explor panels for SECI and AECI
+    fig, axes = plt.subplots(3, 3, figsize=(18, 14))
     fig.suptitle(
         f'Filter Bubble & Delivery Metrics Over Time{n_label}',
         fontsize=13, fontweight='bold'
     )
-    ax_seci, ax_aeci, ax_mae    = axes[0]
-    ax_prec, ax_unmet, ax_spare = axes[1]
-    ax_spare.axis('off')
+    ax_seci_ex, ax_seci_er, ax_mae   = axes[0]
+    ax_aeci_ex, ax_aeci_er, ax_unmet = axes[1]
+    ax_prec,    ax_spare1, ax_spare2  = axes[2]
+    ax_spare1.axis('off')
+    ax_spare2.axis('off')
 
     for color, alpha in zip(colors, alphas):
         res   = alpha_r[alpha]
@@ -266,13 +269,13 @@ def plot_timeseries(alpha_r, save_dir):
         ts    = res['metric_ticks']
         label = f'α={alpha}' + (' ★' if alpha == best_alpha else '')
 
-        # SECI / AECI — combined exploit+explor
-        for mk, ax_d in [('seci', ax_seci), ('aeci', ax_aeci)]:
-            m = (np.array(res[f'{mk}_exploit_mean']) +
-                 np.array(res[f'{mk}_explor_mean'])) / 2
-            s = (np.array(res[f'{mk}_exploit_std']) +
-                 np.array(res[f'{mk}_explor_std']))  / 2
-            _band(ax_d, tf, m, s, color, label)
+        # SECI — separate exploit and explor panels
+        _band(ax_seci_ex, tf, res['seci_exploit_mean'], res['seci_exploit_std'], color, label)
+        _band(ax_seci_er, tf, res['seci_explor_mean'],  res['seci_explor_std'],  color, label)
+
+        # AECI — separate exploit and explor panels
+        _band(ax_aeci_ex, tf, res['aeci_exploit_mean'], res['aeci_exploit_std'], color, label)
+        _band(ax_aeci_er, tf, res['aeci_explor_mean'],  res['aeci_explor_std'],  color, label)
 
         # MAE — combined, sampled
         mae_m = (np.array(res['mae_exploit_mean']) + np.array(res['mae_explor_mean'])) / 2
@@ -297,16 +300,20 @@ def plot_timeseries(alpha_r, save_dir):
               color, label)
 
     for ax, title, ylabel, ylim, hl in [
-        (ax_seci,  'SECI Over Time',
+        (ax_seci_ex, 'SECI Over Time — Exploitative Agents\n(confirmation-biased, narrow acceptance)',
          'SECI (-1 to +1)', (-1.1, 1.1), 0),
-        (ax_aeci,  'AECI Over Time',
-         'AECI (-1 to +1)', (-1.1, 1.1), 0),
-        (ax_mae,   'Belief MAE Over Time',
+        (ax_seci_er, 'SECI Over Time — Exploratory Agents\n(open, wide acceptance)',
+         'SECI (-1 to +1)', (-1.1, 1.1), 0),
+        (ax_mae,     'Belief MAE Over Time  (exploit + explor avg)',
          'Mean Absolute Error', (0, None), None),
-        (ax_prec,  'Targeting Precision\n(solid=exploratory, dashed=exploitative)',
-         'Correct / Total', (0, 1.05), 0.6),
-        (ax_unmet, 'Unmet High-Need Cells (level ≥4, 0 tokens)',
+        (ax_aeci_ex, 'AECI Over Time — Exploitative Agents',
+         'AECI (-1 to +1)', (-1.1, 1.1), 0),
+        (ax_aeci_er, 'AECI Over Time — Exploratory Agents',
+         'AECI (-1 to +1)', (-1.1, 1.1), 0),
+        (ax_unmet,   'Unmet High-Need Cells per Tick (level ≥4, 0 tokens)',
          'Count', (0, None), None),
+        (ax_prec,    'Relief Targeting Precision\n(solid=exploratory, dashed=exploitative)',
+         'Correct / Total', (0, 1.05), 0.6),
     ]:
         _finish(ax, title, 'Tick', ylabel, ylim, hline=hl)
 
