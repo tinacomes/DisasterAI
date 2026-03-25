@@ -3075,50 +3075,73 @@ class DisasterModel(Model):
             # SECI while explorers (spread across uncertain cells) show a
             # weaker one.  The pooled global_var is retained for AECI, which
             # compares AI-reliant agents against the full population.
-            exploit_belief_levels = []
-            explor_belief_levels  = []
+            # --- SECI: community-level variance vs global variance, split by type ---
+            # Uses actual social-network components (not raw type pools) so the metric
+            # reflects network-mediated convergence rather than the structural D/δ
+            # difference between types (exploiters always converge more than explorers
+            # just due to their narrow acceptance window, confounding the type-pool measure).
+            #
+            # For each connected component (community), pool L1+ beliefs of members.
+            # Compare that community's internal variance to the global variance across
+            # all L1+ beliefs.  Low community variance → agents share the same (possibly
+            # false) focal belief → echo chamber signal (SECI < 0).
+            # Split by community type (network is type-homogeneous) to retain separate
+            # exploit / explor signals.
+            #
+            # Aligned with Cinelli et al. (2021 PNAS) which measures echo chambers as
+            # within-community information homogeneity relative to the global pool.
 
+            # Collect global L1+ beliefs (all types) for baseline variance
+            all_belief_levels = []
             for agent in self.humans.values():
                 if agent.beliefs:
-                    # Filter to L1+ cells: echo chambers form around disaster areas (L1+),
-                    # not the vast L0 majority which dilutes variance and masks the signal.
-                    levels = [
-                        b.get('level', 0)
-                        for b in agent.beliefs.values()
-                        if isinstance(b, dict) and b.get('level', 0) >= 1
-                    ]
-                    if agent.agent_type == "exploitative":
-                        exploit_belief_levels.extend(levels)
-                    else:
-                        explor_belief_levels.extend(levels)
+                    for b in agent.beliefs.values():
+                        if isinstance(b, dict) and b.get('level', 0) >= 1:
+                            all_belief_levels.append(b.get('level', 0))
 
-            exploit_global_var = np.var(exploit_belief_levels) if len(exploit_belief_levels) > 1 else 1e-6
-            explor_global_var  = np.var(explor_belief_levels)  if len(explor_belief_levels)  > 1 else 1e-6
-            # Pooled global_var kept for AECI (compares AI-reliant agents vs whole pop)
-            all_belief_levels = exploit_belief_levels + explor_belief_levels
             global_var = np.var(all_belief_levels) if len(all_belief_levels) > 1 else 1e-6
 
-            # SECI: type-vs-global comparison.
-            # Measures whether a type is MORE homogeneous than the full population —
-            # i.e., whether exploiters have converged on a shared (possibly false)
-            # epicenter while explorers remain diverse.  This is stable over time:
-            # exploiters locked on the false epicenter keep low type_var even as their
-            # absolute belief set grows, because the false-epicenter cells dominate.
-            # The old friend-group approach weakened over time as all communities
-            # eventually converged equally, making friend_var ≈ type_global_var → 0.
             max_possible_var = 5.0
-            def _seci_val(type_var, gvar):
+            def _seci_val(community_var, gvar):
                 if gvar < 1e-9:
                     return 0.0
-                var_diff = type_var - gvar
-                if var_diff < 0:  # type more homogeneous than global → echo chamber
+                var_diff = community_var - gvar
+                if var_diff < 0:  # community more homogeneous than global → echo chamber
                     return max(-1.0, var_diff / gvar)
-                else:             # type more diverse than global → anti-bubble
+                else:             # community more diverse than global → anti-bubble
                     denom = max_possible_var - gvar
                     return min(1.0, var_diff / denom) if denom > 1e-9 else 0.0
 
-            seci_exploit_mean = _seci_val(exploit_global_var, global_var)
-            seci_explor_mean  = _seci_val(explor_global_var,  global_var)
+            exploit_community_vars = []
+            explor_community_vars  = []
+
+            for component_nodes in nx.connected_components(self.social_network):
+                if len(component_nodes) <= 1:
+                    continue
+                # Network is type-homogeneous — all members share the same type
+                comp_agents = [self.humans.get(f"H_{n}") for n in component_nodes
+                               if self.humans.get(f"H_{n}") is not None]
+                if not comp_agents:
+                    continue
+                community_type = comp_agents[0].agent_type
+                comp_levels = [
+                    b.get('level', 0)
+                    for a in comp_agents if a.beliefs
+                    for b in a.beliefs.values()
+                    if isinstance(b, dict) and b.get('level', 0) >= 1
+                ]
+                if len(comp_levels) > 1:
+                    cvar = np.var(comp_levels)
+                    if community_type == "exploitative":
+                        exploit_community_vars.append(cvar)
+                    else:
+                        explor_community_vars.append(cvar)
+
+            mean_exploit_community_var = np.mean(exploit_community_vars) if exploit_community_vars else 1e-6
+            mean_explor_community_var  = np.mean(explor_community_vars)  if explor_community_vars  else 1e-6
+
+            seci_exploit_mean = _seci_val(mean_exploit_community_var, global_var)
+            seci_explor_mean  = _seci_val(mean_explor_community_var,  global_var)
 
             # Store results with proper checks
             if True:
@@ -3334,10 +3357,15 @@ class DisasterModel(Model):
             aeci_expl = []
 
             def _beliefs_l1(agents):
+                """Return L1+ belief levels from informed beliefs (confidence > 0.1).
+                Excludes the ~900 default L0 priors that every agent holds for
+                unvisited cells — these would dilute the AI-heavy vs AI-light
+                variance comparison with uninformative data."""
                 levels = []
                 for a in agents:
                     for binfo in a.beliefs.values():
-                        if isinstance(binfo, dict):
+                        if (isinstance(binfo, dict)
+                                and binfo.get('confidence', 0) > 0.1):
                             lv = binfo.get('level', 0)
                             if not np.isnan(lv) and lv >= 1:
                                 levels.append(float(lv))

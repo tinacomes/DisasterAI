@@ -545,7 +545,7 @@ def plot_goldilocks(metrics, all_results, save_dir):
        'Belief Accuracy\n(lower = beliefs closer to ground truth)')
 
     eb(axes[1, 1], 'unmet', 'darkorange', 'Unmet high-need cells',
-       'Unmet Needs (level ≥4, 0 tokens)\n(lower = better disaster response)')
+       'Unmet Needs (level ≥3, 0 tokens)\n(lower = better disaster response)')
 
     eb(axes[1, 2], 'prec', 'teal', 'Correct / Total targets',
        'Relief Targeting Precision\n(higher = relief on high-need cells)', (0, 1.05))
@@ -580,9 +580,7 @@ def _plot_timeseries(all_results, save_dir, best_alpha=None):
     )
     ax_seci_ex, ax_seci_er, ax_mae    = axes[0]
     ax_aeci_ex, ax_aeci_er, ax_unmet  = axes[1]
-    ax_prec,    ax_sp1,     ax_sp2    = axes[2]
-    ax_sp1.axis('off')
-    ax_sp2.axis('off')
+    ax_prec,    ax_aqr_ex,  ax_aqr_er  = axes[2]
 
     for color, (res, alpha) in zip(colors, zip(all_results, ALIGNMENT_SWEEP)):
         tf    = list(range(res['n_ticks']))
@@ -631,21 +629,39 @@ def _plot_timeseries(all_results, save_dir, best_alpha=None):
         ax_unmet.plot(x, un_m, color=color, linewidth=1.8, label=label)
         ax_unmet.fill_between(x, un_m - un_s, un_m + un_s, color=color, alpha=0.2)
 
+        # AI query ratio — per tick (key: do explorers switch from AI to social at high α?)
+        for mk, ax_d in [('ai_query_ratio_exploit', ax_aqr_ex),
+                          ('ai_query_ratio_explor',  ax_aqr_er)]:
+            qm = np.array(res.get(f'{mk}_mean', []))
+            qs = np.array(res.get(f'{mk}_std',  []))
+            if len(qm) == 0:
+                continue
+            valid = ~np.isnan(qm)
+            if np.any(valid):
+                tv = np.array(tf[:len(qm)])[valid]
+                ax_d.plot(tv, qm[valid], color=color, linewidth=1.5, label=label)
+                ax_d.fill_between(tv, (qm - qs)[valid], (qm + qs)[valid],
+                                  color=color, alpha=0.15)
+
     for ax, title, ylabel, ylim, hl in [
-        (ax_seci_ex, 'SECI Over Time — Exploitative Agents\n(confirmation-biased, narrow acceptance)',
+        (ax_seci_ex, 'SECI Over Time — Exploitative Agents\n(community variance vs global)',
          'SECI (-1 to +1)', (-1.1, 1.1), 0),
-        (ax_seci_er, 'SECI Over Time — Exploratory Agents\n(open, wide acceptance)',
+        (ax_seci_er, 'SECI Over Time — Exploratory Agents\n(community variance vs global)',
          'SECI (-1 to +1)', (-1.1, 1.1), 0),
-        (ax_aeci_ex, 'AECI Over Time — Exploitative Agents',
+        (ax_aeci_ex, 'AECI Over Time — Exploitative Agents\n(AI-heavy vs AI-light within type)',
          'AECI (-1 to +1)', (-1.1, 1.1), 0),
-        (ax_aeci_er, 'AECI Over Time — Exploratory Agents',
+        (ax_aeci_er, 'AECI Over Time — Exploratory Agents\n(AI-heavy vs AI-light within type)',
          'AECI (-1 to +1)', (-1.1, 1.1), 0),
-        (ax_mae,   'Belief MAE Over Time  (exploit + explor avg)',
+        (ax_mae,   'Belief MAE Over Time  (exploit + explor avg, informed beliefs only)',
          'Mean Absolute Error', (0, None), None),
         (ax_prec,  'Relief Targeting Precision\n(solid=exploratory, dashed=exploitative)',
          'Correct / Total', (0, 1.05), 0.6),
-        (ax_unmet, 'Unmet High-Need Cells per Tick (level ≥4, 0 tokens)',
+        (ax_unmet, 'Unmet High-Need Cells per Tick (level ≥3, 0 tokens)',
          'Count', (0, None), None),
+        (ax_aqr_ex, 'AI Query Ratio — Exploitative Agents\n(fraction of queries sent to AI)',
+         'AI / Total queries', (0, 1.05), None),
+        (ax_aqr_er, 'AI Query Ratio — Exploratory Agents\n(↓ at high α = switch to social)',
+         'AI / Total queries', (0, 1.05), None),
     ]:
         ax.set_xlabel('Tick')
         ax.set_ylabel(ylabel)
@@ -659,7 +675,8 @@ def _plot_timeseries(all_results, save_dir, best_alpha=None):
         if hl is not None:
             ax.axhline(hl, color='k', linestyle=':', alpha=0.4)
 
-    for ax in [ax_seci_ex, ax_seci_er, ax_aeci_ex, ax_aeci_er, ax_mae, ax_unmet]:
+    for ax in [ax_seci_ex, ax_seci_er, ax_aeci_ex, ax_aeci_er, ax_mae,
+               ax_unmet, ax_aqr_ex, ax_aqr_er]:
         ax.legend(fontsize=8)
     # Precision legend: deduplicate (keep one entry per α)
     hs, ls = ax_prec.get_legend_handles_labels()

@@ -50,6 +50,7 @@ def load_and_aggregate(path):
     runs = data['runs']
     keys = ['seci_exploit', 'seci_explor', 'aeci_exploit', 'aeci_explor',
             'mae_exploit',  'mae_explor',  'prec_exploit', 'prec_explor',
+            'ai_query_ratio_exploit', 'ai_query_ratio_explor',
             'unmet_needs']
 
     result = {
@@ -220,7 +221,7 @@ def plot_goldilocks(alpha_r, save_dir):
        'Belief Accuracy\n(lower = beliefs closer to ground truth)')
 
     ep(axes[1, 1], unmet_ms, 'darkorange', 'Unmet high-need cells',
-       'Unmet Needs (level ≥4, 0 tokens)\n(lower = better disaster response)')
+       'Unmet Needs (level ≥3, 0 tokens)\n(lower = better disaster response)')
 
     ep(axes[1, 2], prec_ms, 'teal', 'Correct / Total targets',
        'Relief Targeting Precision\n(higher = relief on high-need cells)', (0, 1.05))
@@ -259,9 +260,7 @@ def plot_timeseries(alpha_r, save_dir):
     )
     ax_seci_ex, ax_seci_er, ax_mae   = axes[0]
     ax_aeci_ex, ax_aeci_er, ax_unmet = axes[1]
-    ax_prec,    ax_spare1, ax_spare2  = axes[2]
-    ax_spare1.axis('off')
-    ax_spare2.axis('off')
+    ax_prec,    ax_aqr_ex, ax_aqr_er  = axes[2]
 
     for color, alpha in zip(colors, alphas):
         res   = alpha_r[alpha]
@@ -299,21 +298,41 @@ def plot_timeseries(alpha_r, save_dir):
         _band(ax_unmet, tf, res['unmet_needs_mean'], res['unmet_needs_std'],
               color, label)
 
+        # AI query ratio — per tick (shows whether agents switch from AI to social)
+        for mk, ax_d, ls in [
+            ('ai_query_ratio_exploit', ax_aqr_ex, '-'),
+            ('ai_query_ratio_explor',  ax_aqr_er, '-'),
+        ]:
+            if f'{mk}_mean' in res:
+                qm = np.array(res[f'{mk}_mean'])
+                qs = np.array(res[f'{mk}_std'])
+                valid = ~np.isnan(qm)
+                if np.any(valid):
+                    tv = np.array(tf[:len(qm)])[valid]
+                    ax_d.plot(tv, qm[valid], color=color, linewidth=1.5,
+                              linestyle=ls, label=label)
+                    ax_d.fill_between(tv, (qm - qs)[valid], (qm + qs)[valid],
+                                      color=color, alpha=0.15)
+
     for ax, title, ylabel, ylim, hl in [
-        (ax_seci_ex, 'SECI Over Time — Exploitative Agents\n(confirmation-biased, narrow acceptance)',
+        (ax_seci_ex, 'SECI Over Time — Exploitative Agents\n(community variance vs global)',
          'SECI (-1 to +1)', (-1.1, 1.1), 0),
-        (ax_seci_er, 'SECI Over Time — Exploratory Agents\n(open, wide acceptance)',
+        (ax_seci_er, 'SECI Over Time — Exploratory Agents\n(community variance vs global)',
          'SECI (-1 to +1)', (-1.1, 1.1), 0),
-        (ax_mae,     'Belief MAE Over Time  (exploit + explor avg)',
+        (ax_mae,     'Belief MAE Over Time  (exploit + explor avg, informed beliefs only)',
          'Mean Absolute Error', (0, None), None),
-        (ax_aeci_ex, 'AECI Over Time — Exploitative Agents',
+        (ax_aeci_ex, 'AECI Over Time — Exploitative Agents\n(AI-heavy vs AI-light within type)',
          'AECI (-1 to +1)', (-1.1, 1.1), 0),
-        (ax_aeci_er, 'AECI Over Time — Exploratory Agents',
+        (ax_aeci_er, 'AECI Over Time — Exploratory Agents\n(AI-heavy vs AI-light within type)',
          'AECI (-1 to +1)', (-1.1, 1.1), 0),
-        (ax_unmet,   'Unmet High-Need Cells per Tick (level ≥4, 0 tokens)',
+        (ax_unmet,   'Unmet High-Need Cells per Tick (level ≥3, 0 tokens)',
          'Count', (0, None), None),
         (ax_prec,    'Relief Targeting Precision\n(solid=exploratory, dashed=exploitative)',
          'Correct / Total', (0, 1.05), 0.6),
+        (ax_aqr_ex,  'AI Query Ratio — Exploitative Agents\n(fraction of queries sent to AI)',
+         'AI / Total queries', (0, 1.05), None),
+        (ax_aqr_er,  'AI Query Ratio — Exploratory Agents\n(↓ at high α = switch to social)',
+         'AI / Total queries', (0, 1.05), None),
     ]:
         _finish(ax, title, 'Tick', ylabel, ylim, hline=hl)
 
