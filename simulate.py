@@ -44,11 +44,17 @@ def run_one(params):
     """Run one simulation and return a JSON-serialisable metrics dict."""
     model = DisasterModel(**params)
 
-    seci_exploit, seci_explor = [], []
-    aeci_exploit, aeci_explor = [], []
-    mae_exploit,  mae_explor  = [], []
-    prec_exploit, prec_explor = [], []
+    seci_exploit, seci_explor                   = [], []
+    aeci_exploit, aeci_explor                   = [], []
+    mae_exploit,  mae_explor                    = [], []
+    prec_exploit, prec_explor                   = [], []
+    ai_query_ratio_exploit, ai_query_ratio_explor = [], []
     metric_ticks = []
+
+    # Accumulate relief tokens per 5-tick window for precision calculation
+    _win_ex_correct = _win_ex_total = _win_er_correct = _win_er_total = 0
+    # Cumulative AI call counters for per-tick delta computation
+    _prev_ai_ex = _prev_tot_ex = _prev_ai_er = _prev_tot_er = 0
 
     for tick in range(params['ticks']):
         model.step()
@@ -63,43 +69,71 @@ def run_one(params):
             aeci_exploit.append(float(a[1]))
             aeci_explor.append(float(a[2]))
 
+        # Per-tick AI query ratio (delta of cumulative accum_calls counters)
+        ai_ex = tot_ex = ai_er = tot_er = 0
+        for _ag in model.agent_list:
+            if not isinstance(_ag, HumanAgent):
+                continue
+            _ai  = getattr(_ag, 'accum_calls_ai',    0)
+            _tot = getattr(_ag, 'accum_calls_total',  0)
+            if _ag.agent_type == 'exploitative':
+                ai_ex += _ai;  tot_ex += _tot
+            else:
+                ai_er += _ai;  tot_er += _tot
+        d_ai_ex,  _prev_ai_ex  = ai_ex  - _prev_ai_ex,  ai_ex
+        d_tot_ex, _prev_tot_ex = tot_ex - _prev_tot_ex, tot_ex
+        d_ai_er,  _prev_ai_er  = ai_er  - _prev_ai_er,  ai_er
+        d_tot_er, _prev_tot_er = tot_er - _prev_tot_er, tot_er
+        ai_query_ratio_exploit.append(d_ai_ex / d_tot_ex if d_tot_ex > 0 else float('nan'))
+        ai_query_ratio_explor.append( d_ai_er / d_tot_er if d_tot_er > 0 else float('nan'))
+
+        # Accumulate token-based precision counts using current-tick disaster state
+        for pos, cnts in model.tokens_this_tick.items():
+            is_high = model.disaster_grid[pos] >= 3
+            ex_n = cnts.get('exploit', 0)
+            er_n = cnts.get('explor', 0)
+            if is_high:
+                _win_ex_correct += ex_n
+                _win_er_correct += er_n
+            _win_ex_total += ex_n
+            _win_er_total += er_n
+
         if tick % 5 == 0:
             ex_errors, er_errors = [], []
-            ex_correct = ex_total = er_correct = er_total = 0
             for agent in model.agent_list:
                 if not isinstance(agent, HumanAgent):
                     continue
+                # Filter to informed beliefs only (exclude default L0 priors)
+                informed = [(c, b) for c, b in agent.beliefs.items()
+                            if isinstance(b, dict) and b.get('confidence', 0) > 0.1]
                 err = float(np.mean([
                     abs(b.get('level', 0) - model.disaster_grid[c])
-                    for c, b in agent.beliefs.items()
-                    if isinstance(b, dict)
-                ])) if agent.beliefs else 0.0
-                total = agent.correct_targets + agent.incorrect_targets
+                    for c, b in informed
+                ])) if informed else float('nan')
                 if agent.agent_type == 'exploitative':
                     ex_errors.append(err)
-                    ex_correct += agent.correct_targets
-                    ex_total   += total
                 else:
                     er_errors.append(err)
-                    er_correct += agent.correct_targets
-                    er_total   += total
-            mae_exploit.append(float(np.mean(ex_errors)) if ex_errors else 0.0)
-            mae_explor.append( float(np.mean(er_errors)) if er_errors else 0.0)
-            prec_exploit.append(float(ex_correct / ex_total) if ex_total > 0 else None)
-            prec_explor.append( float(er_correct / er_total) if er_total > 0 else None)
+            mae_exploit.append(float(np.nanmean(ex_errors)) if ex_errors else float('nan'))
+            mae_explor.append( float(np.nanmean(er_errors)) if er_errors else float('nan'))
+            prec_exploit.append(float(_win_ex_correct / _win_ex_total) if _win_ex_total > 0 else None)
+            prec_explor.append( float(_win_er_correct / _win_er_total) if _win_er_total > 0 else None)
+            _win_ex_correct = _win_ex_total = _win_er_correct = _win_er_total = 0
             metric_ticks.append(tick)
 
     return {
-        'seci_exploit': seci_exploit,
-        'seci_explor':  seci_explor,
-        'aeci_exploit': aeci_exploit,
-        'aeci_explor':  aeci_explor,
-        'mae_exploit':  mae_exploit,
-        'mae_explor':   mae_explor,
-        'prec_exploit': prec_exploit,
-        'prec_explor':  prec_explor,
-        'unmet_needs':  [float(v) for v in model.unmet_needs_evolution],
-        'metric_ticks': metric_ticks,
+        'seci_exploit':           seci_exploit,
+        'seci_explor':            seci_explor,
+        'aeci_exploit':           aeci_exploit,
+        'aeci_explor':            aeci_explor,
+        'mae_exploit':            mae_exploit,
+        'mae_explor':             mae_explor,
+        'prec_exploit':           prec_exploit,
+        'prec_explor':            prec_explor,
+        'ai_query_ratio_exploit': ai_query_ratio_exploit,
+        'ai_query_ratio_explor':  ai_query_ratio_explor,
+        'unmet_needs':            [float(v) for v in model.unmet_needs_evolution],
+        'metric_ticks':           metric_ticks,
     }
 
 

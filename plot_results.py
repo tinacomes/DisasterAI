@@ -50,6 +50,7 @@ def load_and_aggregate(path):
     runs = data['runs']
     keys = ['seci_exploit', 'seci_explor', 'aeci_exploit', 'aeci_explor',
             'mae_exploit',  'mae_explor',  'prec_exploit', 'prec_explor',
+            'ai_query_ratio_exploit', 'ai_query_ratio_explor',
             'unmet_needs']
 
     result = {
@@ -220,7 +221,7 @@ def plot_goldilocks(alpha_r, save_dir):
        'Belief Accuracy\n(lower = beliefs closer to ground truth)')
 
     ep(axes[1, 1], unmet_ms, 'darkorange', 'Unmet high-need cells',
-       'Unmet Needs (level ≥4, 0 tokens)\n(lower = better disaster response)')
+       'Unmet Needs (level ≥3, 0 tokens)\n(lower = better disaster response)')
 
     ep(axes[1, 2], prec_ms, 'teal', 'Correct / Total targets',
        'Relief Targeting Precision\n(higher = relief on high-need cells)', (0, 1.05))
@@ -251,14 +252,15 @@ def plot_timeseries(alpha_r, save_dir):
     colors = plt.cm.viridis(np.linspace(0, 1, len(alphas)))
     n_label = f'  (mean ± std, N={n_runs})' if n_runs else ''
 
-    fig, axes = plt.subplots(2, 3, figsize=(18, 10))
+    # 3×3 layout: separate exploit/explor panels for SECI and AECI
+    fig, axes = plt.subplots(3, 3, figsize=(18, 14))
     fig.suptitle(
         f'Filter Bubble & Delivery Metrics Over Time{n_label}',
         fontsize=13, fontweight='bold'
     )
-    ax_seci, ax_aeci, ax_mae    = axes[0]
-    ax_prec, ax_unmet, ax_spare = axes[1]
-    ax_spare.axis('off')
+    ax_seci_ex, ax_seci_er, ax_mae   = axes[0]
+    ax_aeci_ex, ax_aeci_er, ax_unmet = axes[1]
+    ax_prec,    ax_aqr_ex, ax_aqr_er  = axes[2]
 
     for color, alpha in zip(colors, alphas):
         res   = alpha_r[alpha]
@@ -266,13 +268,13 @@ def plot_timeseries(alpha_r, save_dir):
         ts    = res['metric_ticks']
         label = f'α={alpha}' + (' ★' if alpha == best_alpha else '')
 
-        # SECI / AECI — combined exploit+explor
-        for mk, ax_d in [('seci', ax_seci), ('aeci', ax_aeci)]:
-            m = (np.array(res[f'{mk}_exploit_mean']) +
-                 np.array(res[f'{mk}_explor_mean'])) / 2
-            s = (np.array(res[f'{mk}_exploit_std']) +
-                 np.array(res[f'{mk}_explor_std']))  / 2
-            _band(ax_d, tf, m, s, color, label)
+        # SECI — separate exploit and explor panels
+        _band(ax_seci_ex, tf, res['seci_exploit_mean'], res['seci_exploit_std'], color, label)
+        _band(ax_seci_er, tf, res['seci_explor_mean'],  res['seci_explor_std'],  color, label)
+
+        # AECI — separate exploit and explor panels
+        _band(ax_aeci_ex, tf, res['aeci_exploit_mean'], res['aeci_exploit_std'], color, label)
+        _band(ax_aeci_er, tf, res['aeci_explor_mean'],  res['aeci_explor_std'],  color, label)
 
         # MAE — combined, sampled
         mae_m = (np.array(res['mae_exploit_mean']) + np.array(res['mae_explor_mean'])) / 2
@@ -296,17 +298,41 @@ def plot_timeseries(alpha_r, save_dir):
         _band(ax_unmet, tf, res['unmet_needs_mean'], res['unmet_needs_std'],
               color, label)
 
+        # AI query ratio — per tick (shows whether agents switch from AI to social)
+        for mk, ax_d, ls in [
+            ('ai_query_ratio_exploit', ax_aqr_ex, '-'),
+            ('ai_query_ratio_explor',  ax_aqr_er, '-'),
+        ]:
+            if f'{mk}_mean' in res:
+                qm = np.array(res[f'{mk}_mean'])
+                qs = np.array(res[f'{mk}_std'])
+                valid = ~np.isnan(qm)
+                if np.any(valid):
+                    tv = np.array(tf[:len(qm)])[valid]
+                    ax_d.plot(tv, qm[valid], color=color, linewidth=1.5,
+                              linestyle=ls, label=label)
+                    ax_d.fill_between(tv, (qm - qs)[valid], (qm + qs)[valid],
+                                      color=color, alpha=0.15)
+
     for ax, title, ylabel, ylim, hl in [
-        (ax_seci,  'SECI Over Time',
+        (ax_seci_ex, 'SECI Over Time — Exploitative Agents\n(community variance vs global)',
          'SECI (-1 to +1)', (-1.1, 1.1), 0),
-        (ax_aeci,  'AECI Over Time',
-         'AECI (-1 to +1)', (-1.1, 1.1), 0),
-        (ax_mae,   'Belief MAE Over Time',
+        (ax_seci_er, 'SECI Over Time — Exploratory Agents\n(community variance vs global)',
+         'SECI (-1 to +1)', (-1.1, 1.1), 0),
+        (ax_mae,     'Belief MAE Over Time  (exploit + explor avg, informed beliefs only)',
          'Mean Absolute Error', (0, None), None),
-        (ax_prec,  'Targeting Precision\n(solid=exploratory, dashed=exploitative)',
-         'Correct / Total', (0, 1.05), 0.6),
-        (ax_unmet, 'Unmet High-Need Cells (level ≥4, 0 tokens)',
+        (ax_aeci_ex, 'AECI Over Time — Exploitative Agents\n(AI-heavy vs AI-light within type)',
+         'AECI (-1 to +1)', (-1.1, 1.1), 0),
+        (ax_aeci_er, 'AECI Over Time — Exploratory Agents\n(AI-heavy vs AI-light within type)',
+         'AECI (-1 to +1)', (-1.1, 1.1), 0),
+        (ax_unmet,   'Unmet High-Need Cells per Tick (level ≥3, 0 tokens)',
          'Count', (0, None), None),
+        (ax_prec,    'Relief Targeting Precision\n(solid=exploratory, dashed=exploitative)',
+         'Correct / Total', (0, 1.05), 0.6),
+        (ax_aqr_ex,  'AI Query Ratio — Exploitative Agents\n(fraction of queries sent to AI)',
+         'AI / Total queries', (0, 1.05), None),
+        (ax_aqr_er,  'AI Query Ratio — Exploratory Agents\n(↓ at high α = switch to social)',
+         'AI / Total queries', (0, 1.05), None),
     ]:
         _finish(ax, title, 'Tick', ylabel, ylim, hline=hl)
 

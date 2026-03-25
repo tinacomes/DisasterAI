@@ -166,6 +166,8 @@ def run_one_sim(params):
     metric_ticks = []
     # Cumulative call counters for computing per-tick deltas
     _prev_ai_ex = _prev_tot_ex = _prev_ai_er = _prev_tot_er = 0
+    # Accumulate relief tokens per 5-tick window for precision calculation
+    _win_ex_correct = _win_ex_total = _win_er_correct = _win_er_total = 0
 
     W, H = params['width'], params['height']
     cum_aid_grid      = np.zeros((W, H), dtype=float)
@@ -224,32 +226,38 @@ def run_one_sim(params):
             info_div_exploit.append(float(d[1]))
             info_div_explor.append(float(d[2]))
 
+        # Accumulate token-based precision counts using current-tick disaster state
+        for pos, cnts in model.tokens_this_tick.items():
+            is_high = model.disaster_grid[pos] >= 3
+            ex_n = cnts.get('exploit', 0)
+            er_n = cnts.get('explor', 0)
+            if is_high:
+                _win_ex_correct += ex_n
+                _win_er_correct += er_n
+            _win_ex_total += ex_n
+            _win_er_total += er_n
+
         if tick % 5 == 0:
             ex_errors, er_errors = [], []
-            ex_correct = ex_total = er_correct = er_total = 0
             for agent in model.agent_list:
                 if not isinstance(agent, HumanAgent):
                     continue
+                # Filter to informed beliefs only (exclude default L0 priors)
+                informed = [(c, b) for c, b in agent.beliefs.items()
+                            if isinstance(b, dict) and b.get('confidence', 0) > 0.1]
                 err = float(np.mean([
                     abs(b.get('level', 0) - model.disaster_grid[c])
-                    for c, b in agent.beliefs.items()
-                    if isinstance(b, dict)
-                ])) if agent.beliefs else 0.0
-                total = agent.correct_targets + agent.incorrect_targets
+                    for c, b in informed
+                ])) if informed else float('nan')
                 if agent.agent_type == 'exploitative':
                     ex_errors.append(err)
-                    ex_correct += agent.correct_targets
-                    ex_total   += total
                 else:
                     er_errors.append(err)
-                    er_correct += agent.correct_targets
-                    er_total   += total
-            mae_exploit.append(float(np.mean(ex_errors)) if ex_errors else 0.0)
-            mae_explor.append( float(np.mean(er_errors)) if er_errors else 0.0)
-            # Use 0.0 (not nan) when no tokens sent yet so the x-axis spans the
-            # full simulation range rather than autoscaling to the first non-NaN point.
-            prec_exploit.append(ex_correct / ex_total if ex_total > 0 else 0.0)
-            prec_explor.append( er_correct / er_total if er_total > 0 else 0.0)
+            mae_exploit.append(float(np.nanmean(ex_errors)) if ex_errors else float('nan'))
+            mae_explor.append( float(np.nanmean(er_errors)) if er_errors else float('nan'))
+            prec_exploit.append(float(_win_ex_correct / _win_ex_total) if _win_ex_total > 0 else 0.0)
+            prec_explor.append( float(_win_er_correct / _win_er_total) if _win_er_total > 0 else 0.0)
+            _win_ex_correct = _win_ex_total = _win_er_correct = _win_er_total = 0
             metric_ticks.append(tick)
 
     n = len(seci_exploit)
@@ -537,7 +545,7 @@ def plot_goldilocks(metrics, all_results, save_dir):
        'Belief Accuracy\n(lower = beliefs closer to ground truth)')
 
     eb(axes[1, 1], 'unmet', 'darkorange', 'Unmet high-need cells',
-       'Unmet Needs (level ≥4, 0 tokens)\n(lower = better disaster response)')
+       'Unmet Needs (level ≥3, 0 tokens)\n(lower = better disaster response)')
 
     eb(axes[1, 2], 'prec', 'teal', 'Correct / Total targets',
        'Relief Targeting Precision\n(higher = relief on high-need cells)', (0, 1.05))
@@ -572,9 +580,7 @@ def _plot_timeseries(all_results, save_dir, best_alpha=None):
     )
     ax_seci_ex, ax_seci_er, ax_mae    = axes[0]
     ax_aeci_ex, ax_aeci_er, ax_unmet  = axes[1]
-    ax_prec,    ax_sp1,     ax_sp2    = axes[2]
-    ax_sp1.axis('off')
-    ax_sp2.axis('off')
+    ax_prec,    ax_aqr_ex,  ax_aqr_er  = axes[2]
 
     for color, (res, alpha) in zip(colors, zip(all_results, ALIGNMENT_SWEEP)):
         tf    = list(range(res['n_ticks']))
@@ -623,21 +629,39 @@ def _plot_timeseries(all_results, save_dir, best_alpha=None):
         ax_unmet.plot(x, un_m, color=color, linewidth=1.8, label=label)
         ax_unmet.fill_between(x, un_m - un_s, un_m + un_s, color=color, alpha=0.2)
 
+        # AI query ratio — per tick (key: do explorers switch from AI to social at high α?)
+        for mk, ax_d in [('ai_query_ratio_exploit', ax_aqr_ex),
+                          ('ai_query_ratio_explor',  ax_aqr_er)]:
+            qm = np.array(res.get(f'{mk}_mean', []))
+            qs = np.array(res.get(f'{mk}_std',  []))
+            if len(qm) == 0:
+                continue
+            valid = ~np.isnan(qm)
+            if np.any(valid):
+                tv = np.array(tf[:len(qm)])[valid]
+                ax_d.plot(tv, qm[valid], color=color, linewidth=1.5, label=label)
+                ax_d.fill_between(tv, (qm - qs)[valid], (qm + qs)[valid],
+                                  color=color, alpha=0.15)
+
     for ax, title, ylabel, ylim, hl in [
-        (ax_seci_ex, 'SECI Over Time — Exploitative Agents\n(confirmation-biased, narrow acceptance)',
+        (ax_seci_ex, 'SECI Over Time — Exploitative Agents\n(community variance vs global)',
          'SECI (-1 to +1)', (-1.1, 1.1), 0),
-        (ax_seci_er, 'SECI Over Time — Exploratory Agents\n(open, wide acceptance)',
+        (ax_seci_er, 'SECI Over Time — Exploratory Agents\n(community variance vs global)',
          'SECI (-1 to +1)', (-1.1, 1.1), 0),
-        (ax_aeci_ex, 'AECI Over Time — Exploitative Agents',
+        (ax_aeci_ex, 'AECI Over Time — Exploitative Agents\n(AI-heavy vs AI-light within type)',
          'AECI (-1 to +1)', (-1.1, 1.1), 0),
-        (ax_aeci_er, 'AECI Over Time — Exploratory Agents',
+        (ax_aeci_er, 'AECI Over Time — Exploratory Agents\n(AI-heavy vs AI-light within type)',
          'AECI (-1 to +1)', (-1.1, 1.1), 0),
-        (ax_mae,   'Belief MAE Over Time  (exploit + explor avg)',
+        (ax_mae,   'Belief MAE Over Time  (exploit + explor avg, informed beliefs only)',
          'Mean Absolute Error', (0, None), None),
         (ax_prec,  'Relief Targeting Precision\n(solid=exploratory, dashed=exploitative)',
          'Correct / Total', (0, 1.05), 0.6),
-        (ax_unmet, 'Unmet High-Need Cells per Tick (level ≥4, 0 tokens)',
+        (ax_unmet, 'Unmet High-Need Cells per Tick (level ≥3, 0 tokens)',
          'Count', (0, None), None),
+        (ax_aqr_ex, 'AI Query Ratio — Exploitative Agents\n(fraction of queries sent to AI)',
+         'AI / Total queries', (0, 1.05), None),
+        (ax_aqr_er, 'AI Query Ratio — Exploratory Agents\n(↓ at high α = switch to social)',
+         'AI / Total queries', (0, 1.05), None),
     ]:
         ax.set_xlabel('Tick')
         ax.set_ylabel(ylabel)
@@ -651,7 +675,8 @@ def _plot_timeseries(all_results, save_dir, best_alpha=None):
         if hl is not None:
             ax.axhline(hl, color='k', linestyle=':', alpha=0.4)
 
-    for ax in [ax_seci_ex, ax_seci_er, ax_aeci_ex, ax_aeci_er, ax_mae, ax_unmet]:
+    for ax in [ax_seci_ex, ax_seci_er, ax_aeci_ex, ax_aeci_er, ax_mae,
+               ax_unmet, ax_aqr_ex, ax_aqr_er]:
         ax.legend(fontsize=8)
     # Precision legend: deduplicate (keep one entry per α)
     hs, ls = ax_prec.get_legend_handles_labels()

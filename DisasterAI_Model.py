@@ -503,9 +503,9 @@ class HumanAgent(Agent):
         evaluated = []
 
         for item in self.pending_info_evaluations:
-            # Support both old (4-tuple) and new (6-tuple) format
-            if len(item) == 6:
-                tick_received, source_id, eval_cell, reported_level, _, _ = item
+            # Support 4-tuple, 6-tuple, and new 7-tuple (with was_accepted flag)
+            if len(item) >= 6:
+                tick_received, source_id, eval_cell, reported_level = item[0], item[1], item[2], item[3]
             else:
                 tick_received, source_id, eval_cell, reported_level = item
 
@@ -725,13 +725,16 @@ class HumanAgent(Agent):
         evaluated = []
 
         for item in self.pending_info_evaluations:
-            # Support both old (4-tuple) and new (6-tuple) format
-            if len(item) == 6:
-                tick_received, source_id, cell, reported_level, stored_prior_level, stored_prior_conf = item
+            # Support 4-tuple, 6-tuple, and new 7-tuple (adds was_accepted flag at index 6)
+            if len(item) >= 6:
+                tick_received, source_id, cell, reported_level, stored_prior_level, stored_prior_conf = \
+                    item[0], item[1], item[2], item[3], item[4], item[5]
+                was_accepted = item[6] if len(item) >= 7 else True  # default True for old tuples
             else:
                 tick_received, source_id, cell, reported_level = item
                 stored_prior_level = None
                 stored_prior_conf = 0.0
+                was_accepted = True
 
             ticks_elapsed = current_tick - tick_received
 
@@ -815,24 +818,25 @@ class HumanAgent(Agent):
             confidence_scaling = min(1.0, belief_conf / 0.5)  # Full strength at 0.5+ confidence
 
             # --- Accuracy score: reported vs current reference ---
-            # CRITICAL FIX: For EXPLORERS querying REMOTE cells, don't penalize disagreement
-            # with uncertain beliefs. Only evaluate accuracy for sensed/verified cells.
-            if is_remote_cell and self.agent_type == "exploratory":
-                # Explorer querying remote cell: can't verify accuracy yet
-                # Use NEUTRAL accuracy score - don't penalize or reward based on unverified belief
-                # They'll get proper feedback when they eventually sense the cell
-                accuracy_score = 0.0
+            # For EXPLORERS querying REMOTE cells, the reference may be contaminated if
+            # the info was ACCEPTED (belief updated toward reported). If the info was
+            # REJECTED (was_accepted=False), the belief is unchanged = stored_prior,
+            # so we can evaluate safely using stored_prior.
+            # Accepted remote queries are still deferred (rely on process_reward Fix 1).
+            if is_remote_cell and self.agent_type == "exploratory" and was_accepted:
+                # Accepted remote query: belief is contaminated, defer to sensing/relief feedback
+                continue
+            # For rejected remote queries (was_accepted=False) or local cells:
+            # use reference_level (which is stored_prior for rejected items, as belief unchanged)
+            level_error = abs(reported_level - reference_level)
+            if level_error == 0:
+                accuracy_score = 1.0
+            elif level_error == 1:
+                accuracy_score = 0.5
+            elif level_error == 2:
+                accuracy_score = -0.2
             else:
-                # For sensed cells OR exploiters: evaluate normally
-                level_error = abs(reported_level - reference_level)
-                if level_error == 0:
-                    accuracy_score = 1.0
-                elif level_error == 1:
-                    accuracy_score = 0.5
-                elif level_error == 2:
-                    accuracy_score = -0.2
-                else:
-                    accuracy_score = -0.6
+                accuracy_score = -0.6
 
             # --- Confirmation score: reported vs STORED prior (uncontaminated) ---
             prior_level = stored_prior_level if stored_prior_level is not None else reference_level
@@ -868,12 +872,9 @@ class HumanAgent(Agent):
             else:
                 source_knowledge_conf = 0.7  # Unknown source type
 
-            # Same type-specific reward logic as evaluate_information_quality:
-            #   Explorers  → accuracy_score  (truth-seeking)
+            # Type-specific reward:
+            #   Explorers  → accuracy_score  (truth-seeking; rejected queries use stored_prior)
             #   Exploiters → confirmation_score  (confirmation bias)
-            if is_remote_cell and self.agent_type == "exploratory":
-                # Explorer querying remote cell: defer until sensed (ground truth unavailable)
-                continue
             combined_reward = accuracy_score if self.agent_type == "exploratory" else confirmation_score
 
             accuracy_reward = combined_reward * 0.7 - 0.1  # Slightly larger scale
@@ -1284,9 +1285,10 @@ class HumanAgent(Agent):
                 if source_id:
                     self.pending_info_evaluations.append((
                         self.model.tick, source_id, cell,
-                        int(reported_level), int(prior_level), float(prior_confidence)
+                        int(reported_level), int(prior_level), float(prior_confidence),
+                        False  # was_accepted = False (rejected by D/delta)
                     ))
-                return False  # No belief change
+                return (False, False)  # (significant_change, was_accepted)
 
             # Convert confidence to precision with agent-specific scaling
             # Exploiters: stronger prior (1.5x) → more resistant to change
@@ -1345,17 +1347,11 @@ class HumanAgent(Agent):
                     cell,
                     int(reported_level),  # The level reported by the source (NOT posterior)
                     int(prior_level),     # Prior belief BEFORE this update (for uncontaminated cross-ref)
-                    float(prior_confidence)  # Prior confidence BEFORE this update
+                    float(prior_confidence),  # Prior confidence BEFORE this update
+                    True  # was_accepted = True (passed D/delta threshold)
                 ))
-                # DEBUG: Track pending info evaluations
                 if self.model.debug_mode and hasattr(self, 'id_num') and (self.id_num < 2 or (50 <= self.id_num < 52)):
                     print(f"[DEBUG] Agent {self.unique_id} ({self.agent_type}) added pending info eval: tick={self.model.tick}, source={source_id}, cell={cell}, reported={reported_level}")
-
-                # NOTE: Cross-reference evaluation moved to evaluate_pending_info()
-                # which runs as a dedicated pass each tick after both sense and query.
-                # Previously this was called here on the same tick, but
-                # evaluate_information_quality requires ticks_elapsed >= 3, so
-                # same-tick cross-reference never actually worked.
 
             # Track AI source information for later trust updates
             is_ai_source = hasattr(self, 'ai_info_sources') and cell in self.ai_info_sources
@@ -1364,13 +1360,8 @@ class HumanAgent(Agent):
                     self.ai_acceptances = {}
                 self.ai_acceptances[cell] = self.model.tick
 
-            # BUG FIX: Removed duplicate acceptance tracking from here
-            # Acceptance is now ONLY tracked in seek_information() (lines ~1070-1077)
-            # to avoid double-counting. Previously this incremented counters,
-            # then seek_information incremented them again = 2x inflation!
-
-            # Return whether this update caused a significant belief change
-            return significant_change
+            # Return (significant_change, was_accepted=True) — passed D/delta threshold
+            return (significant_change, True)
 
         except Exception as e:
             print(f"ERROR in Agent {self.unique_id} update_belief_bayesian: {e}")
@@ -1649,26 +1640,28 @@ class HumanAgent(Agent):
                 # Convert to integer level if it's not already
                 reported_level = int(round(reported_value))
 
-                # Use the Bayesian update function
-                significant_update = self.update_belief_bayesian(cell, reported_level, source_trust, source_id)
-                # Track if this was a significant belief update
+                # Use the Bayesian update function — returns (significant_change, was_accepted)
+                result = self.update_belief_bayesian(cell, reported_level, source_trust, source_id)
+                significant_update, was_accepted = result if isinstance(result, tuple) else (result, False)
+
+                # cum_accepted_ai: count ALL D/delta acceptances (not just significant changes).
+                # This correctly captures confirming AI that increases confidence without changing
+                # the level — late-stage echo chamber reinforcement that significant_update misses.
+                if was_accepted and source_id and source_id.startswith("A_"):
+                    self.cum_accepted_ai += 1  # cumulative; drives AECI classification
+
+                # Track if this was a significant belief update (level or confidence change)
                 if significant_update:
                     belief_updates += 1
 
-                    # Track source acceptance (for metrics)
+                    # Track source acceptance (for per-period retainment metrics)
                     if source_id:
                         if source_id.startswith("H_"):
                             self.accepted_human += 1
                             if source_id in self.friends:
                                 self.accepted_friend += 1
                         elif source_id.startswith("A_"):
-                            # INCREMENT AI ACCEPTANCE COUNTER HERE
-                            self.accepted_ai += 1
-                            self.cum_accepted_ai += 1  # cumulative; drives AECI classification
-
-                            # DEBUG PRINT to track AI info acceptance
-                            #if self.model.debug_mode and random.random() < 0.05:  # 5% of the time
-                                #print(f"DEBUG: Agent {self.unique_id} accepted info from AI {source_id} for cell {cell}")
+                            self.accepted_ai += 1  # per-period counter (reset every 5 ticks)
 
         except Exception as e:
             print(f"ERROR in Agent {self.unique_id} seek_information at tick {self.model.tick}: {e}")
@@ -1722,14 +1715,9 @@ class HumanAgent(Agent):
                             self.model.tokens_this_tick[cell] = {'exploit': 0, 'explor': 0}
                         self.model.tokens_this_tick[cell][agent_type_key] += 1
 
-                # Immediate precision tracking (metric only; Q-learning still uses delayed reward)
-                for cell, belief_level in reward_cells:
-                    if 0 <= cell[0] < self.model.width and 0 <= cell[1] < self.model.height:
-                        actual = self.model.disaster_grid[cell[0], cell[1]]
-                        if actual >= 3:
-                            self.correct_targets += 1
-                        else:
-                            self.incorrect_targets += 1
+                # NOTE: correct_targets / incorrect_targets are updated in process_reward()
+                # with delayed ground truth (15-25 ticks). DO NOT also update them here —
+                # that would double-count every targeted cell and inflate precision metrics.
 
                 # Snapshot pending info evaluations per targeted cell so process_reward can
                 # retroactively evaluate source accuracy against real ground truth (Fix 5).
@@ -2217,36 +2205,24 @@ class AIAgent(Agent):
                             guessed_value = int(round(avg_value + noise * 0.5))  # Reduced noise impact
                             value_to_use = max(0, min(5, guessed_value))
                         else:
-                            # 3. If no nearby sensed cells, use caller's belief as a hint
-                            caller_belief_info = caller_beliefs.get(cell, {'level': None, 'confidence': 0})
-                            caller_level = caller_belief_info.get('level')
-                            caller_conf = caller_belief_info.get('confidence', 0)
-
-                            if caller_level is not None and caller_conf > 0.3:
-                                # If caller has reasonable confidence, use their belief with noise
-                                noise = random.choice([-1, 0, 0, 1])
-                                value_to_use = max(0, min(5, caller_level + noise))
+                            # 3. No nearby sensed cells: use ONLY position-based estimate.
+                            # DO NOT use caller_beliefs here — that creates implicit confirmation
+                            # bias at ALL alpha levels (even α=0 "truthful" AI would echo the
+                            # caller's belief for ~85% of unvisited cells, collapsing the α sweep).
+                            # The alignment formula later applies α AFTER this base estimate, so
+                            # the base must be belief-independent for α to have its intended effect.
+                            dist_to_interest = math.sqrt(
+                                (cell[0] - interest_point[0])**2 +
+                                (cell[1] - interest_point[1])**2
+                            )
+                            scaled_dist = min(1.0, dist_to_interest / (query_radius + 1))
+                            # Position-based prior: cells closer to queried epicenter more likely high
+                            if scaled_dist < 0.3:
+                                value_to_use = random.choice([2, 3, 3, 4, 4])
+                            elif scaled_dist < 0.6:
+                                value_to_use = random.choice([1, 2, 2, 3, 3])
                             else:
-                                # 4. Last resort: make educated random guess based on position
-                                # Cells closer to center of disaster tend to have higher values
-                                # Use interest_point as a proxy for potential disaster center
-                                dist_to_interest = math.sqrt(
-                                    (cell[0] - interest_point[0])**2 +
-                                    (cell[1] - interest_point[1])**2
-                                )
-
-                                # Scale distance to range [0,1] based on query radius
-                                scaled_dist = min(1.0, dist_to_interest / (query_radius + 1))
-
-                                # Higher probability of higher values closer to interest point
-                                # Further away = more likely to be 0-1
-                                # Closer = more likely to be 2-4
-                                if scaled_dist < 0.3:  # Very close to interest point
-                                    value_to_use = random.choice([2, 3, 3, 4, 4])
-                                elif scaled_dist < 0.6:  # Moderately close
-                                    value_to_use = random.choice([1, 2, 2, 3, 3])
-                                else:  # Far away
-                                    value_to_use = random.choice([0, 0, 1, 1, 2])
+                                value_to_use = random.choice([0, 0, 1, 1, 2])
 
                         is_guessed = True
 
@@ -2408,6 +2384,23 @@ class DisasterModel(Model):
         self.component_ai_trust_variance_data = []  # AI Trust Clustering
         self.info_diversity_data = []  # Information Diversity (Shannon Entropy)
 
+        # --- In-simulation tipping point tracking ---
+        # Tick at which each index first crosses its formation threshold (< -0.3)
+        # and recovery threshold (>= 0.0 after having been negative). None = not yet triggered.
+        self.tp_seci_exploit_formation = None   # exploiters' social bubble forms
+        self.tp_seci_explor_formation  = None   # explorers' social bubble forms
+        self.tp_aeci_exploit_formation = None   # exploiters enter AI echo chamber
+        self.tp_aeci_explor_formation  = None   # explorers enter AI echo chamber
+        self.tp_seci_exploit_recovery  = None   # exploiters' social bubble breaks
+        self.tp_seci_explor_recovery   = None   # explorers' social bubble breaks
+        self.tp_aeci_exploit_recovery  = None   # exploiters exit AI echo chamber
+        self.tp_aeci_explor_recovery   = None   # explorers exit AI echo chamber
+        self._seci_exploit_was_negative = False
+        self._seci_explor_was_negative  = False
+        self._aeci_exploit_was_negative = False
+        self._aeci_explor_was_negative  = False
+        self.tipping_point_threshold = -0.3     # index value below which echo chamber is "formed"
+
         # Initialize disaster grid with Gaussian decay around an epicenter.
         self.disaster_grid = np.zeros((width, height), dtype=int)
         self.baseline_grid = np.zeros((width, height), dtype=int)
@@ -2447,6 +2440,8 @@ class DisasterModel(Model):
                              learning_rate=self.learning_rate,
                              epsilon=self.epsilon,
                              trust_learning_rate=current_trust_lr,
+                             exploit_trust_lr=self.exploit_trust_lr,
+                             explor_trust_lr=self.explor_trust_lr,
                              d_exploit=self.d_exploit,
                              delta_exploit=self.delta_exploit,
                              d_explor=self.d_explor,
@@ -2661,10 +2656,6 @@ class DisasterModel(Model):
         
         # Store in the array with consistent format
         self.aeci_variance_data.append(aeci_variance_tuple)
-        
-        # Debug: print all values in the array
-        print(f"  Current aeci_variance_data length: {len(self.aeci_variance_data)}")
-        print(f"  Last 3 entries: {self.aeci_variance_data[-3:] if len(self.aeci_variance_data) >= 3 else self.aeci_variance_data}")
         
         return aeci_variance_tuple
 
@@ -3036,8 +3027,8 @@ class DisasterModel(Model):
                 # Assign the sum to the token array
                 token_array[x, y] = exploit_tokens + explor_tokens
 
-        # Identify high-need cells (L4+) that received no tokens
-        need_mask = self.disaster_grid >= 4
+        # Identify high-need cells (L3+, matching send_relief targeting threshold) that received no tokens
+        need_mask = self.disaster_grid >= 3
         tokens_mask = token_array == 0
         unmet = np.sum(need_mask & tokens_mask)
         self.unmet_needs_evolution.append(unmet)
@@ -3084,70 +3075,76 @@ class DisasterModel(Model):
             # SECI while explorers (spread across uncertain cells) show a
             # weaker one.  The pooled global_var is retained for AECI, which
             # compares AI-reliant agents against the full population.
-            exploit_belief_levels = []
-            explor_belief_levels  = []
+            # --- SECI: community-level variance vs global variance, split by type ---
+            # Uses actual social-network components (not raw type pools) so the metric
+            # reflects network-mediated convergence rather than the structural D/δ
+            # difference between types (exploiters always converge more than explorers
+            # just due to their narrow acceptance window, confounding the type-pool measure).
+            #
+            # For each connected component (community), pool L1+ beliefs of members.
+            # Compare that community's internal variance to the global variance across
+            # all L1+ beliefs.  Low community variance → agents share the same (possibly
+            # false) focal belief → echo chamber signal (SECI < 0).
+            # Split by community type (network is type-homogeneous) to retain separate
+            # exploit / explor signals.
+            #
+            # Aligned with Cinelli et al. (2021 PNAS) which measures echo chambers as
+            # within-community information homogeneity relative to the global pool.
 
+            # Collect global L1+ beliefs (all types) for baseline variance
+            all_belief_levels = []
             for agent in self.humans.values():
                 if agent.beliefs:
-                    levels = [
-                        b.get('level', 0)
-                        for b in agent.beliefs.values()
-                        if isinstance(b, dict)
-                    ]
-                    if agent.agent_type == "exploitative":
-                        exploit_belief_levels.extend(levels)
-                    else:
-                        explor_belief_levels.extend(levels)
+                    for b in agent.beliefs.values():
+                        if isinstance(b, dict) and b.get('level', 0) >= 1:
+                            all_belief_levels.append(b.get('level', 0))
 
-            exploit_global_var = np.var(exploit_belief_levels) if len(exploit_belief_levels) > 1 else 1e-6
-            explor_global_var  = np.var(explor_belief_levels)  if len(explor_belief_levels)  > 1 else 1e-6
-            # Pooled global_var kept for AECI (compares AI-reliant agents vs whole pop)
-            all_belief_levels = exploit_belief_levels + explor_belief_levels
             global_var = np.var(all_belief_levels) if len(all_belief_levels) > 1 else 1e-6
 
-            # Initialize metric lists
-            seci_exp_list = []
-            seci_expl_list = []
+            max_possible_var = 5.0
+            def _seci_val(community_var, gvar):
+                if gvar < 1e-9:
+                    return 0.0
+                var_diff = community_var - gvar
+                if var_diff < 0:  # community more homogeneous than global → echo chamber
+                    return max(-1.0, var_diff / gvar)
+                else:             # community more diverse than global → anti-bubble
+                    denom = max_possible_var - gvar
+                    return min(1.0, var_diff / denom) if denom > 1e-9 else 0.0
 
-            # More robust friend belief collection and SECI calculation
-            for agent in self.humans.values():
-                # Collect friend beliefs with proper checks
-                friend_belief_levels = []
-                for fid in agent.friends:
-                    friend = self.humans.get(fid)
-                    if friend and friend.beliefs:
-                        for cell, belief_info in friend.beliefs.items():
-                            if isinstance(belief_info, dict):
-                                level = belief_info.get('level', 0)
-                                friend_belief_levels.append(level)
+            exploit_community_vars = []
+            explor_community_vars  = []
 
-                # Calculate friend variance only if we have enough data
-                type_global_var = exploit_global_var if agent.agent_type == "exploitative" else explor_global_var
-                if len(friend_belief_levels) > 1:
-                    friend_var = np.var(friend_belief_levels)
-                else:
-                    friend_var = type_global_var
+            for component_nodes in nx.connected_components(self.social_network):
+                if len(component_nodes) <= 1:
+                    continue
+                # Network is type-homogeneous — all members share the same type
+                comp_agents = [self.humans.get(f"H_{n}") for n in component_nodes
+                               if self.humans.get(f"H_{n}") is not None]
+                if not comp_agents:
+                    continue
+                community_type = comp_agents[0].agent_type
+                comp_levels = [
+                    b.get('level', 0)
+                    for a in comp_agents if a.beliefs
+                    for b in a.beliefs.values()
+                    if isinstance(b, dict) and b.get('level', 0) >= 1
+                ]
+                if len(comp_levels) > 1:
+                    cvar = np.var(comp_levels)
+                    if community_type == "exploitative":
+                        exploit_community_vars.append(cvar)
+                    else:
+                        explor_community_vars.append(cvar)
 
-                # Calculate SECI using type-specific baseline
-                if type_global_var > 1e-9:
-                    var_diff = friend_var - type_global_var
-                    if var_diff < 0:  # Variance reduction (echo chamber)
-                        seci_val = max(-1, var_diff / type_global_var)
-                    else:  # Variance increase (diversification)
-                        max_possible_var = 5.0
-                        seci_val = min(1, var_diff / (max_possible_var - type_global_var))
-                else:
-                    seci_val = 0  # Store by agent type
-                
-                if agent.agent_type == "exploitative":
-                    seci_exp_list.append(seci_val)
-                else:
-                    seci_expl_list.append(seci_val)
+            mean_exploit_community_var = np.mean(exploit_community_vars) if exploit_community_vars else 1e-6
+            mean_explor_community_var  = np.mean(explor_community_vars)  if explor_community_vars  else 1e-6
+
+            seci_exploit_mean = _seci_val(mean_exploit_community_var, global_var)
+            seci_explor_mean  = _seci_val(mean_explor_community_var,  global_var)
 
             # Store results with proper checks
-            if seci_exp_list or seci_expl_list:  # Only store if we have data
-                seci_exploit_mean = np.mean(seci_exp_list) if seci_exp_list else 0
-                seci_explor_mean = np.mean(seci_expl_list) if seci_expl_list else 0
+            if True:
 
                 # Update the last metrics dictionary
                 self._last_metrics['seci'] = {
@@ -3194,7 +3191,7 @@ class DisasterModel(Model):
                 if len(component_nodes) <= 1:
                     continue  # Skip components with only 1 node
                     
-                # Get all beliefs from this component
+                # Get L1+ beliefs from this component (filter out L0 noise)
                 component_belief_levels = []
                 for node_id in component_nodes:
                     agent_id = f"H_{node_id}"
@@ -3203,25 +3200,34 @@ class DisasterModel(Model):
                         for cell, belief_info in agent.beliefs.items():
                             if isinstance(belief_info, dict):
                                 level = belief_info.get('level', 0)
-                                component_belief_levels.append(level)
-                
+                                if level >= 1:
+                                    component_belief_levels.append(level)
+
                 # Only calculate SECI if we have beliefs
                 if len(component_belief_levels) > 0:
-                    # Calculate global variance (all agents)
+                    # Calculate global variance (all agents, L1+ only — consistent baseline)
                     all_belief_levels = []
                     for agent in self.humans.values():
                         for cell, belief_info in agent.beliefs.items():
                             if isinstance(belief_info, dict):
                                 level = belief_info.get('level', 0)
-                                all_belief_levels.append(level)
+                                if level >= 1:
+                                    all_belief_levels.append(level)
                                 
                     # More robust variance calculation
                     global_var = np.var(all_belief_levels) if len(all_belief_levels) > 1 else 1e-6
                     component_var = np.var(component_belief_levels) if len(component_belief_levels) > 1 else global_var
                     
-                    # Calculate component SECI more robustly
-                    if global_var > 1e-9:  # Avoid division by zero with small threshold
-                        component_seci_val = max(0, min(1, (global_var - component_var) / global_var))
+                    # Calculate component SECI with same [-1,1] convention as agent-level SECI:
+                    # negative = component beliefs more homogeneous than global (echo chamber)
+                    # positive = component beliefs more diverse than global (healthy diversity)
+                    if global_var > 1e-9:
+                        var_diff = component_var - global_var
+                        if var_diff < 0:  # Echo chamber: component more homogeneous
+                            component_seci_val = max(-1.0, var_diff / global_var)
+                        else:  # Diversification: component more varied
+                            max_possible_var = 5.0
+                            component_seci_val = min(1.0, var_diff / max(1e-9, max_possible_var - global_var))
                         component_seci_list.append(component_seci_val)
                     else:
                         component_seci_list.append(0)
@@ -3329,80 +3335,75 @@ class DisasterModel(Model):
             # AI-reliant agents are classified by accepted_ai (actual belief
             # updates accepted from AI), not query count. The feedback loop
             # means agents that validated AI info as accurate build higher AI
-            # trust and accept more AI updates — so accepted_ai is the correct
-            # measure of AI influence on beliefs.
+            # trust and accept more AI updates.
             #
-            # For each AI-reliant agent, we look at the beliefs held by all
-            # other AI-reliant agents (their "AI-peer group") and compute the
-            # variance of that peer group's beliefs. Compare to global variance:
-            #   peer_var < global_var → AI-reliant agents hold similar beliefs
-            #                           → AI created an echo chamber (negative)
-            #   peer_var > global_var → AI-reliant agents hold diverse beliefs
-            #                           → AI broadened perspectives (positive)
+            # AECI: within-type AI-heavy vs AI-light comparison.
+            # The old formula compared AI-reliant agents to the global population,
+            # which conflated natural type homogeneity (exploiters have narrow D/δ
+            # so they naturally converge more than explorers) with AI-induced
+            # homogeneity.  The result was AECI negative even at α=0 (truthful AI).
+            #
+            # New formula: for each type, split agents into top-50% and bottom-50%
+            # by cum_accepted_ai.  Compare variance of beliefs in the AI-heavy half
+            # to the AI-light half — both within the same type, so type-level
+            # homogeneity cancels out.  If AI reinforcement (confirming α) is causing
+            # an echo chamber, the AI-heavy agents will have MORE uniform beliefs
+            # (locked on the false epicenter) vs the AI-light agents who explored
+            # more independently.
+            #   AECI < 0 → AI-heavy more homogeneous than AI-light → echo chamber
+            #   AECI ≈ 0 → no AI-driven convergence
+            #   AECI > 0 → AI-heavy more diverse (AI is broadening perspectives)
             aeci_exp = []
             aeci_expl = []
 
-            # Use cumulative accepted_ai (never reset) so that:
-            # - Explorers (Q["ai"]=0.3, wide D/δ) accumulate acceptances quickly → classified
-            # - Exploiters at low α (truthful AI contradicts their beliefs) reject AI → low
-            #   cum_accepted_ai → not classified → AECI correctly stays near 0
-            # - Exploiters at high α (confirmatory AI matches beliefs) accept frequently →
-            #   high cum_accepted_ai → classified → their convergent beliefs → negative AECI
-            # Threshold of 3 is enough for a 20-tick run (explorers get ~5-7 accepted;
-            # exploiters at low α get <1 accepted on average over 20 ticks).
-            min_accepted_ai = 3
-
-            # Partition AI-reliant agents by type
-            ai_reliant_exp = []
-            ai_reliant_expl = []
-            for agent in self.humans.values():
-                if not hasattr(agent, 'cum_accepted_ai'):
-                    continue
-                if agent.cum_accepted_ai >= min_accepted_ai:
-                    if agent.agent_type == "exploitative":
-                        ai_reliant_exp.append(agent)
-                    else:
-                        ai_reliant_expl.append(agent)
-
-            # Collect group-level beliefs for each type (all peers in the AI-reliant set)
-            def _peer_beliefs(agents):
+            def _beliefs_l1(agents):
+                """Return L1+ belief levels from informed beliefs (confidence > 0.1).
+                Excludes the ~900 default L0 priors that every agent holds for
+                unvisited cells — these would dilute the AI-heavy vs AI-light
+                variance comparison with uninformative data."""
                 levels = []
                 for a in agents:
-                    for belief_info in a.beliefs.values():
-                        if isinstance(belief_info, dict):
-                            level = belief_info.get('level', 0)
-                            if not np.isnan(level):
-                                levels.append(level)
+                    for binfo in a.beliefs.values():
+                        if (isinstance(binfo, dict)
+                                and binfo.get('confidence', 0) > 0.1):
+                            lv = binfo.get('level', 0)
+                            if not np.isnan(lv) and lv >= 1:
+                                levels.append(float(lv))
                 return levels
 
-            for agent_type_label, ai_reliant_group in [("exploitative", ai_reliant_exp),
-                                                        ("exploratory", ai_reliant_expl)]:
-                if len(ai_reliant_group) < 2:
-                    # Not enough AI-reliant agents to form a peer group
+            for agent_type_label, aeci_list in [("exploitative", aeci_exp),
+                                                  ("exploratory",  aeci_expl)]:
+                type_agents = [a for a in self.humans.values()
+                               if a.agent_type == agent_type_label
+                               and hasattr(a, 'cum_accepted_ai')]
+                if len(type_agents) < 4:
+                    continue  # need at least 2 per half
+
+                # Median split by cumulative AI acceptance within this type
+                sorted_agents = sorted(type_agents, key=lambda a: a.cum_accepted_ai)
+                mid = len(sorted_agents) // 2
+                ai_light = sorted_agents[:mid]
+                ai_heavy = sorted_agents[mid:]
+
+                light_beliefs = _beliefs_l1(ai_light)
+                heavy_beliefs = _beliefs_l1(ai_heavy)
+                if len(light_beliefs) < 2 or len(heavy_beliefs) < 2:
                     continue
 
-                peer_belief_levels = _peer_beliefs(ai_reliant_group)
-                if len(peer_belief_levels) < 2:
-                    continue
+                light_var = np.var(light_beliefs)
+                heavy_var = np.var(heavy_beliefs)
+                baseline  = max(light_var, 1e-6)
 
-                peer_var = np.var(peer_belief_levels)
+                var_diff = heavy_var - baseline
+                if var_diff < 0:  # AI-heavy more homogeneous → echo chamber
+                    aeci_val = max(-1.0, var_diff / baseline)
+                else:             # AI-heavy more diverse → diversification
+                    denom = max_possible_var - baseline
+                    aeci_val = min(1.0, var_diff / denom) if denom > 1e-9 else 0.0
 
-                if global_var > 1e-9:
-                    var_diff = peer_var - global_var
-                    if var_diff < 0:  # Echo chamber: AI-reliant agents hold similar beliefs
-                        aeci_val = max(-1, var_diff / global_var)
-                    else:  # Diversification: AI-reliant agents hold more varied beliefs
-                        max_possible_var = 5.0
-                        aeci_val = min(1, var_diff / (max_possible_var - global_var))
-                else:
-                    aeci_val = 0.0
+                aeci_list.append(aeci_val)
 
-                if agent_type_label == "exploitative":
-                    aeci_exp.append(aeci_val)
-                else:
-                    aeci_expl.append(aeci_val)
-
-            avg_aeci_exp = float(np.mean(aeci_exp)) if aeci_exp else 0.0
+            avg_aeci_exp  = float(np.mean(aeci_exp))  if aeci_exp  else 0.0
             avg_aeci_expl = float(np.mean(aeci_expl)) if aeci_expl else 0.0
 
             avg_aeci_exp = max(-1.0, min(1.0, avg_aeci_exp))
@@ -3435,6 +3436,24 @@ class DisasterModel(Model):
             }
 
             self.running_aeci_data.append((self.tick, self.running_aeci_exp, self.running_aeci_expl))
+
+            # --- In-simulation tipping point detection ---
+            # Record the FIRST tick each index crosses the formation threshold (<-0.3)
+            # and the first recovery tick (>= 0.0 after being negative).
+            _tp = self.tipping_point_threshold
+            for idx_val, formed_attr, was_neg_attr, recover_attr in [
+                (seci_exploit_mean, 'tp_seci_exploit_formation', '_seci_exploit_was_negative', 'tp_seci_exploit_recovery'),
+                (seci_explor_mean,  'tp_seci_explor_formation',  '_seci_explor_was_negative',  'tp_seci_explor_recovery'),
+                (avg_aeci_exp,      'tp_aeci_exploit_formation', '_aeci_exploit_was_negative', 'tp_aeci_exploit_recovery'),
+                (avg_aeci_expl,     'tp_aeci_explor_formation',  '_aeci_explor_was_negative',  'tp_aeci_explor_recovery'),
+            ]:
+                if idx_val < _tp:
+                    if getattr(self, formed_attr) is None:
+                        setattr(self, formed_attr, self.tick)  # echo chamber formed
+                    setattr(self, was_neg_attr, True)
+                elif getattr(self, was_neg_attr) and idx_val >= 0.0:
+                    if getattr(self, recover_attr) is None:
+                        setattr(self, recover_attr, self.tick)  # echo chamber broke
 
             # --- Information Diversity (Shannon Entropy) ---
             info_diversity_result = self.calculate_info_diversity()
