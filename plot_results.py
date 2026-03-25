@@ -57,7 +57,8 @@ def load_and_aggregate(path):
         'condition': data['condition'],
         'n_runs':    data.get('n_runs', len(runs)),
         'metric_ticks': runs[0]['metric_ticks'],
-        'n_ticks':   len(runs[0]['seci_exploit']),
+        # seci/aeci now sampled at metric_ticks cadence; unmet_needs stays per-tick
+        'n_ticks':   len(runs[0]['unmet_needs']),
     }
     for key in keys:
         arrays = []
@@ -268,13 +269,13 @@ def plot_timeseries(alpha_r, save_dir):
         ts    = res['metric_ticks']
         label = f'α={alpha}' + (' ★' if alpha == best_alpha else '')
 
-        # SECI — separate exploit and explor panels
-        _band(ax_seci_ex, tf, res['seci_exploit_mean'], res['seci_exploit_std'], color, label)
-        _band(ax_seci_er, tf, res['seci_explor_mean'],  res['seci_explor_std'],  color, label)
+        # SECI — sampled at metric_ticks cadence (no repeated values)
+        _band(ax_seci_ex, ts[:len(res['seci_exploit_mean'])], res['seci_exploit_mean'], res['seci_exploit_std'], color, label)
+        _band(ax_seci_er, ts[:len(res['seci_explor_mean'])],  res['seci_explor_mean'],  res['seci_explor_std'],  color, label)
 
-        # AECI — separate exploit and explor panels
-        _band(ax_aeci_ex, tf, res['aeci_exploit_mean'], res['aeci_exploit_std'], color, label)
-        _band(ax_aeci_er, tf, res['aeci_explor_mean'],  res['aeci_explor_std'],  color, label)
+        # AECI — sampled at metric_ticks cadence
+        _band(ax_aeci_ex, ts[:len(res['aeci_exploit_mean'])], res['aeci_exploit_mean'], res['aeci_exploit_std'], color, label)
+        _band(ax_aeci_er, ts[:len(res['aeci_explor_mean'])],  res['aeci_explor_mean'],  res['aeci_explor_std'],  color, label)
 
         # MAE — combined, sampled
         mae_m = (np.array(res['mae_exploit_mean']) + np.array(res['mae_explor_mean'])) / 2

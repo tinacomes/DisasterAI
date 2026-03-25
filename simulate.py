@@ -59,16 +59,6 @@ def run_one(params):
     for tick in range(params['ticks']):
         model.step()
 
-        if model.seci_data:
-            s = model.seci_data[-1]
-            seci_exploit.append(float(s[1]))
-            seci_explor.append(float(s[2]))
-
-        if model.aeci_data:
-            a = model.aeci_data[-1]
-            aeci_exploit.append(float(a[1]))
-            aeci_explor.append(float(a[2]))
-
         # Per-tick AI query ratio (delta of cumulative accum_calls counters)
         ai_ex = tot_ex = ai_er = tot_er = 0
         for _ag in model.agent_list:
@@ -99,6 +89,14 @@ def run_one(params):
             _win_er_total += er_n
 
         if tick % 5 == 0:
+            # SECI and AECI: collect only at the same cadence as MAE/precision so
+            # they share the metric_ticks x-axis without repeated values between
+            # computation points (the model recomputes both every 5 ticks).
+            seci_exploit.append(float(model.seci_data[-1][1]) if model.seci_data else float('nan'))
+            seci_explor.append( float(model.seci_data[-1][2]) if model.seci_data else float('nan'))
+            aeci_exploit.append(float(model.aeci_data[-1][1]) if model.aeci_data else float('nan'))
+            aeci_explor.append( float(model.aeci_data[-1][2]) if model.aeci_data else float('nan'))
+
             ex_errors, er_errors = [], []
             for agent in model.agent_list:
                 if not isinstance(agent, HumanAgent):

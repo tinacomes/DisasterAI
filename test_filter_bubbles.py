@@ -201,16 +201,6 @@ def run_one_sim(params):
         ai_query_ratio_exploit.append(d_ai_ex / d_tot_ex if d_tot_ex > 0 else float('nan'))
         ai_query_ratio_explor.append( d_ai_er / d_tot_er if d_tot_er > 0 else float('nan'))
 
-        if model.seci_data:
-            s = model.seci_data[-1]
-            seci_exploit.append(float(s[1]))
-            seci_explor.append(float(s[2]))
-
-        if model.aeci_data:
-            a = model.aeci_data[-1]
-            aeci_exploit.append(float(a[1]))
-            aeci_explor.append(float(a[2]))
-
         if model.trust_stats:
             ts = model.trust_stats[-1]
             trust_ai_exploit.append(float(ts[1]))
@@ -238,6 +228,12 @@ def run_one_sim(params):
             _win_er_total += er_n
 
         if tick % 5 == 0:
+            # SECI and AECI at same cadence as MAE — no repeated values, shares metric_ticks axis
+            seci_exploit.append(float(model.seci_data[-1][1]) if model.seci_data else float('nan'))
+            seci_explor.append( float(model.seci_data[-1][2]) if model.seci_data else float('nan'))
+            aeci_exploit.append(float(model.aeci_data[-1][1]) if model.aeci_data else float('nan'))
+            aeci_explor.append( float(model.aeci_data[-1][2]) if model.aeci_data else float('nan'))
+
             ex_errors, er_errors = [], []
             for agent in model.agent_list:
                 if not isinstance(agent, HumanAgent):
@@ -403,7 +399,7 @@ def _aggregate(runs):
     ]
     result = {
         'metric_ticks': runs[0]['metric_ticks'],
-        'n_ticks': len(runs[0]['seci_exploit']),
+        'n_ticks': len(runs[0]['unmet_needs']),  # unmet_needs stays per-tick
     }
     for key in ts_keys:
         arrays = []
@@ -587,19 +583,19 @@ def _plot_timeseries(all_results, save_dir, best_alpha=None):
         ts    = res['metric_ticks']
         label = f'α={alpha}' + (' ★' if alpha == best_alpha else '')
 
-        # SECI — separate panels per agent type
+        # SECI — sampled at metric_ticks cadence (no repeated values between computations)
         for mk, ax_d in [('seci_exploit', ax_seci_ex), ('seci_explor', ax_seci_er)]:
             m = np.array(res[f'{mk}_mean'])
             s = np.array(res[f'{mk}_std'])
-            x = tf[:len(m)]
+            x = ts[:len(m)]
             ax_d.plot(x, m, color=color, linewidth=1.8, label=label)
             ax_d.fill_between(x, m - s, m + s, color=color, alpha=0.2)
 
-        # AECI — separate panels per agent type
+        # AECI — sampled at metric_ticks cadence
         for mk, ax_d in [('aeci_exploit', ax_aeci_ex), ('aeci_explor', ax_aeci_er)]:
             m = np.array(res[f'{mk}_mean'])
             s = np.array(res[f'{mk}_std'])
-            x = tf[:len(m)]
+            x = ts[:len(m)]
             ax_d.plot(x, m, color=color, linewidth=1.8, label=label)
             ax_d.fill_between(x, m - s, m + s, color=color, alpha=0.2)
 
