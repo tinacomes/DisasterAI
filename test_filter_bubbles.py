@@ -238,13 +238,15 @@ def run_one_sim(params):
             for agent in model.agent_list:
                 if not isinstance(agent, HumanAgent):
                     continue
-                # Filter to informed beliefs only (exclude default L0 priors)
-                informed = [(c, b) for c, b in agent.beliefs.items()
-                            if isinstance(b, dict) and b.get('confidence', 0) > 0.1]
+                # MAE over actual disaster cells only (disaster_grid >= 1).
+                # Measures whether the agent found the disaster, not confidence
+                # on non-disaster cells (which dominated at high α).
+                disaster_beliefs = [(c, b) for c, b in agent.beliefs.items()
+                                    if isinstance(b, dict) and model.disaster_grid[c] >= 1]
                 err = float(np.mean([
                     abs(b.get('level', 0) - model.disaster_grid[c])
-                    for c, b in informed
-                ])) if informed else float('nan')
+                    for c, b in disaster_beliefs
+                ])) if disaster_beliefs else float('nan')
                 if agent.agent_type == 'exploitative':
                     ex_errors.append(err)
                 else:

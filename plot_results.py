@@ -219,7 +219,7 @@ def plot_goldilocks(alpha_r, save_dir):
     _finish(ax, 'Total Bubble Intensity\n(minimise)', 'α', '|SECI|+|AECI|', (0, None))
 
     ep(axes[1, 0], mae_ms, 'm', 'Mean Absolute Error',
-       'Belief Accuracy\n(lower = beliefs closer to ground truth)')
+       'Belief Accuracy on Disaster Cells\n(lower = agent found the disaster)')
 
     ep(axes[1, 1], unmet_ms, 'darkorange', 'Unmet high-need cells',
        'Unmet Needs (level ≥3, 0 tokens)\n(lower = better disaster response)')
