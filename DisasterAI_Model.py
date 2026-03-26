@@ -818,14 +818,23 @@ class HumanAgent(Agent):
             confidence_scaling = min(1.0, belief_conf / 0.5)  # Full strength at 0.5+ confidence
 
             # --- Accuracy score: reported vs current reference ---
-            # For EXPLORERS querying REMOTE cells, the reference may be contaminated if
-            # the info was ACCEPTED (belief updated toward reported). If the info was
-            # REJECTED (was_accepted=False), the belief is unchanged = stored_prior,
-            # so we can evaluate safely using stored_prior.
-            # Accepted remote queries are still deferred (rely on process_reward Fix 1).
+            # For EXPLORERS querying REMOTE cells that were ACCEPTED, reference_level
+            # (current belief) is contaminated — the belief already moved toward the
+            # report, creating a circular evaluation. Using stored_prior here would
+            # give a "confirmation" score (how much did report differ from prior?),
+            # not an accuracy score.
+            # FIX BUG 1: Override reference_level with model ground truth so explorers
+            # receive genuine accuracy feedback for accepted remote AI queries.
+            # Truthful AI (α≈0): reported≈truth → error≈0 → Q+1.0 → explorers learn AI is good.
+            # Confirming AI (α≈1): reported≈prior (often wrong) → error large → Q−0.6 →
+            # explorers learn confirming AI is unreliable.
+            # This creates the Q-learning asymmetry that drives the sweet-spot effect.
             if is_remote_cell and self.agent_type == "exploratory" and was_accepted:
-                # Accepted remote query: belief is contaminated, defer to sensing/relief feedback
-                continue
+                if 0 <= cell[0] < self.model.width and 0 <= cell[1] < self.model.height:
+                    reference_level = int(self.model.disaster_grid[cell[0], cell[1]])
+                else:
+                    continue  # out-of-bounds cell: skip safely
+                # Fall through — Q/trust update proceeds with ground-truth reference
             # For rejected remote queries (was_accepted=False) or local cells:
             # use reference_level (which is stored_prior for rejected items, as belief unchanged)
             level_error = abs(reported_level - reference_level)
