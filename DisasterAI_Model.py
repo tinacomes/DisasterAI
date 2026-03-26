@@ -150,7 +150,7 @@ class HumanAgent(Agent):
 
                 # Calculate distance from agent for sensing
                 distance_from_agent = math.sqrt((x - self.pos[0])**2 + (y - self.pos[1])**2)
-                sense_radius = 2  # Same for both agent types
+                sense_radius = 0  # Own cell only — 100 agents × r=2 covers 94% of grid per tick, eliminating information scarcity
 
                 # If cell is within sensing range, initialize with noisy perception of actual disaster
                 if distance_from_agent <= sense_radius:
@@ -345,7 +345,7 @@ class HumanAgent(Agent):
                 if self.pos and cell:
                     distance = math.sqrt((cell[0] - self.pos[0])**2 + (cell[1] - self.pos[1])**2)
                     # Scale by sensing radius (same for both agent types)
-                    radius = 2
+                    radius = 1  # Reference scale for decay (sensing_radius=0, so any distance is "far")
                     distance_factor = min(1.5, 1.0 + (distance / (2 * radius)))
                 else:
                     distance_factor = 1.0
@@ -422,7 +422,7 @@ class HumanAgent(Agent):
 
     def sense_environment(self):
         pos = self.pos
-        radius = 2  # Same for both agent types - behavioral differences should be in information-seeking, not perception
+        radius = 0  # Own cell only — 100 agents × r=2 covers 94% of grid per tick, eliminating information scarcity
         cells = self.model.grid.get_neighborhood(pos, moore=True, radius=radius, include_center=True)
         for cell in cells:
             if 0 <= cell[0] < self.model.width and 0 <= cell[1] < self.model.height:
@@ -1078,8 +1078,8 @@ class HumanAgent(Agent):
         """Check if a cell is within the agent's sensing radius (Moore neighborhood)."""
         if not self.pos or not cell:
             return False
-        sensing_radius = 2
-        return abs(cell[0] - self.pos[0]) <= sensing_radius and abs(cell[1] - self.pos[1]) <= sensing_radius
+        sensing_radius = 0  # Own cell only
+        return cell[0] == self.pos[0] and cell[1] == self.pos[1]
 
     def find_believed_epicenter(self):
         """
@@ -1437,7 +1437,7 @@ class HumanAgent(Agent):
                         else:
                             # Absolute fallback: pick a random cell OUTSIDE sensing range
                             # Offset by at least sensing_radius + 1 to ensure outside
-                            offset = 3  # sensing_radius (2) + 1
+                            offset = 1  # sensing_radius (0) + 1
                             interest_point = (
                                 (self.pos[0] + offset + random.randrange(self.model.width - 2*offset)) % self.model.width,
                                 (self.pos[1] + offset + random.randrange(self.model.height - 2*offset)) % self.model.height
@@ -1453,7 +1453,7 @@ class HumanAgent(Agent):
 
                 # Fallback if uncertainty search fails - pick cell OUTSIDE sensing range
                 if not interest_point:
-                    offset = 3  # sensing_radius (2) + 1
+                    offset = 1  # sensing_radius (0) + 1
                     interest_point = (
                         (self.pos[0] + offset + random.randrange(max(1, self.model.width - 2*offset))) % self.model.width,
                         (self.pos[1] + offset + random.randrange(max(1, self.model.height - 2*offset))) % self.model.height
