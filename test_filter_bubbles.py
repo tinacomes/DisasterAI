@@ -284,7 +284,10 @@ def run_one_sim(params):
             continue
         node_id = int(agent.unique_id.split('_')[1])
         deg     = degrees.get(node_id, 0)
-        ax, ay  = agent.pos
+        # Use initial spawn position, not final position — agents move every tick so
+        # their end position is arbitrary relative to epicenter.  initial_pos reflects
+        # structural periphery (whether an agent's home area is far from the disaster).
+        ax, ay  = getattr(agent, 'initial_pos', agent.pos)
         dist    = float(np.sqrt((ax - ex) ** 2 + (ay - ey) ** 2))
         all_dists.append(dist)
         err = float(np.mean([
@@ -402,6 +405,7 @@ def _aggregate(runs):
     result = {
         'metric_ticks': runs[0]['metric_ticks'],
         'n_ticks': len(runs[0]['unmet_needs']),  # unmet_needs stays per-tick
+        'n_runs': len(runs),
     }
     for key in ts_keys:
         arrays = []
@@ -418,11 +422,19 @@ def _aggregate(runs):
         mat = np.array([a[:min_len] for a in arrays], dtype=float)
         result[f'{key}_mean'] = np.nanmean(mat, axis=0).tolist()
         result[f'{key}_std']  = np.nanstd( mat, axis=0).tolist()
+        # Per-run steady-state values for boxplot display in goldilocks figure
+        ss_window = STEADY_STATE_WINDOW
+        result[f'{key}_ss_runs'] = [
+            float(np.nanmean(a[-ss_window:])) if a else float('nan')
+            for a in arrays
+        ]
     n_ticks_val = result['n_ticks']
     for key in scalar_keys:
         vals = np.array([run.get(key, float('nan')) for run in runs], dtype=float)
         result[f'{key}_mean'] = float(np.nanmean(vals))
         result[f'{key}_std']  = float(np.nanstd(vals))
+        # Preserve per-run values so callers can draw boxplots when N > 1
+        result[f'{key}_runs'] = [float(v) for v in vals]
         # Fraction of runs where transition occurred (value strictly < n_ticks)
         valid = vals[~np.isnan(vals)]
         occurred = valid[valid < n_ticks_val] if n_ticks_val > 0 else np.array([])
@@ -813,11 +825,30 @@ def plot_transition_timing(all_results, save_dir):
          'Exploitative', 'Exploratory',
          'AI Trust Sustains Lead Over Friend Trust\n(≥5 consecutive ticks)')
 
-    _bar(axes[0, 1],
-         'seci_break_exploit', 'seci_break_explor',
-         '#1A3A6B', '#6BAED6',
-         'Exploitative', 'Exploratory',
-         'Social Echo Chamber Breaks (SECI → 0)\n(sustained ≥5 ticks above −0.05)')
+    # Echo chamber steady-state depth — replaces the "SECI → 0 recovery" panel.
+    # Recovery detection was unreliable: the function returned len(series) (~4) when
+    # no recovery occurred, which was always < n_ticks (20), making every run look
+    # like it "recovered at t=4".  For explorers SECI never forms a chamber at all;
+    # for exploiters at high α the chamber is shallow but does not recover.
+    # Steady-state depth directly answers "how strong is the echo chamber?" without
+    # requiring an ill-defined recovery event.
+    ax01 = axes[0, 1]
+    ss_seci_ex  = [abs(ss(r.get('seci_exploit_mean', []))) for r in all_results]
+    ss_seci_er  = [abs(ss(r.get('seci_explor_mean',  []))) for r in all_results]
+    b_e01 = ax01.bar(x - w / 2, ss_seci_ex, w, color='#1A3A6B', alpha=0.85, label='Exploitative')
+    b_r01 = ax01.bar(x + w / 2, ss_seci_er, w, color='#6BAED6', alpha=0.65, label='Exploratory')
+    for bar, val in zip(list(b_e01) + list(b_r01), ss_seci_ex + ss_seci_er):
+        if val > 0.02:
+            ax01.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.02,
+                      f'{val:.2f}', ha='center', va='bottom', fontsize=7)
+    ax01.set_xlabel('AI Alignment')
+    ax01.set_ylabel('Mean |SECI| (last 15 ticks)')
+    ax01.set_title('Echo Chamber Steady-State Depth\n(higher = stronger bubble; explorers near 0 = no chamber)')
+    ax01.set_ylim(0, 1.05)
+    ax01.set_xticks(x)
+    ax01.set_xticklabels(x_str)
+    ax01.legend(fontsize=9)
+    ax01.grid(True, alpha=0.3, axis='y')
 
     _bar(axes[1, 0],
          'ai_query50_exploit', 'ai_query50_explor',

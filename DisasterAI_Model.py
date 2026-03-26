@@ -2480,6 +2480,7 @@ class DisasterModel(Model):
             pos = (random.randrange(width), random.randrange(height))
             self.grid.place_agent(agent, pos)
             agent.pos = pos
+            agent.initial_pos = pos  # fixed spawn location for spatial periphery classification
 
         # validate_social_network(self, save_dir="analysis_plots") #debug
 
@@ -3410,8 +3411,13 @@ class DisasterModel(Model):
                 if len(type_agents) < 4:
                     continue  # need at least 2 per half
 
-                # Median split by cumulative AI acceptance within this type
-                sorted_agents = sorted(type_agents, key=lambda a: a.cum_accepted_ai)
+                # Median split by total AI calls within this type.
+                # Using accum_calls_ai (total queries, not just accepted) gives genuine
+                # variation at high α where acceptance rate ≈ 100% for all agents and
+                # cum_accepted_ai is near-uniform → meaningless split.
+                # Agents who queried AI more (encountered more uncertain cells) get more
+                # belief reinforcements → higher confident error when AI confirms false beliefs.
+                sorted_agents = sorted(type_agents, key=lambda a: a.accum_calls_ai)
                 mid = len(sorted_agents) // 2
                 ai_light = sorted_agents[:mid]
                 ai_heavy = sorted_agents[mid:]
