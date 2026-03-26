@@ -1606,7 +1606,7 @@ class HumanAgent(Agent):
                 source_agent = self.model.ais.get(source_id)
 
                 if source_agent:
-                    reports = source_agent.report_beliefs(interest_point, query_radius, self.beliefs, self.trust.get(source_id, 0.1))
+                    reports = source_agent.report_beliefs(interest_point, query_radius, self, self.trust.get(source_id, 0.1))
 
                     # track AI source
                     self.last_queried_source_ids = [source_id]
@@ -1687,7 +1687,9 @@ class HumanAgent(Agent):
                 max_believed_level = max(max_believed_level, level)
 
                 if level >= 3:
-                    score = (level / 5.0) * (confidence ** 1.5) if self.agent_type == "exploitative" else (
+                    # Linear confidence prevents confirming AI from gaining 5× volume advantage
+                    # over truthful AI through confidence amplification alone (confidence^1.5 → 5.2× ratio)
+                    score = (level / 5.0) * confidence if self.agent_type == "exploitative" else (
                         (level / 5.0) * 0.7 + (1.0 - confidence) * 0.3  # Prioritize level (70%) and exploration (30%)
                     )
                     if score > 0.01:
@@ -2118,12 +2120,19 @@ class AIAgent(Agent):
                     knowledge_map[cell[0], cell[1]] = 1
             self.model.ai_knowledge_maps[self.unique_id] = knowledge_map
 
-    def report_beliefs(self, interest_point, query_radius, caller_beliefs, caller_trust_in_ai):
+    def report_beliefs(self, interest_point, query_radius, caller, caller_trust_in_ai):
         """
         Reports AI's beliefs about cells within query_radius of interest_point,
         applying alignment based on caller's trust and beliefs.
+
+        `caller` is the querying HumanAgent. Its beliefs and agent_type are used
+        in the alignment formula. For exploitative callers the AI confirms the
+        community's network-consensus belief (not the individual prior) so that
+        confirming AI amplifies social echo chambers rather than locking in
+        idiosyncratic individual beliefs.
         """
         report = {}
+        caller_beliefs = caller.beliefs if hasattr(caller, 'beliefs') else {}
 
         # Safety checks for interest_point
         if interest_point is None:
@@ -2235,10 +2244,20 @@ class AIAgent(Agent):
                     #if is_guessed and hasattr(self.model, 'debug_mode') and self.model.debug_mode and random.random() < 0.02:
                         #print(f"DEBUG: AI {self.unique_id} guessed value {value_to_use} for cell {cell}")
 
-                    # Get the CALLER'S belief for this cell (for alignment)
+                    # Get the belief level that the confirming AI should target.
+                    # For exploitative callers: use the network-consensus belief so that
+                    # confirming AI amplifies the community's shared narrative (echo chamber).
+                    # Without this, confirming individual priors disrupts social convergence
+                    # and makes SECI less negative than the no-AI control — the opposite of H1.
+                    # For exploratory callers: use individual belief (unchanged behaviour).
                     caller_belief_info = caller_beliefs.get(cell, {'level': 0, 'confidence': 0.1})
                     human_level = caller_belief_info.get('level', 0)
                     human_confidence = caller_belief_info.get('confidence', 0.1)
+                    if (hasattr(caller, 'agent_type') and caller.agent_type == "exploitative"
+                            and hasattr(caller, 'get_network_consensus')):
+                        net_level, net_conf = caller.get_network_consensus(cell)
+                        if net_level is not None and net_conf >= 0.2:
+                            human_level = int(round(net_level))   # confirm community belief
                     human_vals_list.append(int(human_level))
                     human_confidence_list.append(human_confidence)
 
@@ -3330,46 +3349,49 @@ class DisasterModel(Model):
 
             self.belief_variance_data.append((self.tick, var_exploit, var_explor))
 
-            # --- AECI Calculation (SECI-style peer-group methodology) ---
-            # Mirrors SECI exactly, but "friend network" → "AI-peer network".
-            # AI-reliant agents are classified by accepted_ai (actual belief
-            # updates accepted from AI), not query count. The feedback loop
-            # means agents that validated AI info as accurate build higher AI
-            # trust and accept more AI updates.
+            # --- AECI Calculation: Confidence-Weighted Belief Error ---
             #
-            # AECI: within-type AI-heavy vs AI-light comparison.
-            # The old formula compared AI-reliant agents to the global population,
-            # which conflated natural type homogeneity (exploiters have narrow D/δ
-            # so they naturally converge more than explorers) with AI-induced
-            # homogeneity.  The result was AECI negative even at α=0 (truthful AI).
+            # The previous variance-based formula failed because confirming AI
+            # (α=0.9) changes CONFIDENCE not LEVEL (d=0 → reported level ≈ prior
+            # level), so level variance is unchanged → AECI ≈ 0 regardless of α.
             #
-            # New formula: for each type, split agents into top-50% and bottom-50%
-            # by cum_accepted_ai.  Compare variance of beliefs in the AI-heavy half
-            # to the AI-light half — both within the same type, so type-level
-            # homogeneity cancels out.  If AI reinforcement (confirming α) is causing
-            # an echo chamber, the AI-heavy agents will have MORE uniform beliefs
-            # (locked on the false epicenter) vs the AI-light agents who explored
-            # more independently.
-            #   AECI < 0 → AI-heavy more homogeneous than AI-light → echo chamber
-            #   AECI ≈ 0 → no AI-driven convergence
-            #   AECI > 0 → AI-heavy more diverse (AI is broadening perspectives)
+            # New formula: for each agent compute the mean of
+            #   confidence × |believed_level − true_level|
+            # over all L1+ cells (high enough belief to matter).  This "confident
+            # error" is the actual echo-chamber signal: agents locked into
+            # confirming AI accumulate high-confidence FALSE beliefs.
+            #
+            # Within each type split by cum_accepted_ai (who queried AI most):
+            #   heavy_err > light_err → AI-heavy agents have more confident false
+            #   beliefs → algorithmic echo chamber → AECI > 0
+            #   heavy_err < light_err → AI corrects beliefs → AECI < 0
+            #   AECI ≈ 0 → AI usage has no directional effect on belief accuracy
+            #
+            # Normalised to [-1, +1]:
+            #   positive half: (heavy_err − light_err) / max(heavy_err, light_err)
+            #   negative half: (heavy_err − light_err) / max(light_err, 1e-6)
             aeci_exp = []
             aeci_expl = []
 
-            def _beliefs_l1(agents):
-                """Return L1+ belief levels from informed beliefs (confidence > 0.1).
-                Excludes the ~900 default L0 priors that every agent holds for
-                unvisited cells — these would dilute the AI-heavy vs AI-light
-                variance comparison with uninformative data."""
-                levels = []
+            def _weighted_error(agents):
+                """Mean confidence × |believed_level − truth| over L1+ beliefs.
+                AI echo chamber = high confidence in WRONG beliefs."""
+                errors = []
                 for a in agents:
-                    for binfo in a.beliefs.values():
-                        if (isinstance(binfo, dict)
-                                and binfo.get('confidence', 0) > 0.1):
-                            lv = binfo.get('level', 0)
-                            if not np.isnan(lv) and lv >= 1:
-                                levels.append(float(lv))
-                return levels
+                    for cell, binfo in a.beliefs.items():
+                        if not isinstance(binfo, dict):
+                            continue
+                        conf = binfo.get('confidence', 0)
+                        if conf <= 0.1:
+                            continue
+                        lv = binfo.get('level', 0)
+                        if lv < 1:
+                            continue
+                        if not (0 <= cell[0] < self.width and 0 <= cell[1] < self.height):
+                            continue
+                        truth = float(self.disaster_grid[cell[0], cell[1]])
+                        errors.append(conf * abs(float(lv) - truth))
+                return float(np.mean(errors)) if errors else 0.0
 
             for agent_type_label, aeci_list in [("exploitative", aeci_exp),
                                                   ("exploratory",  aeci_expl)]:
@@ -3385,21 +3407,16 @@ class DisasterModel(Model):
                 ai_light = sorted_agents[:mid]
                 ai_heavy = sorted_agents[mid:]
 
-                light_beliefs = _beliefs_l1(ai_light)
-                heavy_beliefs = _beliefs_l1(ai_heavy)
-                if len(light_beliefs) < 2 or len(heavy_beliefs) < 2:
-                    continue
+                light_err = _weighted_error(ai_light)
+                heavy_err = _weighted_error(ai_heavy)
 
-                light_var = np.var(light_beliefs)
-                heavy_var = np.var(heavy_beliefs)
-                baseline  = max(light_var, 1e-6)
-
-                var_diff = heavy_var - baseline
-                if var_diff < 0:  # AI-heavy more homogeneous → echo chamber
-                    aeci_val = max(-1.0, var_diff / baseline)
-                else:             # AI-heavy more diverse → diversification
-                    denom = max_possible_var - baseline
-                    aeci_val = min(1.0, var_diff / denom) if denom > 1e-9 else 0.0
+                err_diff = heavy_err - light_err
+                if err_diff >= 0:   # AI-heavy more confident-wrong → echo chamber
+                    denom = max(heavy_err, 1e-6)
+                    aeci_val = min(1.0, err_diff / denom)
+                else:               # AI-heavy more accurate → AI breaks echo chamber
+                    denom = max(light_err, 1e-6)
+                    aeci_val = max(-1.0, err_diff / denom)
 
                 aeci_list.append(aeci_val)
 
