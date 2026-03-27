@@ -1006,6 +1006,9 @@ def plot_echo_chamber_lifecycle(all_results, save_dir):
     for color, (res, alpha) in zip(colors, zip(all_results, ALIGNMENT_SWEEP)):
         label = f'AI Alignment={alpha}'
         ticks_arr = np.arange(res['n_ticks'])
+        # SECI is sampled at metric_ticks cadence (every 5 ticks); use the actual
+        # tick numbers as the x-axis so the plot spans the full simulation length.
+        mt = np.array(res['metric_ticks'])
 
         for ax, key, title in [
             (ax_seci_exp,  'seci_exploit', 'Exploitative Agents: Echo Chamber Formation & Dissolution'),
@@ -1013,11 +1016,11 @@ def plot_echo_chamber_lifecycle(all_results, save_dir):
         ]:
             mean = np.array(res[f'{key}_mean'])
             std  = np.array(res[f'{key}_std'])
-            t    = ticks_arr[:len(mean)]
+            t    = mt[:len(mean)]          # actual tick numbers [0, 5, 10, ..., 195]
             ax.plot(t, mean, color=color, linewidth=1.8, label=label)
             ax.fill_between(t, mean - std, mean + std, color=color, alpha=0.15)
 
-        # AECI-Var timeseries
+        # AECI-Var is recorded every tick — use the full tick range
         av_mean = np.array(res['aeci_var_mean'])
         av_std  = np.array(res['aeci_var_std'])
         t_av    = ticks_arr[:len(av_mean)]
@@ -1034,12 +1037,15 @@ def plot_echo_chamber_lifecycle(all_results, save_dir):
         peak_exp.append(float(np.nanmax(np.abs(se_mean))) if len(se_mean) else 0.0)
         peak_expl.append(float(np.nanmax(np.abs(sr_mean))) if len(sr_mean) else 0.0)
 
-        # When recovery: first tick the mean SECI rises back above CHAMBER_THRESH
-        # after forming below it.  This varies by α (high alignment → slower recovery).
-        # The formation peak is always ~tick 4 (initial belief formation), so we show
-        # recovery instead — a meaningful discriminator across alignment levels.
-        when_exp.append(_first_sustained_break(list(se_mean), sustain=3))
-        when_expl.append(_first_sustained_break(list(sr_mean), sustain=3))
+        # Recovery: _first_sustained_break returns an *index* into the series (0..len-1),
+        # or len(series) as the "never" sentinel.  Convert to actual tick number.
+        def _idx_to_tick(idx, mt_arr, n_t):
+            return int(mt_arr[idx]) if idx < len(mt_arr) else n_t
+
+        when_exp.append(_idx_to_tick(
+            _first_sustained_break(list(se_mean), sustain=3), mt, n))
+        when_expl.append(_idx_to_tick(
+            _first_sustained_break(list(sr_mean), sustain=3), mt, n))
 
         # Duration = fraction of ticks with SECI < CHAMBER_THRESH (scale-invariant)
         dur_exp.append(float(np.mean(se_mean < CHAMBER_THRESH)) if len(se_mean) else 0.0)
@@ -1055,7 +1061,7 @@ def plot_echo_chamber_lifecycle(all_results, save_dir):
         ax.set_title(title, fontsize=10)
         ax.set_xlabel('Simulation Tick')
         ax.set_ylabel('SECI (Social Echo Chamber Index)')
-        ax.set_ylim(-0.55, 0.25)
+        ax.set_ylim(top=0.25)   # let matplotlib choose the lower limit from data
         ax.grid(True, alpha=0.3)
     ax_seci_exp.legend(fontsize=7, loc='lower right')
     ax_seci_expl.legend(fontsize=7, loc='lower right')
