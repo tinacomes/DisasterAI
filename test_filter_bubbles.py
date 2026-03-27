@@ -1485,6 +1485,25 @@ if __name__ == '__main__':
         '--n-runs', type=int, default=None,
         help=f'Override primary sweep replications (default: N_RUNS={N_RUNS}).',
     )
+    parser.add_argument(
+        '--single-alpha', type=float, default=None, metavar='ALPHA',
+        help='Run N replications for one alignment level only and save the '
+             'aggregated result to --out-file.  Used by the CI matrix job so '
+             'each alpha runs in a separate parallel worker.',
+    )
+    parser.add_argument(
+        '--out-file', default=None,
+        help='Output JSON path for --single-alpha mode.',
+    )
+    parser.add_argument(
+        '--collect-and-plot', action='store_true',
+        help='Load per-alpha JSONs from --results-dir, run factor sweeps, '
+             'and produce all plots.  Used after the parallel --single-alpha jobs.',
+    )
+    parser.add_argument(
+        '--results-dir', default='filter_bubble_results',
+        help='Directory containing per-alpha JSON files for --collect-and-plot.',
+    )
     args = parser.parse_args()
 
     # Apply CLI overrides
@@ -1497,7 +1516,64 @@ if __name__ == '__main__':
 
     save_dir = args.save_dir
 
-    if args.plots_only:
+    # ------------------------------------------------------------------
+    # Mode: --single-alpha  (one parallel CI worker per alpha level)
+    # ------------------------------------------------------------------
+    if args.single_alpha is not None:
+        alpha = args.single_alpha
+        if alpha not in ALIGNMENT_SWEEP:
+            raise ValueError(f'--single-alpha {alpha} not in ALIGNMENT_SWEEP {ALIGNMENT_SWEEP}')
+        out = args.out_file or f'filter_bubble_results/bubble_alpha_{alpha}.json'
+        os.makedirs(os.path.dirname(out) or '.', exist_ok=True)
+        print(f'Single-alpha mode: α={alpha}, ticks={base_params["ticks"]}, n_runs={n_runs_primary}')
+        params = {**base_params, 'ai_alignment_level': alpha}
+        result = run_replicated(params, n_runs_primary, f'Alignment α={alpha:.1f}')
+        with open(out, 'w') as f:
+            json.dump({'alpha': alpha, 'result': result}, f)
+        print(f'Saved → {out}')
+        import sys; sys.exit(0)
+
+    # ------------------------------------------------------------------
+    # Mode: --collect-and-plot  (runs after all --single-alpha jobs)
+    # ------------------------------------------------------------------
+    if args.collect_and_plot:
+        import glob as _glob
+        results_dir = args.results_dir
+        # Load per-alpha files produced by --single-alpha jobs
+        per_alpha = {}
+        for path in _glob.glob(os.path.join(results_dir, 'bubble_alpha_*.json')):
+            with open(path) as f:
+                d = json.load(f)
+            per_alpha[float(d['alpha'])] = d['result']
+        if not per_alpha:
+            raise FileNotFoundError(f'No bubble_alpha_*.json files found in {results_dir}')
+        all_results = [per_alpha[a] for a in ALIGNMENT_SWEEP if a in per_alpha]
+        missing = [a for a in ALIGNMENT_SWEEP if a not in per_alpha]
+        if missing:
+            print(f'Warning: missing alpha levels {missing} — plots may be incomplete')
+        print(f'Loaded {len(all_results)} alpha results from {results_dir}')
+
+        # Run factor sweeps (short, comparative — uses factor_ticks)
+        factor_base = {**base_params, 'ticks': factor_ticks}
+        print(f'\nRunning factor sweeps (ticks={factor_ticks}) …')
+        rumor_results = {}
+        for rp in RUMOR_SWEEP:
+            params = {**factor_base, 'ai_alignment_level': FACTOR_ALPHA, 'rumor_probability': rp}
+            rumor_results[rp] = run_replicated(params, N_FACTOR_RUNS, f'Rumour p={rp}')
+        disaster_results = {}
+        for dd in DISASTER_SWEEP:
+            params = {**factor_base, 'ai_alignment_level': FACTOR_ALPHA, 'disaster_dynamics': dd}
+            disaster_results[dd] = run_replicated(params, N_FACTOR_RUNS, f'Disaster dynamics={dd}')
+        mix_results = {}
+        for se in EXPLOITATIVE_SWEEP:
+            params = {**factor_base, 'ai_alignment_level': FACTOR_ALPHA, 'share_exploitative': se}
+            mix_results[se] = run_replicated(params, N_FACTOR_RUNS, f'Exploitative share={se}')
+
+        save_results(all_results, rumor_results, disaster_results, mix_results,
+                     {}, os.path.join(results_dir, 'experiment_results.json'))
+        gap_results = {}
+        # Fall through to plotting below
+    elif args.plots_only:
         print(f"Loading results from {args.results_file} …")
         all_results, rumor_results, disaster_results, mix_results, gap_results = load_results(args.results_file)
         print("Loaded. Regenerating plots …\n")
