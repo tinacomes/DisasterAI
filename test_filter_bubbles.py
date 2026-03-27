@@ -488,8 +488,8 @@ def compute_goldilocks_metrics(all_results):
     α* from total_bubble_norm is the recommended primary result.
     """
     metrics = {}
-    # SECI/AECI/MAE/prec are sampled every 5 ticks → 15 samples = 75 ticks late-run avg.
-    # unmet_needs is per-tick → use 75 to cover the same span.
+    # SECI/MAE/prec are sampled every 5 ticks → 15 samples = 75 ticks late-run avg.
+    # aeci_var and unmet_needs are per-tick → use 75-tick window for consistency.
     TICK_WINDOW = STEADY_STATE_WINDOW * 5   # 75 ticks
 
     for alpha, res in zip(ALIGNMENT_SWEEP, all_results):
@@ -514,16 +514,22 @@ def compute_goldilocks_metrics(all_results):
             ]
 
         seci_m, seci_s = ms('seci_exploit', 'seci_explor')
-        aeci_m, aeci_s = ms('aeci_exploit', 'aeci_explor')
+        # Use variance-based AECI (aeci_var) — same formula as SECI:
+        #   community variance vs global variance, but grouping by AI-reliance
+        #   rather than social-network community.  This makes the Goldilocks sum
+        #   total_bubble = |SECI_var| + |AECI_var| a symmetric, coherent formula.
+        # aeci_var is per-tick → use 75-tick window for consistency with SECI.
+        aeci_m = ss(res['aeci_var_mean'], TICK_WINDOW)
+        aeci_s = ss(res['aeci_var_std'],  TICK_WINDOW)
         mae_m,  mae_s  = ms('mae_exploit',  'mae_explor')
         prec_m, prec_s = ms('prec_exploit', 'prec_explor')
-        # Per-tick series: use 75-tick window to match SECI/AECI cadence
+        # Per-tick series: use 75-tick window to match SECI cadence
         unmet_m = ss(res['unmet_needs_mean'], TICK_WINDOW)
         unmet_s = ss(res['unmet_needs_std'],  TICK_WINDOW)
 
         metrics[alpha] = {
             'seci': seci_m, 'seci_std': seci_s, 'seci_runs': runs_pair('seci_exploit', 'seci_explor'),
-            'aeci': aeci_m, 'aeci_std': aeci_s, 'aeci_runs': runs_pair('aeci_exploit', 'aeci_explor'),
+            'aeci': aeci_m, 'aeci_std': aeci_s, 'aeci_runs': res.get('aeci_var_ss_runs', []),
             'mae':  mae_m,  'mae_std':  mae_s,  'mae_runs':  runs_pair('mae_exploit',  'mae_explor'),
             'prec': prec_m, 'prec_std': prec_s, 'prec_runs': runs_pair('prec_exploit', 'prec_explor'),
             'unmet': unmet_m, 'unmet_std': unmet_s,
@@ -634,8 +640,9 @@ def plot_goldilocks(metrics, all_results, save_dir):
     eb(axes[0, 0], 'seci', 'b', 'SECI (-1 to +1)',
        'Social Echo Chamber\n(negative = stronger bubble)', (-1.1, 1.1), hline=0)
 
-    eb(axes[0, 1], 'aeci', 'r', 'AECI (-1 to +1)',
-       'AI-Induced Bubble\n(negative = stronger AI bubble)', (-1.1, 1.1), hline=0)
+    eb(axes[0, 1], 'aeci', 'r', 'AECI-Var (-1 to +1)',
+       'AI-Induced Bubble (variance-based)\n(negative = AI users more homogeneous than global)',
+       (-1.1, 1.1), hline=0)
 
     # ── Goldilocks composite panel ──────────────────────────────────────────
     # Shows two normalised objectives so the reader can see whether the bubble-
