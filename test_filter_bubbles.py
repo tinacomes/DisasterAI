@@ -58,7 +58,7 @@ base_params = {
     'disaster_dynamics': 2,
     'width': 30,
     'height': 30,
-    'ticks': 100,
+    'ticks': 200,
     'learning_rate': 0.1,
     'epsilon': 0.3,
     'exploit_trust_lr': 0.015,
@@ -473,7 +473,7 @@ def ss(series, window=STEADY_STATE_WINDOW):
 
 
 def compute_goldilocks_metrics(all_results):
-    """Compute steady-state scalar metrics (mean ± std) from replicated results."""
+    """Compute steady-state scalar metrics (mean ± std + per-run lists) from replicated results."""
     metrics = {}
     for alpha, res in zip(ALIGNMENT_SWEEP, all_results):
         def ms(key_e, key_r=None):
@@ -481,6 +481,20 @@ def compute_goldilocks_metrics(all_results):
             m = (ss(res[f'{key_e}_mean']) + ss(res[f'{key_r}_mean'])) / 2
             s = (ss(res[f'{key_e}_std'])  + ss(res[f'{key_r}_std']))  / 2
             return m, s
+
+        def runs_pair(key_e, key_r=None):
+            """Per-run steady-state values averaged over exploit+explor, for boxplots."""
+            key_r = key_r or key_e.replace('exploit', 'explor')
+            re = res.get(f'{key_e}_ss_runs', [])
+            rr = res.get(f'{key_r}_ss_runs', [])
+            n = max(len(re), len(rr))
+            return [
+                float(np.nanmean([
+                    re[i] if i < len(re) else float('nan'),
+                    rr[i] if i < len(rr) else float('nan'),
+                ]))
+                for i in range(n)
+            ]
 
         seci_m, seci_s = ms('seci_exploit', 'seci_explor')
         aeci_m, aeci_s = ms('aeci_exploit', 'aeci_explor')
@@ -490,11 +504,12 @@ def compute_goldilocks_metrics(all_results):
         unmet_s = ss(res['unmet_needs_std'])
 
         metrics[alpha] = {
-            'seci': seci_m, 'seci_std': seci_s,
-            'aeci': aeci_m, 'aeci_std': aeci_s,
-            'mae':  mae_m,  'mae_std':  mae_s,
-            'prec': prec_m, 'prec_std': prec_s,
+            'seci': seci_m, 'seci_std': seci_s, 'seci_runs': runs_pair('seci_exploit', 'seci_explor'),
+            'aeci': aeci_m, 'aeci_std': aeci_s, 'aeci_runs': runs_pair('aeci_exploit', 'aeci_explor'),
+            'mae':  mae_m,  'mae_std':  mae_s,  'mae_runs':  runs_pair('mae_exploit',  'mae_explor'),
+            'prec': prec_m, 'prec_std': prec_s, 'prec_runs': runs_pair('prec_exploit', 'prec_explor'),
             'unmet': unmet_m, 'unmet_std': unmet_s,
+            'unmet_runs': res.get('unmet_needs_ss_runs', []),
             'total_bubble': abs(seci_m) + abs(aeci_m),
         }
     return metrics
@@ -505,25 +520,47 @@ def compute_goldilocks_metrics(all_results):
 # ---------------------------------------------------------------------------
 
 def plot_goldilocks(metrics, all_results, save_dir):
-    """2×3 Goldilocks summary with mean ± std error bars."""
+    """2×3 Goldilocks summary — boxplots per alpha (N>1) or scatter dots (N=1).
+    No lines connect alpha values; each alpha is an independent condition."""
     alphas     = ALIGNMENT_SWEEP
     total_vals = [metrics[a]['total_bubble'] for a in alphas]
     best_alpha = alphas[int(np.argmin(total_vals))]
     print(f"\nGoldilocks α* = {best_alpha}  (min total_bubble = {min(total_vals):.3f})")
 
+    use_box = N_RUNS > 1
+
     fig, axes = plt.subplots(2, 3, figsize=(18, 10))
     fig.suptitle(
-        f'Goldilocks AI Alignment (α*={best_alpha}) — mean ± std, N={N_RUNS} replications\n'
+        f'Goldilocks AI Alignment (α*={best_alpha}) — {"boxplots" if use_box else "single run"}, N={N_RUNS} replications\n'
         f'Steady state = mean of last {STEADY_STATE_WINDOW} ticks of each run',
         fontsize=13, fontweight='bold'
     )
 
-    def eb(ax, key, color, ylabel, title, ylim=None):
+    box_w = max(0.03, (max(alphas) - min(alphas)) / len(alphas) * 0.35)
+
+    def eb(ax, key, color, ylabel, title, ylim=None, hline=None):
         means = [metrics[a][key] for a in alphas]
         stds  = [metrics[a][f'{key}_std'] for a in alphas]
-        ax.errorbar(alphas, means, yerr=stds, fmt='-o', color=color, linewidth=2,
-                    capsize=5, capthick=1.5)
+        runs  = [metrics[a].get(f'{key}_runs', []) for a in alphas]
+        if use_box and any(len(r) > 1 for r in runs):
+            bp = ax.boxplot(runs, positions=alphas, widths=box_w,
+                            patch_artist=True, showfliers=True, manage_ticks=False)
+            for patch in bp['boxes']:
+                patch.set_facecolor(color); patch.set_alpha(0.4)
+            for el in ('whiskers', 'caps', 'medians', 'fliers'):
+                for item in bp[el]:
+                    item.set_color(color)
+            ax.scatter(alphas, means, marker='x', color=color, s=60, zorder=5,
+                       linewidths=2, label='Mean')
+        else:
+            ax.scatter(alphas, means, color=color, s=80, zorder=5)
+            for xi, mi, si in zip(alphas, means, stds):
+                if si > 0:
+                    ax.errorbar(xi, mi, yerr=si, fmt='none', color=color,
+                                capsize=5, capthick=1.5, linewidth=1.5)
         ax.axvline(best_alpha, color='gold', linestyle='--', linewidth=2, label=f'α*={best_alpha}')
+        if hline is not None:
+            ax.axhline(hline, color='k', linestyle=':', alpha=0.5)
         ax.set_xlabel('AI Alignment Level (α)')
         ax.set_ylabel(ylabel)
         ax.set_title(title)
@@ -533,16 +570,14 @@ def plot_goldilocks(metrics, all_results, save_dir):
         ax.grid(True, alpha=0.3)
 
     eb(axes[0, 0], 'seci', 'b', 'SECI (-1 to +1)',
-       'Social Echo Chamber\n(negative = stronger bubble)', (-1.1, 1.1))
-    axes[0, 0].axhline(0, color='k', linestyle=':', alpha=0.5)
+       'Social Echo Chamber\n(negative = stronger bubble)', (-1.1, 1.1), hline=0)
 
     eb(axes[0, 1], 'aeci', 'r', 'AECI (-1 to +1)',
-       'AI-Induced Bubble\n(negative = stronger AI bubble)', (-1.1, 1.1))
-    axes[0, 1].axhline(0, color='k', linestyle=':', alpha=0.5)
+       'AI-Induced Bubble\n(negative = stronger AI bubble)', (-1.1, 1.1), hline=0)
 
     ax = axes[0, 2]
-    ax.plot(alphas, total_vals, 'k-o', linewidth=2.5, label='|SECI|+|AECI|')
-    ax.plot(best_alpha, min(total_vals), 'g*', markersize=18, zorder=5, label=f'α*={best_alpha}')
+    ax.scatter(alphas, total_vals, color='k', s=80, zorder=5, label='|SECI|+|AECI|')
+    ax.plot(best_alpha, min(total_vals), 'g*', markersize=18, zorder=6, label=f'α*={best_alpha}')
     ax.fill_between(alphas, total_vals, alpha=0.15, color='purple')
     ax.axvline(best_alpha, color='gold', linestyle='--', linewidth=2)
     ax.set_xlabel('α')
