@@ -26,7 +26,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        alpha: ["0.0", "0.2", "0.4", "0.6", "0.8", "1.0"]
+        alpha: ["0.0", "0.1", "0.2", "0.3", "0.4", "0.5", "0.6", "0.7", "0.8", "0.9", "1.0"]
 
     steps:
       - uses: actions/checkout@v4
@@ -90,7 +90,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        alpha: ["0.0", "0.2", "0.4", "0.6", "0.8", "1.0"]
+        alpha: ["0.0", "0.1", "0.2", "0.3", "0.4", "0.5", "0.6", "0.7", "0.8", "0.9", "1.0"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -145,10 +145,10 @@ jobs:
           retention-days: 3
 
   # ── Gap-scalar sweep (4 g values in parallel) ────────────────────────────
-  # Each g value: 6α × 2 reps × (ticks/2) ≈ 15–20 min per worker.
+  # Each g value: 11α × 2 reps × (ticks/2) ≈ 25–35 min per worker.
   filter-bubbles-gap-g:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:

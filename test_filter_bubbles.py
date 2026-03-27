@@ -66,7 +66,7 @@ base_params = {
     'rumor_probability': 1.0,
 }
 
-ALIGNMENT_SWEEP    = [0.0, 0.2, 0.4, 0.6, 0.8, 1.0]
+ALIGNMENT_SWEEP    = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
 STEADY_STATE_WINDOW = 15
 
 N_RUNS        = 10   # replications for primary alignment sweep
