@@ -473,8 +473,25 @@ def ss(series, window=STEADY_STATE_WINDOW):
 
 
 def compute_goldilocks_metrics(all_results):
-    """Compute steady-state scalar metrics (mean ± std + per-run lists) from replicated results."""
+    """Compute late-run scalar metrics (mean ± std + per-run lists) from replicated results.
+
+    Primary metrics window: last STEADY_STATE_WINDOW (15) samples of the 5-tick-cadence
+    series (SECI, AECI, MAE, prec) — equivalent to the last 75 ticks of a 200-tick run.
+    Per-tick series (unmet_needs) use a matching 75-tick window for consistency.
+
+    Returns per-α dicts with three composite scores:
+      total_bubble      = |SECI| + |AECI|                (raw, unweighted)
+      total_bubble_norm = |SECI_norm| + |AECI_norm|      (range-normalised; both metrics
+                          contribute equally regardless of magnitude difference)
+      total_score_norm  = |SECI_norm| + |AECI_norm| + MAE_norm  (operational composite:
+                          also penalises poor belief accuracy)
+    α* from total_bubble_norm is the recommended primary result.
+    """
     metrics = {}
+    # SECI/AECI/MAE/prec are sampled every 5 ticks → 15 samples = 75 ticks late-run avg.
+    # unmet_needs is per-tick → use 75 to cover the same span.
+    TICK_WINDOW = STEADY_STATE_WINDOW * 5   # 75 ticks
+
     for alpha, res in zip(ALIGNMENT_SWEEP, all_results):
         def ms(key_e, key_r=None):
             key_r = key_r or key_e.replace('exploit', 'explor')
@@ -483,7 +500,7 @@ def compute_goldilocks_metrics(all_results):
             return m, s
 
         def runs_pair(key_e, key_r=None):
-            """Per-run steady-state values averaged over exploit+explor, for boxplots."""
+            """Per-run late-run values averaged over exploit+explor, for boxplots."""
             key_r = key_r or key_e.replace('exploit', 'explor')
             re = res.get(f'{key_e}_ss_runs', [])
             rr = res.get(f'{key_r}_ss_runs', [])
@@ -500,8 +517,9 @@ def compute_goldilocks_metrics(all_results):
         aeci_m, aeci_s = ms('aeci_exploit', 'aeci_explor')
         mae_m,  mae_s  = ms('mae_exploit',  'mae_explor')
         prec_m, prec_s = ms('prec_exploit', 'prec_explor')
-        unmet_m = ss(res['unmet_needs_mean'])
-        unmet_s = ss(res['unmet_needs_std'])
+        # Per-tick series: use 75-tick window to match SECI/AECI cadence
+        unmet_m = ss(res['unmet_needs_mean'], TICK_WINDOW)
+        unmet_s = ss(res['unmet_needs_std'],  TICK_WINDOW)
 
         metrics[alpha] = {
             'seci': seci_m, 'seci_std': seci_s, 'seci_runs': runs_pair('seci_exploit', 'seci_explor'),
@@ -512,6 +530,32 @@ def compute_goldilocks_metrics(all_results):
             'unmet_runs': res.get('unmet_needs_ss_runs', []),
             'total_bubble': abs(seci_m) + abs(aeci_m),
         }
+
+    # ── Range-normalise |SECI|, |AECI|, MAE across the sweep ────────────────
+    # This ensures each metric contributes equally to the composite regardless
+    # of its absolute magnitude (|SECI| is typically 3–5× larger than |AECI|).
+    def _norm(vals):
+        lo, hi = min(vals), max(vals)
+        span = hi - lo
+        if span < 1e-9:
+            return [0.5] * len(vals)   # degenerate: all equal → arbitrary midpoint
+        return [(v - lo) / span for v in vals]
+
+    seci_abs = [abs(metrics[a]['seci']) for a in ALIGNMENT_SWEEP]
+    aeci_abs = [abs(metrics[a]['aeci']) for a in ALIGNMENT_SWEEP]
+    mae_vals  = [metrics[a]['mae']       for a in ALIGNMENT_SWEEP]
+
+    seci_n = _norm(seci_abs)
+    aeci_n = _norm(aeci_abs)
+    mae_n  = _norm(mae_vals)
+
+    for i, alpha in enumerate(ALIGNMENT_SWEEP):
+        metrics[alpha]['seci_norm']          = seci_n[i]
+        metrics[alpha]['aeci_norm']          = aeci_n[i]
+        metrics[alpha]['mae_norm']           = mae_n[i]
+        metrics[alpha]['total_bubble_norm']  = seci_n[i] + aeci_n[i]
+        metrics[alpha]['total_score_norm']   = seci_n[i] + aeci_n[i] + mae_n[i]
+
     return metrics
 
 
@@ -521,18 +565,36 @@ def compute_goldilocks_metrics(all_results):
 
 def plot_goldilocks(metrics, all_results, save_dir):
     """2×3 Goldilocks summary — boxplots per alpha (N>1) or scatter dots (N=1).
-    No lines connect alpha values; each alpha is an independent condition."""
-    alphas     = ALIGNMENT_SWEEP
-    total_vals = [metrics[a]['total_bubble'] for a in alphas]
-    best_alpha = alphas[int(np.argmin(total_vals))]
-    print(f"\nGoldilocks α* = {best_alpha}  (min total_bubble = {min(total_vals):.3f})")
+    No lines connect alpha values; each alpha is an independent condition.
+
+    α* is identified from the range-normalised composite so that SECI and AECI
+    contribute equally regardless of their absolute magnitude difference.
+    The composite panel also shows the operational score (+MAE) so the reader can
+    see whether the bubble-minimising α also improves disaster response accuracy.
+    """
+    alphas = ALIGNMENT_SWEEP
+
+    # Primary objective: range-normalised bubble composite
+    norm_vals  = [metrics[a]['total_bubble_norm'] for a in alphas]
+    score_vals = [metrics[a]['total_score_norm']  for a in alphas]
+    best_alpha       = alphas[int(np.argmin(norm_vals))]
+    best_alpha_score = alphas[int(np.argmin(score_vals))]
+    print(f"\nGoldilocks α* = {best_alpha}  "
+          f"(min normalised bubble = {min(norm_vals):.3f})")
+    if best_alpha_score != best_alpha:
+        print(f"  Note: operational α* (+MAE) = {best_alpha_score} "
+              f"(bubble and response objectives disagree)")
+    else:
+        print(f"  Operational α* (+MAE) = {best_alpha_score}  ✓ objectives agree")
 
     use_box = N_RUNS > 1
+    late_run_label = f'Late-run avg (last 75 ticks, {STEADY_STATE_WINDOW} samples)'
 
     fig, axes = plt.subplots(2, 3, figsize=(18, 10))
     fig.suptitle(
-        f'Goldilocks AI Alignment (α*={best_alpha}) — {"boxplots" if use_box else "single run"}, N={N_RUNS} replications\n'
-        f'Steady state = mean of last {STEADY_STATE_WINDOW} ticks of each run',
+        f'Goldilocks AI Alignment (α*={best_alpha}) — '
+        f'{"boxplots" if use_box else "single run"}, N={N_RUNS} replications\n'
+        f'{late_run_label}',
         fontsize=13, fontweight='bold'
     )
 
@@ -575,15 +637,27 @@ def plot_goldilocks(metrics, all_results, save_dir):
     eb(axes[0, 1], 'aeci', 'r', 'AECI (-1 to +1)',
        'AI-Induced Bubble\n(negative = stronger AI bubble)', (-1.1, 1.1), hline=0)
 
+    # ── Goldilocks composite panel ──────────────────────────────────────────
+    # Shows two normalised objectives so the reader can see whether the bubble-
+    # minimising α also minimises belief error.  If both argmins coincide the
+    # Goldilocks claim is operationally grounded; if they differ it's a nuance.
     ax = axes[0, 2]
-    ax.scatter(alphas, total_vals, color='k', s=80, zorder=5, label='|SECI|+|AECI|')
-    ax.plot(best_alpha, min(total_vals), 'g*', markersize=18, zorder=6, label=f'α*={best_alpha}')
-    ax.fill_between(alphas, total_vals, alpha=0.15, color='purple')
-    ax.axvline(best_alpha, color='gold', linestyle='--', linewidth=2)
+    ax.scatter(alphas, norm_vals,  color='purple',     s=80,  zorder=5,
+               label='|SECI|+|AECI| (norm.)')
+    ax.plot(alphas,    norm_vals,  color='purple',     lw=1,  alpha=0.35, linestyle='--')
+    ax.scatter(alphas, score_vals, color='darkorange',  s=60,  zorder=5, marker='s',
+               label='|SECI|+|AECI|+MAE (norm.)')
+    ax.plot(alphas,    score_vals, color='darkorange',  lw=1,  alpha=0.35, linestyle=':')
+    ax.axvline(best_alpha, color='gold', linestyle='--', linewidth=2,
+               label=f'α*(bubble)={best_alpha}')
+    if best_alpha_score != best_alpha:
+        ax.axvline(best_alpha_score, color='sienna', linestyle=':', linewidth=2,
+                   label=f'α*(+MAE)={best_alpha_score}')
     ax.set_xlabel('α')
-    ax.set_ylabel('|SECI| + |AECI|')
-    ax.set_title('Total Bubble Intensity\n(minimise to find Goldilocks zone)')
-    ax.legend(fontsize=9)
+    ax.set_ylabel('Normalised composite (0 = best, 2 = worst)')
+    ax.set_title('Goldilocks Composite (range-normalised)\n'
+                 'Purple: bubble-only  |  Orange: + MAE penalty')
+    ax.legend(fontsize=8)
     ax.grid(True, alpha=0.3)
 
     eb(axes[1, 0], 'mae', 'm', 'Mean Absolute Error',
@@ -1759,16 +1833,23 @@ if __name__ == '__main__':
     metrics = compute_goldilocks_metrics(all_results)
 
     print('\n' + '=' * 70)
-    print('STEADY-STATE METRICS SUMMARY')
+    print('LATE-RUN METRICS SUMMARY  (last 75 ticks)')
     print('=' * 70)
-    print(f"{'α':>6}  {'SECI':>8}  {'AECI':>8}  {'|S|+|A|':>8}  {'MAE':>7}  {'Unmet':>7}")
-    print('-' * 55)
-    min_bubble = min(v['total_bubble'] for v in metrics.values())
+    print(f"{'α':>6}  {'SECI':>8}  {'AECI':>8}  {'Bub(norm)':>10}  "
+          f"{'Score(norm)':>12}  {'MAE':>7}  {'Unmet':>7}")
+    print('-' * 72)
+    min_norm  = min(v['total_bubble_norm']  for v in metrics.values())
+    min_score = min(v['total_score_norm']   for v in metrics.values())
     for alpha in ALIGNMENT_SWEEP:
         m = metrics[alpha]
-        tag = '  ← α*' if abs(m['total_bubble'] - min_bubble) < 1e-9 else ''
+        tag = ''
+        if abs(m['total_bubble_norm'] - min_norm) < 1e-9:
+            tag += '  ← α*(bubble)'
+        if abs(m['total_score_norm']  - min_score) < 1e-9:
+            tag += '  ← α*(+MAE)' if '← α*(bubble)' not in tag else '+MAE'
         print(f"{alpha:>6.1f}  {m['seci']:>8.3f}  {m['aeci']:>8.3f}  "
-              f"{m['total_bubble']:>8.3f}  {m['mae']:>7.3f}  {m['unmet']:>7.1f}{tag}")
+              f"{m['total_bubble_norm']:>10.3f}  {m['total_score_norm']:>12.3f}  "
+              f"{m['mae']:>7.3f}  {m['unmet']:>7.1f}{tag}")
 
     plot_goldilocks(metrics, all_results, save_dir)
     if rumor_results and disaster_results and mix_results:
