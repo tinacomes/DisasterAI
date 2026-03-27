@@ -632,21 +632,25 @@ def _plot_timeseries(all_results, save_dir, best_alpha=None):
         ts    = res['metric_ticks']
         label = f'α={alpha}' + (' ★' if alpha == best_alpha else '')
 
-        # SECI — sampled at metric_ticks cadence (no repeated values between computations)
+        # SECI — sampled at metric_ticks cadence.
+        # Skip index 0 (tick 0 value is always 0 before any community variance
+        # is computed) to avoid a misleading visual drop from 0 to first real value.
         for mk, ax_d in [('seci_exploit', ax_seci_ex), ('seci_explor', ax_seci_er)]:
             m = np.array(res[f'{mk}_mean'])
             s = np.array(res[f'{mk}_std'])
-            x = ts[:len(m)]
-            ax_d.plot(x, m, color=color, linewidth=1.8, label=label)
-            ax_d.fill_between(x, m - s, m + s, color=color, alpha=0.2)
+            x = np.array(ts[:len(m)])
+            i0 = 1 if len(m) > 1 else 0   # start at first real measurement
+            ax_d.plot(x[i0:], m[i0:], color=color, linewidth=1.8, label=label)
+            ax_d.fill_between(x[i0:], m[i0:] - s[i0:], m[i0:] + s[i0:], color=color, alpha=0.2)
 
-        # AECI — sampled at metric_ticks cadence
+        # AECI — sampled at metric_ticks cadence; same skip for same reason.
         for mk, ax_d in [('aeci_exploit', ax_aeci_ex), ('aeci_explor', ax_aeci_er)]:
             m = np.array(res[f'{mk}_mean'])
             s = np.array(res[f'{mk}_std'])
-            x = ts[:len(m)]
-            ax_d.plot(x, m, color=color, linewidth=1.8, label=label)
-            ax_d.fill_between(x, m - s, m + s, color=color, alpha=0.2)
+            x = np.array(ts[:len(m)])
+            i0 = 1 if len(m) > 1 else 0
+            ax_d.plot(x[i0:], m[i0:], color=color, linewidth=1.8, label=label)
+            ax_d.fill_between(x[i0:], m[i0:] - s[i0:], m[i0:] + s[i0:], color=color, alpha=0.2)
 
         # MAE — combined exploit+explor, sampled every 5 ticks
         mae_m = (np.array(res['mae_exploit_mean']) + np.array(res['mae_explor_mean'])) / 2
