@@ -109,13 +109,72 @@ jobs:
           path: filter_bubble_results/bubble_alpha_${{ matrix.alpha }}.json
           retention-days: 3
 
-  # ── Bubble experiment: step 2 of 2 ──────────────────────────────────────
-  # Collects per-alpha JSONs, runs factor sweeps (short), produces all plots.
-  # Factor sweeps: 9 conditions × 2 reps × (ticks/2) ≈ 10–15 min.
-  filter-bubbles-collect:
-    needs: filter-bubbles-alpha
+  # ── Factor sweep (9 conditions in parallel) ──────────────────────────────
+  # Each condition: 2 reps × (ticks/2) ≈ 3–5 min per worker.
+  filter-bubbles-factor:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {ftype: rumor,    fval: "0.0"}
+          - {ftype: rumor,    fval: "0.5"}
+          - {ftype: rumor,    fval: "1.0"}
+          - {ftype: disaster, fval: "0"}
+          - {ftype: disaster, fval: "2"}
+          - {ftype: disaster, fval: "3"}
+          - {ftype: mix,      fval: "0.2"}
+          - {ftype: mix,      fval: "0.5"}
+          - {ftype: mix,      fval: "0.8"}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11", cache: "pip"}
+      - run: pip install -r requirements.txt
+      - run: |
+          mkdir -p filter_bubble_results
+          python3 test_filter_bubbles.py \
+            --single-factor ${{ matrix.ftype }} ${{ matrix.fval }} \
+            --out-file filter_bubble_results/bubble_factor_${{ matrix.ftype }}_${{ matrix.fval }}.json \
+            --ticks ${{ inputs.ticks }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bubble-factor-${{ matrix.ftype }}-${{ matrix.fval }}
+          path: filter_bubble_results/bubble_factor_${{ matrix.ftype }}_${{ matrix.fval }}.json
+          retention-days: 3
+
+  # ── Gap-scalar sweep (4 g values in parallel) ────────────────────────────
+  # Each g value: 6α × 2 reps × (ticks/2) ≈ 15–20 min per worker.
+  filter-bubbles-gap-g:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        g: ["0.0", "0.5", "1.0", "1.5"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11", cache: "pip"}
+      - run: pip install -r requirements.txt
+      - run: |
+          mkdir -p filter_bubble_results
+          python3 test_filter_bubbles.py \
+            --single-gap ${{ matrix.g }} \
+            --out-file filter_bubble_results/bubble_gap_${{ matrix.g }}.json \
+            --ticks ${{ inputs.ticks }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bubble-gap-g-${{ matrix.g }}
+          path: filter_bubble_results/bubble_gap_${{ matrix.g }}.json
+          retention-days: 3
+
+  # ── Collect all results and plot (plot-only, no simulation) ──────────────
+  filter-bubbles-collect:
+    needs: [filter-bubbles-alpha, filter-bubbles-factor, filter-bubbles-gap-g]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -124,6 +183,16 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           pattern: bubble-alpha-*
+          merge-multiple: true
+          path: filter_bubble_results/
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: bubble-factor-*
+          merge-multiple: true
+          path: filter_bubble_results/
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: bubble-gap-g-*
           merge-multiple: true
           path: filter_bubble_results/
       - run: ls -lh filter_bubble_results/
@@ -138,46 +207,6 @@ jobs:
         if: always()
         with:
           name: filter-bubble-plots
-          path: filter_bubble_results/*.png
-          retention-days: 30
-
-  # ── Gap-scalar sweep (independent) ───────────────────────────────────────
-  # 4g × 6α × 2 reps × (ticks/2).  Runs in parallel with alpha jobs.
-  filter-bubbles-gap:
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: {python-version: "3.11", cache: "pip"}
-      - run: pip install -r requirements.txt
-      - run: |
-          mkdir -p filter_bubble_results
-          TICKS=${{ inputs.ticks }} python3 - <<'EOF'
-          import test_filter_bubbles as fb, os
-          save_dir = 'filter_bubble_results'
-          os.makedirs(save_dir, exist_ok=True)
-          factor_ticks = max(50, int(os.environ.get('TICKS', str(fb.base_params['ticks']))) // 2)
-          fb.base_params['ticks'] = factor_ticks
-          print(f'Gap sweep using ticks={factor_ticks}')
-          gap_results = {}
-          for g in fb.GAP_SWEEP:
-              d_ex, dlt_ex, d_er, dlt_er = fb._gap_d_delta(g)
-              g_alpha_results = []
-              for alpha in fb.ALIGNMENT_SWEEP:
-                  params = {**fb.base_params, 'ai_alignment_level': alpha,
-                            'd_exploit': d_ex, 'delta_exploit': dlt_ex,
-                            'd_explor': d_er, 'delta_explor': dlt_er}
-                  g_alpha_results.append(
-                      fb.run_replicated(params, fb.N_FACTOR_RUNS, f'g={g} alpha={alpha:.1f}'))
-              gap_results[g] = {'all_results': g_alpha_results}
-          fb.plot_gap_sweep(gap_results, save_dir)
-          print('Gap sweep: OK')
-          EOF
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: filter-bubble-gap-plots
           path: filter_bubble_results/*.png
           retention-days: 30
 

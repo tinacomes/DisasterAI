@@ -1504,6 +1504,18 @@ if __name__ == '__main__':
         '--results-dir', default='filter_bubble_results',
         help='Directory containing per-alpha JSON files for --collect-and-plot.',
     )
+    parser.add_argument(
+        '--single-factor', nargs=2, default=None, metavar=('TYPE', 'VALUE'),
+        help='Run N_FACTOR_RUNS replications for one factor condition and save '
+             'the result to --out-file.  TYPE is one of: rumor, disaster, mix. '
+             'VALUE is the numeric value.  Used by the CI matrix job.',
+    )
+    parser.add_argument(
+        '--single-gap', type=float, default=None, metavar='G',
+        help='Run N_FACTOR_RUNS replications for one gap-scalar value (over all '
+             'alignment levels) and save the result to --out-file.  '
+             'Used by the CI matrix job.',
+    )
     args = parser.parse_args()
 
     # Apply CLI overrides
@@ -1534,7 +1546,66 @@ if __name__ == '__main__':
         import sys; sys.exit(0)
 
     # ------------------------------------------------------------------
-    # Mode: --collect-and-plot  (runs after all --single-alpha jobs)
+    # Mode: --single-factor  (one parallel CI worker per factor condition)
+    # ------------------------------------------------------------------
+    if args.single_factor is not None:
+        ftype, fval_str = args.single_factor
+        fval_f = float(fval_str)
+        factor_base_sf = {**base_params, 'ticks': factor_ticks}
+        if ftype == 'rumor':
+            params = {**factor_base_sf, 'ai_alignment_level': FACTOR_ALPHA,
+                      'rumor_probability': fval_f}
+            label = f'Rumour p={fval_f}'
+        elif ftype == 'disaster':
+            params = {**factor_base_sf, 'ai_alignment_level': FACTOR_ALPHA,
+                      'disaster_dynamics': int(fval_f)}
+            label = f'Disaster dynamics={int(fval_f)}'
+        elif ftype == 'mix':
+            params = {**factor_base_sf, 'ai_alignment_level': FACTOR_ALPHA,
+                      'share_exploitative': fval_f}
+            label = f'Exploitative share={fval_f}'
+        else:
+            raise ValueError(f'Unknown factor type {ftype!r}; expected rumor, disaster, or mix')
+        print(f'Single-factor mode: type={ftype}, value={fval_f}, '
+              f'ticks={factor_ticks}, n_runs={N_FACTOR_RUNS}')
+        result = run_replicated(params, N_FACTOR_RUNS, label)
+        out = args.out_file or f'filter_bubble_results/bubble_factor_{ftype}_{fval_str}.json'
+        os.makedirs(os.path.dirname(out) or '.', exist_ok=True)
+        with open(out, 'w') as f:
+            json.dump({'factor_type': ftype, 'factor_value': fval_f, 'result': result}, f)
+        print(f'Saved → {out}')
+        import sys; sys.exit(0)
+
+    # ------------------------------------------------------------------
+    # Mode: --single-gap  (one parallel CI worker per gap-scalar value)
+    # ------------------------------------------------------------------
+    if args.single_gap is not None:
+        g = args.single_gap
+        d_ex, dlt_ex, d_er, dlt_er = _gap_d_delta(g)
+        factor_base_sg = {**base_params, 'ticks': factor_ticks}
+        print(f'Single-gap mode: g={g}, ticks={factor_ticks}, n_runs={N_FACTOR_RUNS}')
+        g_alpha_results = []
+        for alpha in ALIGNMENT_SWEEP:
+            params = {
+                **factor_base_sg,
+                'ai_alignment_level': alpha,
+                'd_exploit':    d_ex,
+                'delta_exploit': dlt_ex,
+                'd_explor':     d_er,
+                'delta_explor': dlt_er,
+            }
+            g_alpha_results.append(
+                run_replicated(params, N_FACTOR_RUNS, f'g={g} α={alpha:.1f}')
+            )
+        out = args.out_file or f'filter_bubble_results/bubble_gap_{g}.json'
+        os.makedirs(os.path.dirname(out) or '.', exist_ok=True)
+        with open(out, 'w') as f:
+            json.dump({'gap': g, 'all_results': g_alpha_results}, f)
+        print(f'Saved → {out}')
+        import sys; sys.exit(0)
+
+    # ------------------------------------------------------------------
+    # Mode: --collect-and-plot  (runs after all parallel CI jobs)
     # ------------------------------------------------------------------
     if args.collect_and_plot:
         import glob as _glob
@@ -1553,25 +1624,35 @@ if __name__ == '__main__':
             print(f'Warning: missing alpha levels {missing} — plots may be incomplete')
         print(f'Loaded {len(all_results)} alpha results from {results_dir}')
 
-        # Run factor sweeps (short, comparative — uses factor_ticks)
-        factor_base = {**base_params, 'ticks': factor_ticks}
-        print(f'\nRunning factor sweeps (ticks={factor_ticks}) …')
+        # Load factor results produced by --single-factor parallel jobs
+        print(f'\nLoading factor sweep results from {results_dir} …')
         rumor_results = {}
-        for rp in RUMOR_SWEEP:
-            params = {**factor_base, 'ai_alignment_level': FACTOR_ALPHA, 'rumor_probability': rp}
-            rumor_results[rp] = run_replicated(params, N_FACTOR_RUNS, f'Rumour p={rp}')
         disaster_results = {}
-        for dd in DISASTER_SWEEP:
-            params = {**factor_base, 'ai_alignment_level': FACTOR_ALPHA, 'disaster_dynamics': dd}
-            disaster_results[dd] = run_replicated(params, N_FACTOR_RUNS, f'Disaster dynamics={dd}')
         mix_results = {}
-        for se in EXPLOITATIVE_SWEEP:
-            params = {**factor_base, 'ai_alignment_level': FACTOR_ALPHA, 'share_exploitative': se}
-            mix_results[se] = run_replicated(params, N_FACTOR_RUNS, f'Exploitative share={se}')
+        for path in _glob.glob(os.path.join(results_dir, 'bubble_factor_*.json')):
+            with open(path) as f:
+                d = json.load(f)
+            ftype = d['factor_type']
+            fval  = d['factor_value']
+            if ftype == 'rumor':
+                rumor_results[fval] = d['result']
+            elif ftype == 'disaster':
+                disaster_results[int(fval)] = d['result']
+            elif ftype == 'mix':
+                mix_results[fval] = d['result']
+        print(f'  rumor: {sorted(rumor_results)}, '
+              f'disaster: {sorted(disaster_results)}, mix: {sorted(mix_results)}')
+
+        # Load gap results produced by --single-gap parallel jobs
+        gap_results = {}
+        for path in _glob.glob(os.path.join(results_dir, 'bubble_gap_*.json')):
+            with open(path) as f:
+                d = json.load(f)
+            gap_results[float(d['gap'])] = {'all_results': d['all_results']}
+        print(f'  gap scalars: {sorted(gap_results)}')
 
         save_results(all_results, rumor_results, disaster_results, mix_results,
-                     {}, os.path.join(results_dir, 'experiment_results.json'))
-        gap_results = {}
+                     gap_results, os.path.join(results_dir, 'experiment_results.json'))
         # Fall through to plotting below
     elif args.plots_only:
         print(f"Loading results from {args.results_file} …")
