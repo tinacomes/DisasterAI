@@ -1472,7 +1472,24 @@ if __name__ == '__main__':
              'reuse factor/gap results from --results-file. Useful for bumping '
              'N_RUNS without repeating the factor/gap sweeps.',
     )
+    parser.add_argument(
+        '--ticks', type=int, default=None,
+        help='Override simulation ticks (default: value in base_params, currently '
+             f'{base_params["ticks"]}). Factor/gap sweeps use half this value.',
+    )
+    parser.add_argument(
+        '--n-runs', type=int, default=None,
+        help=f'Override primary sweep replications (default: N_RUNS={N_RUNS}).',
+    )
     args = parser.parse_args()
+
+    # Apply CLI overrides
+    if args.ticks is not None:
+        base_params['ticks'] = args.ticks
+    n_runs_primary = args.n_runs if args.n_runs is not None else N_RUNS
+    # Factor/gap sweeps use at most half the primary ticks (they measure relative
+    # differences, not absolute steady-state values, so shorter runs suffice)
+    factor_ticks = max(50, base_params['ticks'] // 2)
 
     save_dir = args.save_dir
 
@@ -1493,11 +1510,11 @@ if __name__ == '__main__':
         print('=' * 70)
         print(f'Sweeping alignment levels: {ALIGNMENT_SWEEP}')
         print(f'Ticks per run: {base_params["ticks"]}')
-        print(f'Replications: {N_RUNS}\n')
+        print(f'Replications: {n_runs_primary}\n')
         all_results = []
         for alpha in ALIGNMENT_SWEEP:
             params = {**base_params, 'ai_alignment_level': alpha}
-            all_results.append(run_replicated(params, N_RUNS, f'Alignment α={alpha:.1f}'))
+            all_results.append(run_replicated(params, n_runs_primary, f'Alignment α={alpha:.1f}'))
         save_results(all_results, rumor_results, disaster_results, mix_results,
                      gap_results, args.results_file)
     else:
@@ -1506,7 +1523,8 @@ if __name__ == '__main__':
         print('=' * 70)
         print(f'Sweeping alignment levels: {ALIGNMENT_SWEEP}')
         print(f'Ticks per run: {base_params["ticks"]}')
-        print(f'Replications (primary sweep): {N_RUNS}')
+        print(f'Ticks for factor/gap sweeps: {factor_ticks}')
+        print(f'Replications (primary sweep): {n_runs_primary}')
         print(f'Replications (factor sweeps): {N_FACTOR_RUNS}')
         print(f'Steady-state window: last {STEADY_STATE_WINDOW} ticks\n')
 
@@ -1514,26 +1532,27 @@ if __name__ == '__main__':
         all_results = []
         for alpha in ALIGNMENT_SWEEP:
             params = {**base_params, 'ai_alignment_level': alpha}
-            all_results.append(run_replicated(params, N_RUNS, f'Alignment α={alpha:.1f}'))
+            all_results.append(run_replicated(params, n_runs_primary, f'Alignment α={alpha:.1f}'))
 
-        # 2. Factor sweeps (at fixed α = FACTOR_ALPHA)
+        # 2. Factor sweeps (at fixed α = FACTOR_ALPHA, shorter ticks — comparative)
         print('\n' + '=' * 70)
-        print(f'FACTOR SWEEPS  (all at α={FACTOR_ALPHA})')
+        print(f'FACTOR SWEEPS  (all at α={FACTOR_ALPHA}, ticks={factor_ticks})')
         print('=' * 70)
+        factor_base = {**base_params, 'ticks': factor_ticks}
 
         rumor_results = {}
         for rp in RUMOR_SWEEP:
-            params = {**base_params, 'ai_alignment_level': FACTOR_ALPHA, 'rumor_probability': rp}
+            params = {**factor_base, 'ai_alignment_level': FACTOR_ALPHA, 'rumor_probability': rp}
             rumor_results[rp] = run_replicated(params, N_FACTOR_RUNS, f'Rumour p={rp}')
 
         disaster_results = {}
         for dd in DISASTER_SWEEP:
-            params = {**base_params, 'ai_alignment_level': FACTOR_ALPHA, 'disaster_dynamics': dd}
+            params = {**factor_base, 'ai_alignment_level': FACTOR_ALPHA, 'disaster_dynamics': dd}
             disaster_results[dd] = run_replicated(params, N_FACTOR_RUNS, f'Disaster dynamics={dd}')
 
         mix_results = {}
         for se in EXPLOITATIVE_SWEEP:
-            params = {**base_params, 'ai_alignment_level': FACTOR_ALPHA, 'share_exploitative': se}
+            params = {**factor_base, 'ai_alignment_level': FACTOR_ALPHA, 'share_exploitative': se}
             mix_results[se] = run_replicated(params, N_FACTOR_RUNS, f'Exploitative share={se}')
 
         # 3. Gap-scalar sweep (skipped when --skip-gap is set so CI can run it
@@ -1553,7 +1572,7 @@ if __name__ == '__main__':
                 g_alpha_results = []
                 for alpha in ALIGNMENT_SWEEP:
                     params = {
-                        **base_params,
+                        **factor_base,          # uses factor_ticks, not primary ticks
                         'ai_alignment_level': alpha,
                         'd_exploit':    d_ex,
                         'delta_exploit': dlt_ex,
