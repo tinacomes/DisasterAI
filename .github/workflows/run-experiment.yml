@@ -6,9 +6,13 @@ on:
   workflow_dispatch:
     inputs:
       n_runs:
-        description: "Replications per condition"
+        description: "Replications per condition (primary sweep)"
         required: false
-        default: "10"
+        default: "4"
+      ticks:
+        description: "Simulation ticks per run (factor/gap jobs use ticks/2)"
+        required: false
+        default: "150"
 
 env:
   MPLBACKEND: Agg
@@ -88,7 +92,11 @@ jobs:
       - run: pip install -r requirements.txt
       - run: |
           mkdir -p filter_bubble_results
-          python3 test_filter_bubbles.py --save-dir filter_bubble_results/ --skip-gap
+          python3 test_filter_bubbles.py \
+            --save-dir filter_bubble_results/ \
+            --skip-gap \
+            --ticks ${{ inputs.ticks }} \
+            --n-runs ${{ inputs.n_runs }}
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -108,10 +116,14 @@ jobs:
       - run: pip install -r requirements.txt
       - run: |
           mkdir -p filter_bubble_results
-          python3 - <<'EOF'
+          TICKS=${{ inputs.ticks }} python3 - <<'EOF'
           import test_filter_bubbles as fb, os
           save_dir = 'filter_bubble_results'
           os.makedirs(save_dir, exist_ok=True)
+          # Use half of primary ticks for gap sweep (comparative, not steady-state)
+          factor_ticks = max(50, int(os.environ.get('TICKS', str(fb.base_params['ticks']))) // 2)
+          fb.base_params['ticks'] = factor_ticks
+          print(f'Gap sweep using ticks={factor_ticks}')
           gap_results = {}
           for g in fb.GAP_SWEEP:
               d_ex, dlt_ex, d_er, dlt_er = fb._gap_d_delta(g)
