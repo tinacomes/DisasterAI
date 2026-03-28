@@ -1421,60 +1421,66 @@ def plot_gap_sweep(gap_results, save_dir):
     """2×2 figure: effect of cognitive polarisation (gap scalar g) at fixed α.
 
     For each g value we run the full alignment sweep and record α* (the
-    Goldilocks point) plus the minimum total_bubble achieved.  Two additional
-    panels show how steady-state SECI and AECI change with g.
+    Goldilocks point) plus the minimum normalised bubble composite achieved.
+    α* uses total_bubble_norm (range-normalised |SECI|+|AECI|) — the same
+    criterion as the main experiment — so g=1 (baseline) should reproduce
+    the same α* as the primary alignment sweep.
     """
-    g_values        = sorted(gap_results.keys())
-    best_alphas     = []
-    min_bubbles     = []
-    min_bubble_stds = []
-    seci_at_star    = []
-    seci_stds       = []
-    aeci_at_star    = []
-    aeci_stds       = []
+    g_values     = sorted(gap_results.keys())
+    best_alphas  = []
+    min_bubbles  = []
+    seci_at_star = []
+    seci_stds    = []
+    aeci_at_star = []
+    aeci_stds    = []
 
     for g in g_values:
         results_g = gap_results[g]['all_results']
         metrics_g = compute_goldilocks_metrics(results_g)
-        total_vals = [metrics_g[a]['total_bubble'] for a in ALIGNMENT_SWEEP]
-        idx = int(np.argmin(total_vals))
+        # Use the range-normalised composite — same criterion as the main sweep
+        norm_vals = [metrics_g[a]['total_bubble_norm'] for a in ALIGNMENT_SWEEP]
+        idx    = int(np.argmin(norm_vals))
         a_star = ALIGNMENT_SWEEP[idx]
         best_alphas.append(a_star)
-        min_bubbles.append(total_vals[idx])
-        min_bubble_stds.append(metrics_g[a_star]['seci_std'] + metrics_g[a_star]['aeci_std'])
+        min_bubbles.append(norm_vals[idx])
         seci_at_star.append(metrics_g[a_star]['seci'])
         seci_stds.append(metrics_g[a_star]['seci_std'])
         aeci_at_star.append(metrics_g[a_star]['aeci'])
         aeci_stds.append(metrics_g[a_star]['aeci_std'])
 
-    g_labels = [f'g={g}\n(D_ex={_D_MID-g*_D_HALF:.1f}, δ_ex={_DELTA_MID+g*_DELTA_HALF:.2f})'
-                for g in g_values]
+    def _g_label(g):
+        if g == 0.0:  return f'g={g:.1f}\n(homogeneous)'
+        if g == 1.0:  return f'g={g:.1f}\n(baseline ★)'
+        if g >= 1.4:  return f'g={g:.1f}\n(strongly polarised)'
+        return f'g={g:.1f}'
+    g_labels = [_g_label(g) for g in g_values]
     x = np.arange(len(g_values))
 
     fig, axes = plt.subplots(2, 2, figsize=(14, 10))
     fig.suptitle(
         'Cognitive Polarisation Sweep (gap scalar g)\n'
-        'g=0: no heterogeneity  |  g=1: baseline  |  g=1.5: strongly polarised',
-        fontsize=13, fontweight='bold',
+        'g=0: agents cognitively identical  |  g=1 ★: baseline (matches main experiment)'
+        '  |  g=1.5: strongly polarised\n'
+        f'(gap jobs: {N_FACTOR_RUNS} reps × factor_ticks; α* uses same normalised composite as main sweep)',
+        fontsize=11, fontweight='bold',
     )
 
     # Panel 1: α* vs g
     ax = axes[0, 0]
     ax.bar(x, best_alphas, color='steelblue', alpha=0.85, edgecolor='white')
-    ax.set_xticks(x); ax.set_xticklabels(g_labels, fontsize=8)
+    ax.set_xticks(x); ax.set_xticklabels(g_labels, fontsize=9)
     ax.set_ylabel('Goldilocks α*')
     ax.set_title('Goldilocks Point α* vs Cognitive Polarisation')
     ax.set_ylim(0, 1.05)
     ax.axhline(0.5, color='gray', linestyle=':', alpha=0.6, label='α=0.5')
     ax.legend(fontsize=9); ax.grid(True, alpha=0.3, axis='y')
 
-    # Panel 2: min total_bubble vs g
+    # Panel 2: min normalised bubble vs g (no error bars — N=2 too noisy)
     ax = axes[0, 1]
-    ax.bar(x, min_bubbles, yerr=min_bubble_stds, color='purple', alpha=0.75,
-           edgecolor='white', capsize=5, error_kw={'elinewidth': 1.5, 'ecolor': 'black'})
-    ax.set_xticks(x); ax.set_xticklabels(g_labels, fontsize=8)
-    ax.set_ylabel('min(|SECI| + |AECI|)')
-    ax.set_title('Minimum Total Bubble at α*\n(lower = Goldilocks zone is more effective)')
+    ax.bar(x, min_bubbles, color='purple', alpha=0.75, edgecolor='white')
+    ax.set_xticks(x); ax.set_xticklabels(g_labels, fontsize=9)
+    ax.set_ylabel('min(|SECI| + |AECI|)  range-normalised')
+    ax.set_title('Minimum Bubble Composite at α*\n(lower = Goldilocks zone more effective)')
     ax.grid(True, alpha=0.3, axis='y')
 
     # Panel 3: SECI at α* vs g
