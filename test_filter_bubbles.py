@@ -118,7 +118,11 @@ def _first_cross(series, threshold, direction='up'):
 def _first_sustained_break(series, form_thresh=-0.1, break_thresh=-0.05, sustain=5):
     """First index where series recovers above break_thresh *and stays there* for
     `sustain` consecutive non-NaN ticks after having formed below form_thresh.
-    Returns len(series) if the condition is never met.
+
+    Returns:
+        -1           if the series never dropped below form_thresh (chamber never formed)
+        len(series)  if a chamber formed but never subsequently recovered
+        i            the index of the first sustained recovery otherwise
     """
     formed = False
     for i, v in enumerate(series):
@@ -130,7 +134,7 @@ def _first_sustained_break(series, form_thresh=-0.1, break_thresh=-0.05, sustain
             window = [w for w in series[i:i + sustain] if not np.isnan(w)]
             if len(window) == sustain and all(w > break_thresh for w in window):
                 return i
-    return len(series)
+    return -1 if not formed else len(series)
 
 
 def _first_sustained_cross(series, threshold, sustain=5, direction='up'):
@@ -1123,10 +1127,11 @@ def plot_echo_chamber_lifecycle(all_results, save_dir):
         def _idx_to_tick(idx, mt_arr, n_t):
             return int(mt_arr[idx]) if idx < len(mt_arr) else n_t
 
-        when_exp.append(_idx_to_tick(
-            _first_sustained_break(list(se_mean), sustain=3), mt, n))
-        when_expl.append(_idx_to_tick(
-            _first_sustained_break(list(sr_mean), sustain=3), mt, n))
+        # _first_sustained_break returns -1 (never formed), len (formed/never recovered), or idx
+        raw_exp  = _first_sustained_break(list(se_mean), sustain=3)
+        raw_expl = _first_sustained_break(list(sr_mean), sustain=3)
+        when_exp.append( -1 if raw_exp  < 0 else _idx_to_tick(raw_exp,  mt, n))
+        when_expl.append(-1 if raw_expl < 0 else _idx_to_tick(raw_expl, mt, n))
 
         # Duration = fraction of ticks with SECI < CHAMBER_THRESH (scale-invariant)
         dur_exp.append(float(np.mean(se_mean < CHAMBER_THRESH)) if len(se_mean) else 0.0)
@@ -1172,19 +1177,28 @@ def plot_echo_chamber_lifecycle(all_results, save_dir):
     ax_peak.legend(fontsize=9); ax_peak.grid(True, alpha=0.3, axis='y')
 
     n_ticks_val = all_results[0]['n_ticks']
-    # Cap at n_ticks so "never recovered" bars still render clearly
-    when_exp_plot  = [min(v, n_ticks_val) for v in when_exp]
-    when_expl_plot = [min(v, n_ticks_val) for v in when_expl]
-    ax_when.bar(x - w/2, when_exp_plot,  w, label='Exploitative', color='#1A3A6B', alpha=0.85)
-    ax_when.bar(x + w/2, when_expl_plot, w, label='Exploratory',  color='#6BAED6', alpha=0.85)
-    # Annotate bars that never recovered with a "✗"
+    # -1 = never formed (no bar); n_ticks = formed but never recovered (bar at top + ✗)
+    when_exp_plot  = [max(v, 0) for v in when_exp]   # -1 → 0 so bar has zero height
+    when_expl_plot = [max(v, 0) for v in when_expl]
+    ax_when.bar(x - w/2, [min(v, n_ticks_val) for v in when_exp_plot],
+                w, label='Exploitative', color='#1A3A6B', alpha=0.85)
+    ax_when.bar(x + w/2, [min(v, n_ticks_val) for v in when_expl_plot],
+                w, label='Exploratory',  color='#6BAED6', alpha=0.85)
+    # Annotate: ○ = chamber never formed; ✗ = formed but never recovered
     for xi, (ve, vr) in enumerate(zip(when_exp, when_expl)):
-        if ve >= n_ticks_val:
-            ax_when.text(xi - w/2, min(ve, n_ticks_val) + 1, '✗', ha='center', fontsize=9)
-        if vr >= n_ticks_val:
-            ax_when.text(xi + w/2, min(vr, n_ticks_val) + 1, '✗', ha='center', fontsize=9)
-    ax_when.set_title('When Does Echo Chamber Recover?\n(first tick SECI sustains > −0.1)', fontsize=10)
-    ax_when.set_ylabel('Tick of first recovery (✗ = never)')
+        if ve == -1:
+            ax_when.text(xi - w/2, 2, '○', ha='center', fontsize=9, color='#1A3A6B')
+        elif ve >= n_ticks_val:
+            ax_when.text(xi - w/2, n_ticks_val + 1, '✗', ha='center', fontsize=9)
+        if vr == -1:
+            ax_when.text(xi + w/2, 2, '○', ha='center', fontsize=9, color='#6BAED6')
+        elif vr >= n_ticks_val:
+            ax_when.text(xi + w/2, n_ticks_val + 1, '✗', ha='center', fontsize=9)
+    ax_when.set_title(
+        'When Does Echo Chamber Recover?\n'
+        '(first tick SECI sustains > −0.1;  ○ = no chamber formed,  ✗ = formed, never recovered)',
+        fontsize=9)
+    ax_when.set_ylabel('Tick of first recovery')
     ax_when.set_ylim(0, n_ticks_val * 1.15)
     ax_when.set_xticks(x); ax_when.set_xticklabels(x_str)
     ax_when.set_xlabel('AI Alignment')
@@ -1353,8 +1367,8 @@ def plot_periphery_gap(all_results, metrics, save_dir):
 
     lodeg_mae = [_get(r, 'lodeg_mae') for r in all_results]
     hideg_mae = [_get(r, 'hideg_mae') for r in all_results]
-    lodeg_ai  = [_get(r, 'lodeg_ai')  for r in all_results]
-    hideg_ai  = [_get(r, 'hideg_ai')  for r in all_results]
+    lodeg_aid = [_get(r, 'lodeg_aid') for r in all_results]
+    hideg_aid = [_get(r, 'hideg_aid') for r in all_results]
 
     fig, axes = plt.subplots(2, 2, figsize=(13, 9))
     fig.suptitle(
@@ -1400,10 +1414,10 @@ def plot_periphery_gap(all_results, metrics, save_dir):
            'High degree (Q4)', 'Low degree (Q1)',
            'Belief MAE', 'Network periphery — Belief Accuracy\n(lower = better)')
 
-    _panel(axes[1, 1], hideg_ai, lodeg_ai,
+    _panel(axes[1, 1], hideg_aid, lodeg_aid,
            'High degree (Q4)', 'Low degree (Q1)',
-           'AI query fraction', 'Network periphery — AI Usage\n(higher = more AI queries)',
-           ylim=(0, 1))
+           'Avg aid tokens sent / agent',
+           'Network periphery — Aid Sent\n(higher = more relief delivered per agent)')
 
     plt.tight_layout()
     os.makedirs(save_dir, exist_ok=True)
