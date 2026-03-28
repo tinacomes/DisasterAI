@@ -1434,19 +1434,29 @@ def plot_periphery_gap(all_results, metrics, save_dir):
 def plot_gap_sweep(gap_results, save_dir):
     """2×2 figure: effect of cognitive polarisation (gap scalar g) at fixed α.
 
-    For each g value we run the full alignment sweep and record α* (the
-    Goldilocks point) plus the minimum normalised bubble composite achieved.
-    α* uses total_bubble_norm (range-normalised |SECI|+|AECI|) — the same
-    criterion as the main experiment — so g=1 (baseline) should reproduce
-    the same α* as the primary alignment sweep.
+    g linearly scales the cognitive difference between exploitative and exploratory
+    agents from a shared midpoint (D_mid=3.0, δ_mid=2.35):
+        d_exploit(g)     = 3.0 − g       δ_exploit(g) = 2.35 + 1.15·g
+        d_explor(g)      = 3.0 + g       δ_explor(g)  = 2.35 − 1.15·g
+    g=0 → all agents identical at (D=3.0, δ=2.35).
+    g=1 (baseline) → (D_ex=2.0, δ_ex=3.5) vs (D_er=4.0, δ_er=1.2).
+
+    α* uses total_bubble_norm so g=1 matches the primary alignment sweep.
+
+    Panel layout:
+      (0,0) α* bar chart — directly comparable across g
+      (0,1) Raw |SECI|+|AECI| at α* — directly comparable across g
+      (1,0) SECI at α* line plot (auto-scaled)
+      (1,1) MAE at α* line plot — operational outcome at the Goldilocks point
     """
     g_values     = sorted(gap_results.keys())
     best_alphas  = []
-    min_bubbles  = []
     seci_at_star = []
     seci_stds    = []
     aeci_at_star = []
     aeci_stds    = []
+    mae_at_star  = []
+    mae_stds     = []
 
     for g in g_values:
         results_g = gap_results[g]['all_results']
@@ -1456,48 +1466,69 @@ def plot_gap_sweep(gap_results, save_dir):
         idx    = int(np.argmin(norm_vals))
         a_star = ALIGNMENT_SWEEP[idx]
         best_alphas.append(a_star)
-        min_bubbles.append(norm_vals[idx])
         seci_at_star.append(metrics_g[a_star]['seci'])
         seci_stds.append(metrics_g[a_star]['seci_std'])
         aeci_at_star.append(metrics_g[a_star]['aeci'])
         aeci_stds.append(metrics_g[a_star]['aeci_std'])
+        mae_at_star.append(metrics_g[a_star]['mae'])
+        mae_stds.append(metrics_g[a_star]['mae_std'])
+
+    # Raw (un-normalised) bubble at α* — comparable across g
+    raw_bubble = [abs(s) + abs(a) for s, a in zip(seci_at_star, aeci_at_star)]
 
     def _g_label(g):
-        if g == 0.0:  return f'g={g:.1f}\n(homogeneous)'
-        if g == 1.0:  return f'g={g:.1f}\n(baseline ★)'
-        if g >= 1.4:  return f'g={g:.1f}\n(strongly polarised)'
+        d_ex, dlt_ex, d_er, dlt_er = _gap_d_delta(g)
+        if g == 0.0:
+            return f'g={g:.1f}\n(homogeneous midpoint\nD={d_ex:.1f}, δ={dlt_ex:.2f})'
+        if g == 1.0:
+            return (f'g={g:.1f}\n(baseline ★\nD_ex={d_ex:.1f}/D_er={d_er:.1f})')
+        if g >= 1.4:
+            return f'g={g:.1f}\n(strongly polarised)'
         return f'g={g:.1f}'
     g_labels = [_g_label(g) for g in g_values]
     x = np.arange(len(g_values))
 
-    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+    # Suptitle: dynamically show key parameter values
+    d0, dlt0, _, _ = _gap_d_delta(0.0)
+    d1_ex, dlt1_ex, d1_er, dlt1_er = _gap_d_delta(1.0)
+    d15_ex, dlt15_ex, d15_er, dlt15_er = _gap_d_delta(1.5)
+
+    fig, axes = plt.subplots(2, 2, figsize=(14, 11))
     fig.suptitle(
         'Cognitive Polarisation Sweep (gap scalar g)\n'
-        'g=0: agents cognitively identical  |  g=1 ★: baseline (matches main experiment)'
-        '  |  g=1.5: strongly polarised\n'
-        f'(gap jobs: {N_FACTOR_RUNS} reps × factor_ticks; α* uses same normalised composite as main sweep)',
-        fontsize=11, fontweight='bold',
+        f'g=0: all agents D={d0:.1f}, δ={dlt0:.2f} (homogeneous midpoint)  |  '
+        f'g=1★: D_ex={d1_ex:.1f}/δ_ex={dlt1_ex:.2f} vs D_er={d1_er:.1f}/δ_er={dlt1_er:.2f}  |  '
+        f'g=1.5: D_ex={d15_ex:.1f}/δ_ex={dlt15_ex:.2f} vs D_er={d15_er:.1f}/δ_er={dlt15_er:.2f}\n'
+        f'(gap jobs: {N_FACTOR_RUNS} reps × factor_ticks; α* via total_bubble_norm as in main sweep)',
+        fontsize=10, fontweight='bold',
     )
 
-    # Panel 1: α* vs g
+    # Panel 1: α* vs g (directly comparable)
     ax = axes[0, 0]
     ax.bar(x, best_alphas, color='steelblue', alpha=0.85, edgecolor='white')
-    ax.set_xticks(x); ax.set_xticklabels(g_labels, fontsize=9)
+    ax.set_xticks(x); ax.set_xticklabels(g_labels, fontsize=8)
     ax.set_ylabel('Goldilocks α*')
     ax.set_title('Goldilocks Point α* vs Cognitive Polarisation')
     ax.set_ylim(0, 1.05)
     ax.axhline(0.5, color='gray', linestyle=':', alpha=0.6, label='α=0.5')
     ax.legend(fontsize=9); ax.grid(True, alpha=0.3, axis='y')
 
-    # Panel 2: min normalised bubble vs g (no error bars — N=2 too noisy)
+    # Panel 2: Raw |SECI|+|AECI| at α* (directly comparable across g)
     ax = axes[0, 1]
-    ax.bar(x, min_bubbles, color='purple', alpha=0.75, edgecolor='white')
-    ax.set_xticks(x); ax.set_xticklabels(g_labels, fontsize=9)
-    ax.set_ylabel('min(|SECI| + |AECI|)  range-normalised')
-    ax.set_title('Minimum Bubble Composite at α*\n(lower = Goldilocks zone more effective)')
+    bars = ax.bar(x, raw_bubble, color='darkorchid', alpha=0.80, edgecolor='white')
+    # Mark g=1 baseline level
+    if 1.0 in g_values:
+        baseline_val = raw_bubble[g_values.index(1.0)]
+        ax.axhline(baseline_val, color='orange', linestyle='--', linewidth=1.5,
+                   label=f'g=1 baseline ({baseline_val:.3f})')
+        ax.legend(fontsize=8)
+    ax.set_xticks(x); ax.set_xticklabels(g_labels, fontsize=8)
+    ax.set_ylabel('|SECI| + |AECI|  at α*  (raw, not normalised)')
+    ax.set_title('Echo Chamber Strength at Goldilocks Point\n'
+                 '(lower = better; directly comparable across g)')
     ax.grid(True, alpha=0.3, axis='y')
 
-    # Panel 3: SECI at α* vs g
+    # Panel 3: SECI at α* vs g (auto-scaled to show actual variation)
     ax = axes[1, 0]
     seci_arr = np.array(seci_at_star)
     seci_std_arr = np.array(seci_stds)
@@ -1507,23 +1538,22 @@ def plot_gap_sweep(gap_results, save_dir):
     ax.axhline(0, color='k', linestyle=':', alpha=0.5)
     ax.set_xlabel('Gap scalar g')
     ax.set_ylabel('SECI at α*')
-    ax.set_title('Social Echo Chamber Strength at α*\n(negative = stronger bubble)')
-    ax.set_ylim(-1.1, 0.5)
+    ax.set_title('Social Echo Chamber Strength at α*\n(negative = stronger bubble; auto-scaled)')
     ax.legend(fontsize=9)
     ax.grid(True, alpha=0.3)
 
-    # Panel 4: AECI at α* vs g
+    # Panel 4: MAE at α* vs g — operational outcome at the Goldilocks point
     ax = axes[1, 1]
-    aeci_arr = np.array(aeci_at_star)
-    aeci_std_arr = np.array(aeci_stds)
-    ax.plot(g_values, aeci_arr, 'r-o', linewidth=2, markersize=8)
-    ax.fill_between(g_values, aeci_arr - aeci_std_arr, aeci_arr + aeci_std_arr,
-                    color='red', alpha=0.15, label='±1 SD')
+    mae_arr = np.array(mae_at_star)
+    mae_std_arr = np.array(mae_stds)
+    ax.plot(g_values, mae_arr, 'g-o', linewidth=2, markersize=8)
+    ax.fill_between(g_values, mae_arr - mae_std_arr, mae_arr + mae_std_arr,
+                    color='green', alpha=0.15, label='±1 SD')
     ax.axhline(0, color='k', linestyle=':', alpha=0.5)
     ax.set_xlabel('Gap scalar g')
-    ax.set_ylabel('AECI at α*')
-    ax.set_title('AI-Induced Bubble Strength at α*\n(negative = stronger AI bubble)')
-    ax.set_ylim(-1.1, 0.5)
+    ax.set_ylabel('Belief MAE at α*')
+    ax.set_title('Belief Accuracy at Goldilocks Point\n'
+                 '(lower = better; does polarisation hurt accuracy?)')
     ax.legend(fontsize=9)
     ax.grid(True, alpha=0.3)
 
