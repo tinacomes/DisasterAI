@@ -1305,28 +1305,51 @@ def plot_periphery_gap(all_results, metrics, save_dir):
     """
     2-row × 2-col figure showing how the periphery gap varies with α.
 
-    Left column  — spatial periphery (far Q4 vs near Q1 agents by distance
-                   to the disaster epicentre).
+    Left column  — spatial periphery (cell-based, from coverage_deficit_map and
+                   avg_aid_map).  Cells are split into near-epicentre (Q1 by
+                   distance) and far-epicentre (Q4) zones; no agent-position
+                   assumptions needed.
     Right column — network periphery (low-degree Q1 vs high-degree Q4 agents
                    in the Watts–Strogatz social network).
 
-    Row 1 — Belief MAE: are periphery agents less accurate?
-    Row 2 — AI-query fraction: do periphery agents compensate via AI?
-
-    A gap that shrinks toward α* is evidence that Goldilocks alignment
-    reduces structural inequality in situational awareness.
+    Row 1 — Coverage deficit (disaster − aid) near vs far: +ve = under-served.
+    Row 2 — Aid density (tokens/tick) near vs far  |  AI-query fraction by degree.
     """
     alphas = ALIGNMENT_SWEEP
-    total_vals  = [metrics[a]['total_bubble'] for a in alphas]
-    best_alpha  = alphas[int(np.argmin(total_vals))]
+    total_n = [metrics[a]['total_bubble_norm'] for a in alphas]
+    best_alpha = alphas[int(np.argmin(total_n))]
 
+    # ── Cell-based spatial metrics from stored map arrays ───────────────────
+    near_def, far_def     = [], []   # mean coverage deficit (disaster − aid)
+    near_aid_d, far_aid_d = [], []   # mean aid density (tokens / tick)
+
+    for res in all_results:
+        if 'coverage_deficit_map_mean' not in res or not res['coverage_deficit_map_mean']:
+            near_def.append(float('nan')); far_def.append(float('nan'))
+            near_aid_d.append(float('nan')); far_aid_d.append(float('nan'))
+            continue
+        deficit_map = np.array(res['coverage_deficit_map_mean'])
+        aid_map     = np.array(res['avg_aid_map_mean'])
+        ex, ey = res['epicenter']
+        H, W   = deficit_map.shape
+        Y, X   = np.mgrid[0:H, 0:W]
+        dist_map = np.sqrt((X - ex) ** 2 + (Y - ey) ** 2)
+
+        # Same quartile logic as the agent split: Q1 = nearest 25%, Q4 = farthest 25%
+        d_flat    = dist_map.flatten()
+        q1_thresh = np.percentile(d_flat, 25)
+        q3_thresh = np.percentile(d_flat, 75)
+        near_mask = dist_map <= q1_thresh
+        far_mask  = dist_map >= q3_thresh
+
+        near_def.append(float(np.nanmean(deficit_map[near_mask])))
+        far_def.append( float(np.nanmean(deficit_map[far_mask])))
+        near_aid_d.append(float(np.nanmean(aid_map[near_mask])))
+        far_aid_d.append( float(np.nanmean(aid_map[far_mask])))
+
+    # ── Network periphery from pre-computed agent scalars ───────────────────
     def _get(res, key):
         return float(res.get(f'{key}_mean', float('nan')))
-
-    near_mae  = [_get(r, 'near_mae')  for r in all_results]
-    far_mae   = [_get(r, 'far_mae')   for r in all_results]
-    near_ai   = [_get(r, 'near_ai')   for r in all_results]
-    far_ai    = [_get(r, 'far_ai')    for r in all_results]
 
     lodeg_mae = [_get(r, 'lodeg_mae') for r in all_results]
     hideg_mae = [_get(r, 'hideg_mae') for r in all_results]
@@ -1336,21 +1359,22 @@ def plot_periphery_gap(all_results, metrics, save_dir):
     fig, axes = plt.subplots(2, 2, figsize=(13, 9))
     fig.suptitle(
         'Periphery Gap across AI Alignment (α)\n'
-        'Left: spatial (far vs near epicentre)  |  Right: network degree (low vs high)',
+        'Left: spatial (cell-based near/far epicentre)  |  Right: network degree (low vs high)',
         fontsize=12, fontweight='bold'
     )
 
     def _panel(ax, core_vals, periph_vals, core_label, periph_label,
-                ylabel, title, ylim=None):
-        ax.plot(alphas, core_vals,   'o-', color='steelblue',  linewidth=2,
+                ylabel, title, ylim=None, hline=None):
+        ax.plot(alphas, core_vals,   'o-',  color='steelblue', linewidth=2,
                 label=core_label,   markersize=7)
         ax.plot(alphas, periph_vals, 's--', color='firebrick', linewidth=2,
                 label=periph_label, markersize=7)
-        # Shade the gap
         ax.fill_between(alphas, core_vals, periph_vals, alpha=0.12, color='orange',
-                         label='Gap')
+                        label='Gap')
         ax.axvline(best_alpha, color='gold', linestyle='--', linewidth=2,
                    label=f'α*={best_alpha}')
+        if hline is not None:
+            ax.axhline(hline, color='k', linestyle=':', linewidth=1, alpha=0.5)
         ax.set_xlabel('AI Alignment Level (α)')
         ax.set_ylabel(ylabel)
         ax.set_title(title)
@@ -1359,18 +1383,22 @@ def plot_periphery_gap(all_results, metrics, save_dir):
         ax.legend(fontsize=8)
         ax.grid(True, alpha=0.3)
 
-    _panel(axes[0, 0], near_mae, far_mae,
-           'Near epicentre (Q1)', 'Far epicentre (Q4)',
-           'Belief MAE', 'Spatial periphery — Belief Accuracy\n(lower = better)')
+    # Left column: cell-based spatial periphery
+    _panel(axes[0, 0], near_def, far_def,
+           'Near epicentre (Q1 cells)', 'Far epicentre (Q4 cells)',
+           'Coverage deficit (disaster − aid)',
+           'Spatial coverage deficit\n(+ve = under-served; −ve = over-served)',
+           hline=0)
 
+    _panel(axes[1, 0], near_aid_d, far_aid_d,
+           'Near epicentre (Q1 cells)', 'Far epicentre (Q4 cells)',
+           'Avg tokens / tick',
+           'Aid density near vs far epicentre\n(higher = more relief delivered)')
+
+    # Right column: network-degree periphery (agent-based, meaningful signal)
     _panel(axes[0, 1], hideg_mae, lodeg_mae,
            'High degree (Q4)', 'Low degree (Q1)',
            'Belief MAE', 'Network periphery — Belief Accuracy\n(lower = better)')
-
-    _panel(axes[1, 0], near_ai, far_ai,
-           'Near epicentre (Q1)', 'Far epicentre (Q4)',
-           'AI query fraction', 'Spatial periphery — AI Usage\n(higher = more AI queries)',
-           ylim=(0, 1))
 
     _panel(axes[1, 1], hideg_ai, lodeg_ai,
            'High degree (Q4)', 'Low degree (Q1)',
