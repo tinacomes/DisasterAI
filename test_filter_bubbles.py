@@ -1330,8 +1330,10 @@ def plot_periphery_gap(all_results, metrics, save_dir):
     Row 2 — Aid density (tokens/tick) near vs far  |  AI-query fraction by degree.
     """
     alphas = ALIGNMENT_SWEEP
-    total_n = [metrics[a]['total_bubble_norm'] for a in alphas]
-    best_alpha = alphas[int(np.argmin(total_n))]
+    total_n  = [metrics[a]['total_bubble_norm']  for a in alphas]
+    total_sn = [metrics[a]['total_score_norm']   for a in alphas]
+    best_alpha       = alphas[int(np.argmin(total_n))]   # α*(bubble)
+    best_alpha_score = alphas[int(np.argmin(total_sn))]  # α*(bubble + MAE)
 
     # ── Cell-based spatial metrics from stored map arrays ───────────────────
     near_def, far_def     = [], []   # mean coverage deficit (disaster − aid)
@@ -1386,7 +1388,9 @@ def plot_periphery_gap(all_results, metrics, save_dir):
         ax.fill_between(alphas, core_vals, periph_vals, alpha=0.12, color='orange',
                         label='Gap')
         ax.axvline(best_alpha, color='gold', linestyle='--', linewidth=2,
-                   label=f'α*={best_alpha}')
+                   label=f'α*(bubble)={best_alpha}')
+        ax.axvline(best_alpha_score, color='tomato', linestyle=':', linewidth=1.8,
+                   label=f'α*(+MAE)={best_alpha_score}')
         if hline is not None:
             ax.axhline(hline, color='k', linestyle=':', linewidth=1, alpha=0.5)
         ax.set_xlabel('AI Alignment Level (α)')
@@ -1409,10 +1413,22 @@ def plot_periphery_gap(all_results, metrics, save_dir):
            'Avg tokens / tick',
            'Aid density near vs far epicentre\n(higher = more relief delivered)')
 
-    # Right column: network-degree periphery (agent-based, meaningful signal)
+    # Right column: network-degree periphery
     _panel(axes[0, 1], hideg_mae, lodeg_mae,
            'High degree (Q4)', 'Low degree (Q1)',
-           'Belief MAE', 'Network periphery — Belief Accuracy\n(lower = better)')
+           'Belief MAE',
+           'Network periphery — Belief Accuracy\n'
+           '(lower = better; null result: WS topology equalises information access)')
+    # Annotate the null result explicitly so it reads as a finding, not a bug
+    axes[0, 1].annotate(
+        'Null result: degree does not predict\n'
+        'belief accuracy in small-world network.\n'
+        'WS k=4 → avg path ≈ log N: all nodes\n'
+        'equidistant in information-flow terms.',
+        xy=(0.04, 0.06), xycoords='axes fraction',
+        fontsize=7.5, color='#444444',
+        bbox=dict(boxstyle='round,pad=0.35', facecolor='lightyellow', alpha=0.85),
+    )
 
     _panel(axes[1, 1], hideg_aid, lodeg_aid,
            'High degree (Q4)', 'Low degree (Q1)',
@@ -1449,23 +1465,27 @@ def plot_gap_sweep(gap_results, save_dir):
       (1,0) SECI at α* line plot (auto-scaled)
       (1,1) MAE at α* line plot — operational outcome at the Goldilocks point
     """
-    g_values     = sorted(gap_results.keys())
-    best_alphas  = []
-    seci_at_star = []
-    seci_stds    = []
-    aeci_at_star = []
-    aeci_stds    = []
-    mae_at_star  = []
-    mae_stds     = []
+    g_values          = sorted(gap_results.keys())
+    best_alphas       = []   # α*(bubble):  argmin total_bubble_norm
+    best_score_alphas = []   # α*(+MAE):    argmin total_score_norm
+    seci_at_star      = []
+    seci_stds         = []
+    aeci_at_star      = []
+    aeci_stds         = []
+    mae_at_star       = []
+    mae_stds          = []
 
     for g in g_values:
         results_g = gap_results[g]['all_results']
         metrics_g = compute_goldilocks_metrics(results_g)
-        # Use the range-normalised composite — same criterion as the main sweep
+        # α*(bubble): same criterion as the main sweep
         norm_vals = [metrics_g[a]['total_bubble_norm'] for a in ALIGNMENT_SWEEP]
         idx    = int(np.argmin(norm_vals))
         a_star = ALIGNMENT_SWEEP[idx]
         best_alphas.append(a_star)
+        # α*(+MAE): operational composite (bubble + MAE penalty)
+        score_vals = [metrics_g[a]['total_score_norm'] for a in ALIGNMENT_SWEEP]
+        best_score_alphas.append(ALIGNMENT_SWEEP[int(np.argmin(score_vals))])
         seci_at_star.append(metrics_g[a_star]['seci'])
         seci_stds.append(metrics_g[a_star]['seci_std'])
         aeci_at_star.append(metrics_g[a_star]['aeci'])
@@ -1499,19 +1519,25 @@ def plot_gap_sweep(gap_results, save_dir):
         f'g=0: all agents D={d0:.1f}, δ={dlt0:.2f} (homogeneous midpoint)  |  '
         f'g=1★: D_ex={d1_ex:.1f}/δ_ex={dlt1_ex:.2f} vs D_er={d1_er:.1f}/δ_er={dlt1_er:.2f}  |  '
         f'g=1.5: D_ex={d15_ex:.1f}/δ_ex={dlt15_ex:.2f} vs D_er={d15_er:.1f}/δ_er={dlt15_er:.2f}\n'
-        f'(gap jobs: {N_FACTOR_RUNS} reps × factor_ticks; α* via total_bubble_norm as in main sweep)',
+        f'(gap jobs: {N_FACTOR_RUNS} reps × factor_ticks={factor_ticks} — '
+        f'late-run avg covers earlier phase than main sweep; magnitudes not directly comparable)',
         fontsize=10, fontweight='bold',
     )
 
-    # Panel 1: α* vs g (directly comparable)
+    # Panel 1: both α* criteria vs g — directly comparable across g
     ax = axes[0, 0]
-    ax.bar(x, best_alphas, color='steelblue', alpha=0.85, edgecolor='white')
+    w = 0.38
+    ax.bar(x - w/2, best_alphas,       w, label='α*(bubble)',
+           color='steelblue',  alpha=0.85, edgecolor='white')
+    ax.bar(x + w/2, best_score_alphas, w, label='α*(bubble+MAE)',
+           color='darkorange', alpha=0.85, edgecolor='white')
     ax.set_xticks(x); ax.set_xticklabels(g_labels, fontsize=8)
     ax.set_ylabel('Goldilocks α*')
-    ax.set_title('Goldilocks Point α* vs Cognitive Polarisation')
+    ax.set_title('Goldilocks α* vs Cognitive Polarisation\n'
+                 '(blue = bubble-only criterion; orange = bubble + MAE criterion)')
     ax.set_ylim(0, 1.05)
     ax.axhline(0.5, color='gray', linestyle=':', alpha=0.6, label='α=0.5')
-    ax.legend(fontsize=9); ax.grid(True, alpha=0.3, axis='y')
+    ax.legend(fontsize=8); ax.grid(True, alpha=0.3, axis='y')
 
     # Panel 2: Raw |SECI|+|AECI| at α* (directly comparable across g)
     ax = axes[0, 1]
