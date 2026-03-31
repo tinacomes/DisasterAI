@@ -281,6 +281,21 @@ def run_one_sim(params):
     hi_thresh = deg_vals[min(n_agents - 1, 3 * n_agents // 4)]
 
     ex, ey = model.epicenter           # grid coords of disaster centre
+
+    # Cell-based near/far scalars — computed with THIS run's epicentre so they
+    # aggregate correctly across replications (unlike averaging maps first).
+    _H, _W = coverage_deficit.shape
+    _Yg, _Xg = np.mgrid[0:_H, 0:_W]
+    _cell_dist = np.sqrt((_Xg - ex) ** 2 + (_Yg - ey) ** 2)
+    _cd_flat   = _cell_dist.flatten()
+    _cq1 = np.percentile(_cd_flat, 25)
+    _cq3 = np.percentile(_cd_flat, 75)
+    _near_mask = _cell_dist <= _cq1
+    _far_mask  = _cell_dist >= _cq3
+    near_cell_deficit = float(np.nanmean(coverage_deficit[_near_mask]))
+    far_cell_deficit  = float(np.nanmean(coverage_deficit[_far_mask]))
+    near_cell_aid     = float(np.nanmean(avg_aid[_near_mask]))
+    far_cell_aid      = float(np.nanmean(avg_aid[_far_mask]))
     all_dists  = []
     agent_data = []                    # (dist, degree, mae, ai_frac, aid_sent)
     for agent in model.agent_list:
@@ -376,6 +391,11 @@ def run_one_sim(params):
         'avg_disaster_map':     avg_disaster.tolist(),
         'avg_aid_map':          avg_aid.tolist(),
         'epicenter':            list(model.epicenter),
+        # Cell-based near/far scalars (correct per-run epicentre)
+        'near_cell_deficit': near_cell_deficit,
+        'far_cell_deficit':  far_cell_deficit,
+        'near_cell_aid':     near_cell_aid,
+        'far_cell_aid':      far_cell_aid,
         # Network-periphery scalars (spatial distance: near Q1 vs far Q4)
         'near_mae':   _m(near_mae),  'far_mae':   _m(far_mae),
         'near_ai':    _m(near_ai),   'far_ai':    _m(far_ai),
@@ -403,6 +423,7 @@ def _aggregate(runs):
         'seci_break_exploit',  'seci_break_explor',
         'ai_query50_exploit',  'ai_query50_explor',
         # Spatial / network-periphery scalars
+        'near_cell_deficit', 'far_cell_deficit', 'near_cell_aid', 'far_cell_aid',
         'near_mae', 'far_mae', 'near_ai', 'far_ai', 'near_aid', 'far_aid',
         'lodeg_mae', 'hideg_mae', 'lodeg_ai', 'hideg_ai', 'lodeg_aid', 'hideg_aid',
     ]
@@ -1325,10 +1346,10 @@ def plot_periphery_gap(all_results, metrics, save_dir):
     """
     2-row × 2-col figure showing how the periphery gap varies with α.
 
-    Left column  — spatial periphery (cell-based, from coverage_deficit_map and
-                   avg_aid_map).  Cells are split into near-epicentre (Q1 by
-                   distance) and far-epicentre (Q4) zones; no agent-position
-                   assumptions needed.
+    Left column  — spatial periphery (cell-based near/far scalars pre-computed
+                   per replication in run_one_sim(), then averaged).  Each run
+                   uses its own epicentre for the Q1/Q4 distance split, avoiding
+                   the blurring artefact of splitting the cross-run mean map.
     Right column — network periphery (low-degree Q1 vs high-degree Q4 agents
                    in the Watts–Strogatz social network).
 
@@ -1341,37 +1362,17 @@ def plot_periphery_gap(all_results, metrics, save_dir):
     best_alpha       = alphas[int(np.argmin(total_n))]   # α*(bubble)
     best_alpha_score = alphas[int(np.argmin(total_sn))]  # α*(bubble + MAE)
 
-    # ── Cell-based spatial metrics from stored map arrays ───────────────────
-    near_def, far_def     = [], []   # mean coverage deficit (disaster − aid)
-    near_aid_d, far_aid_d = [], []   # mean aid density (tokens / tick)
-
-    for res in all_results:
-        if 'coverage_deficit_map_mean' not in res or not res['coverage_deficit_map_mean']:
-            near_def.append(float('nan')); far_def.append(float('nan'))
-            near_aid_d.append(float('nan')); far_aid_d.append(float('nan'))
-            continue
-        deficit_map = np.array(res['coverage_deficit_map_mean'])
-        aid_map     = np.array(res['avg_aid_map_mean'])
-        ex, ey = res['epicenter']
-        H, W   = deficit_map.shape
-        Y, X   = np.mgrid[0:H, 0:W]
-        dist_map = np.sqrt((X - ex) ** 2 + (Y - ey) ** 2)
-
-        # Same quartile logic as the agent split: Q1 = nearest 25%, Q4 = farthest 25%
-        d_flat    = dist_map.flatten()
-        q1_thresh = np.percentile(d_flat, 25)
-        q3_thresh = np.percentile(d_flat, 75)
-        near_mask = dist_map <= q1_thresh
-        far_mask  = dist_map >= q3_thresh
-
-        near_def.append(float(np.nanmean(deficit_map[near_mask])))
-        far_def.append( float(np.nanmean(deficit_map[far_mask])))
-        near_aid_d.append(float(np.nanmean(aid_map[near_mask])))
-        far_aid_d.append( float(np.nanmean(aid_map[far_mask])))
-
-    # ── Network periphery from pre-computed agent scalars ───────────────────
+    # ── Cell-based spatial metrics — pre-computed per run in run_one_sim() ──
+    # Using per-run epicentre avoids the blurring bug: the mean maps average across
+    # replications with different epicentre positions, making post-hoc near/far
+    # splits against run-0's epicentre meaningless.
     def _get(res, key):
         return float(res.get(f'{key}_mean', float('nan')))
+
+    near_def  = [_get(r, 'near_cell_deficit') for r in all_results]
+    far_def   = [_get(r, 'far_cell_deficit')  for r in all_results]
+    near_aid_d = [_get(r, 'near_cell_aid')    for r in all_results]
+    far_aid_d  = [_get(r, 'far_cell_aid')     for r in all_results]
 
     lodeg_mae = [_get(r, 'lodeg_mae') for r in all_results]
     hideg_mae = [_get(r, 'hideg_mae') for r in all_results]
