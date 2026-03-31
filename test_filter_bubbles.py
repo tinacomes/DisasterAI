@@ -618,13 +618,14 @@ def plot_goldilocks(metrics, all_results, save_dir):
     else:
         print(f"  Operational α* (+MAE) = {best_alpha_score}  ✓ objectives agree")
 
-    use_box = N_RUNS > 1
+    use_box = all_results[0].get('n_runs', N_RUNS) > 1
+    n_actual = all_results[0].get('n_runs', N_RUNS)
     late_run_label = f'Late-run avg (last 75 ticks, {STEADY_STATE_WINDOW} samples)'
 
     fig, axes = plt.subplots(2, 3, figsize=(18, 10))
     fig.suptitle(
         f'Goldilocks AI Alignment (α*={best_alpha}) — '
-        f'{"boxplots" if use_box else "single run"}, N={N_RUNS} replications\n'
+        f'{"boxplots" if use_box else "single run"}, N={n_actual} replications\n'
         f'{late_run_label}',
         fontsize=13, fontweight='bold'
     )
@@ -726,7 +727,8 @@ def _plot_timeseries(all_results, save_dir, best_alpha=None):
 
     fig, axes = plt.subplots(3, 3, figsize=(18, 14))
     fig.suptitle(
-        f'Filter Bubble & Delivery Metrics Over Time  (mean ± std, N={N_RUNS})',
+        f'Filter Bubble & Delivery Metrics Over Time  '
+        f'(mean ± std, N={all_results[0].get("n_runs", N_RUNS)})',
         fontsize=13, fontweight='bold'
     )
     ax_seci_ex, ax_seci_er, ax_mae    = axes[0]
