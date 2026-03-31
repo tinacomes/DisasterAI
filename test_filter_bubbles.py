@@ -1044,24 +1044,21 @@ def plot_aeci_evolution(all_results, save_dir):
     colors = plt.cm.plasma(np.linspace(0.1, 0.9, len(ALIGNMENT_SWEEP)))
 
     fig, axes = plt.subplots(1, 2, figsize=(16, 6), sharey=True)
-    fig.suptitle(
-        'AI Query Preference Evolution\n(Agent shift from friends to AI)',
-        fontsize=13, fontweight='bold',
-    )
+    fig.suptitle('AI Query Preference Evolution', fontsize=13, fontweight='bold')
 
     for ax, key, title in [
         (axes[0], 'aeci_exploit', 'Exploitative Agents'),
         (axes[1], 'aeci_explor',  'Exploratory Agents'),
     ]:
         for color, (res, alpha) in zip(colors, zip(all_results, ALIGNMENT_SWEEP)):
-            mean = np.array(res[f'{key}_mean'])
-            std  = np.array(res[f'{key}_std'])
-            ticks = np.arange(len(mean))
+            mean  = np.array(res[f'{key}_mean'])
+            std   = np.array(res[f'{key}_std'])
+            ticks = np.array(res['metric_ticks'])
             ax.plot(ticks, mean, color=color, linewidth=2, label=f'AI Alignment={alpha}')
             ax.fill_between(ticks, mean - std, mean + std, color=color, alpha=0.18)
         ax.axhline(0.5, color='red', linestyle='--', linewidth=1.5, label='50% threshold')
         ax.set_xlabel('Simulation Tick')
-        ax.set_ylabel('AECI (AI Query Ratio)')
+        ax.set_ylabel('AI Query Ratio (cumulative)')
         ax.set_title(title)
         ax.set_ylim(0, 1.02)
         ax.legend(fontsize=8, loc='upper left')
@@ -1255,8 +1252,6 @@ def plot_spatial_coverage(all_results, metrics, save_dir):
     Row 1 — Coverage Deficit (avg_disaster − avg_aid): red = chronically
              under-served; blue = over-served relative to local severity.
     Row 2 — Average Aid Density: how many tokens per tick reached each cell.
-
-    The epicenter is marked with a white star on every panel.
     """
     alphas = ALIGNMENT_SWEEP
     best_bubble = alphas[int(np.argmin([metrics[a]['total_bubble_norm'] for a in alphas]))]
@@ -1292,7 +1287,6 @@ def plot_spatial_coverage(all_results, metrics, save_dir):
 
     for col, alpha in enumerate(show_alphas):
         res = result_map.get(alpha)
-        ex, ey = res['epicenter'] if res else [0, 0]
 
         ax_def = axes[0, col] if ncols > 1 else axes[0]
         ax_aid = axes[1, col] if ncols > 1 else axes[1]
@@ -1314,16 +1308,11 @@ def plot_spatial_coverage(all_results, metrics, save_dir):
 
             im1 = ax_def.imshow(deficit, origin='lower', cmap='RdBu_r',
                                 vmin=-vdef, vmax=vdef, aspect='auto')
-            ax_def.plot(ex, ey, '*', color='white', markersize=14,
-                        markeredgecolor='black', markeredgewidth=0.8,
-                        label='Epicentre')
             plt.colorbar(im1, ax=ax_def, fraction=0.046, pad=0.04,
                          label='Deficit (disaster − aid)')
 
             im2 = ax_aid.imshow(aid_map, origin='lower', cmap='Blues',
                                 vmin=0, vmax=vaid, aspect='auto')
-            ax_aid.plot(ex, ey, '*', color='gold', markersize=14,
-                        markeredgecolor='black', markeredgewidth=0.8)
             plt.colorbar(im2, ax=ax_aid, fraction=0.046, pad=0.04,
                          label='Avg tokens / tick')
         else:
