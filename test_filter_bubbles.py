@@ -1236,12 +1236,11 @@ def plot_spatial_coverage(all_results, metrics, save_dir):
     The epicenter is marked with a white star on every panel.
     """
     alphas = ALIGNMENT_SWEEP
-    total_vals = [metrics[a]['total_bubble'] for a in alphas]
-    best_alpha  = alphas[int(np.argmin(total_vals))]
+    best_bubble = alphas[int(np.argmin([metrics[a]['total_bubble_norm'] for a in alphas]))]
+    best_score  = alphas[int(np.argmin([metrics[a]['total_score_norm']  for a in alphas]))]
 
-    # Choose three representative α values
-    show_alphas = [0.0, best_alpha, 1.0]
-    # De-duplicate while preserving order
+    # Show baseline + both Goldilocks optima; de-duplicate if they coincide
+    show_alphas = [0.0, best_score, best_bubble]
     seen = set()
     show_alphas = [a for a in show_alphas if not (a in seen or seen.add(a))]
     ncols = len(show_alphas)
@@ -1275,9 +1274,16 @@ def plot_spatial_coverage(all_results, metrics, save_dir):
         ax_def = axes[0, col] if ncols > 1 else axes[0]
         ax_aid = axes[1, col] if ncols > 1 else axes[1]
 
-        label = f'α={alpha:.1f}'
-        if alpha == best_alpha:
-            label += '  ← α*'
+        if alpha == 0.0:
+            label = f'α={alpha:.1f}  (no alignment)'
+        elif alpha == best_score and alpha == best_bubble:
+            label = f'α={alpha:.1f}  ← α* (both criteria)'
+        elif alpha == best_score:
+            label = f'α={alpha:.1f}  ← α*(+MAE)'
+        elif alpha == best_bubble:
+            label = f'α={alpha:.1f}  ← α*(bubble)'
+        else:
+            label = f'α={alpha:.1f}'
 
         if res and 'coverage_deficit_map_mean' in res:
             deficit = np.array(res['coverage_deficit_map_mean']).T  # transpose: x→col, y→row
@@ -1405,35 +1411,24 @@ def plot_periphery_gap(all_results, metrics, save_dir):
     _panel(axes[0, 0], near_def, far_def,
            'Near epicentre (Q1 cells)', 'Far epicentre (Q4 cells)',
            'Coverage deficit (disaster − aid)',
-           'Spatial coverage deficit\n(+ve = under-served; −ve = over-served)',
+           'Spatial Coverage Deficit',
            hline=0)
 
     _panel(axes[1, 0], near_aid_d, far_aid_d,
            'Near epicentre (Q1 cells)', 'Far epicentre (Q4 cells)',
            'Avg tokens / tick',
-           'Aid density near vs far epicentre\n(higher = more relief delivered)')
+           'Aid Density near vs far Epicentre')
 
     # Right column: network-degree periphery
     _panel(axes[0, 1], hideg_mae, lodeg_mae,
            'High degree (Q4)', 'Low degree (Q1)',
            'Belief MAE',
-           'Network periphery — Belief Accuracy\n'
-           '(lower = better; null result: WS topology equalises information access)')
-    # Annotate the null result explicitly so it reads as a finding, not a bug
-    axes[0, 1].annotate(
-        'Null result: degree does not predict\n'
-        'belief accuracy in small-world network.\n'
-        'WS k=4 → avg path ≈ log N: all nodes\n'
-        'equidistant in information-flow terms.',
-        xy=(0.04, 0.06), xycoords='axes fraction',
-        fontsize=7.5, color='#444444',
-        bbox=dict(boxstyle='round,pad=0.35', facecolor='lightyellow', alpha=0.85),
-    )
+           'Network Periphery — Belief Accuracy')
 
     _panel(axes[1, 1], hideg_aid, lodeg_aid,
            'High degree (Q4)', 'Low degree (Q1)',
            'Avg aid tokens sent / agent',
-           'Network periphery — Aid Sent\n(higher = more relief delivered per agent)')
+           'Network Periphery — Aid Sent per Agent')
 
     plt.tight_layout()
     os.makedirs(save_dir, exist_ok=True)
