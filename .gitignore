@@ -1,2 +1,8 @@
 __pycache__/
+*.pyc
 analysis_plots/
+agent_model_results/
+test_results/
+results/
+*.json
+.DS_Store
