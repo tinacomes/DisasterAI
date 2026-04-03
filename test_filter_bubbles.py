@@ -1654,8 +1654,13 @@ if __name__ == '__main__':
     )
     parser.add_argument(
         '--skip-gap', action='store_true',
-        help='Skip the gap-scalar sweep (4g × 6α × N_FACTOR_RUNS runs); '
-             'use when running the gap sweep in a separate parallel CI job.',
+        help='Skip the gap-scalar sweep; use when running it in a separate parallel CI job.',
+    )
+    parser.add_argument(
+        '--gap-only', action='store_true',
+        help='Re-run only the gap-scalar sweep (N_GAP_RUNS replications, full ticks) '
+             'and regenerate the gap sweep figure.  Loads all other results from '
+             '--results-file so the remaining plots are not affected.',
     )
     parser.add_argument(
         '--primary-only', action='store_true',
@@ -1845,6 +1850,45 @@ if __name__ == '__main__':
         print(f"Loading results from {args.results_file} …")
         all_results, rumor_results, disaster_results, mix_results, gap_results = load_results(args.results_file)
         print("Loaded. Regenerating plots …\n")
+    elif args.gap_only:
+        if os.path.exists(args.results_file):
+            print(f"Loading existing primary/factor results from {args.results_file} …")
+            all_results, rumor_results, disaster_results, mix_results, _ = load_results(args.results_file)
+            print("Loaded. Re-running gap sweep only.\n")
+        else:
+            raise FileNotFoundError(
+                f'Results file {args.results_file!r} not found. '
+                'Run the full experiment first, then use --gap-only to rerun just the gap sweep.'
+            )
+        print('=' * 70)
+        print(f'GAP-SCALAR SWEEP ONLY  (N_GAP_RUNS={N_GAP_RUNS}, full ticks={base_params["ticks"]})')
+        print('=' * 70)
+        gap_results = {}
+        for g in GAP_SWEEP:
+            d_ex, dlt_ex, d_er, dlt_er = _gap_d_delta(g)
+            print(f"\n--- g={g}: D_exploit={d_ex:.2f}, δ_exploit={dlt_ex:.2f}, "
+                  f"D_explor={d_er:.2f}, δ_explor={dlt_er:.2f} ---")
+            g_alpha_results = []
+            for alpha in ALIGNMENT_SWEEP:
+                params = {
+                    **base_params,
+                    'ai_alignment_level': alpha,
+                    'd_exploit':    d_ex,
+                    'delta_exploit': dlt_ex,
+                    'd_explor':     d_er,
+                    'delta_explor': dlt_er,
+                }
+                g_alpha_results.append(
+                    run_replicated(params, N_GAP_RUNS, f'g={g} α={alpha:.1f}')
+                )
+            gap_results[g] = {'all_results': g_alpha_results}
+        save_results(all_results, rumor_results, disaster_results, mix_results,
+                     gap_results, args.results_file)
+        # Plot only the gap figure and exit
+        metrics = compute_goldilocks_metrics(all_results)
+        plot_gap_sweep(gap_results, save_dir)
+        print('\nGap sweep figure regenerated. Other plots unchanged.')
+        import sys; sys.exit(0)
     elif args.primary_only:
         if os.path.exists(args.results_file):
             print(f"Loading existing factor/gap results from {args.results_file} …")
