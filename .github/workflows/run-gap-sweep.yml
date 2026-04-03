@@ -1,0 +1,85 @@
+name: Run Gap Sweep only
+
+# Re-runs only the 4g × 11α × N_GAP_RUNS cognitive polarisation sweep.
+# Use this after the primary experiment is already done and you only
+# want to regenerate gap_sweep.png (e.g. after fixing the N or ticks).
+#
+# Trigger: GitHub → Actions → "Run Gap Sweep only" → Run workflow
+on:
+  workflow_dispatch:
+    inputs:
+      ticks:
+        description: "Simulation ticks per run (must match your primary sweep)"
+        required: false
+        default: "200"
+
+env:
+  MPLBACKEND: Agg
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+
+  # ── One job per g value — all four run in parallel ──────────────────
+  gap-g:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        g: ["0.0", "0.5", "1.0", "1.5"]
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: publication
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11", cache: "pip"}
+      - run: pip install -r requirements.txt
+
+      - name: Run gap scalar g=${{ matrix.g }}
+        run: |
+          mkdir -p filter_bubble_results
+          python3 test_filter_bubbles.py \
+            --single-gap ${{ matrix.g }} \
+            --out-file filter_bubble_results/bubble_gap_${{ matrix.g }}.json \
+            --ticks ${{ inputs.ticks }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gap-g-${{ matrix.g }}
+          path: filter_bubble_results/bubble_gap_${{ matrix.g }}.json
+          retention-days: 30
+
+  # ── Collect all four g results and plot ─────────────────────────────
+  plot:
+    needs: gap-g
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: publication
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11", cache: "pip"}
+      - run: pip install -r requirements.txt
+
+      - name: Download gap result artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: gap-g-*
+          path: filter_bubble_results
+          merge-multiple: true
+
+      - name: Generate gap_sweep.png
+        run: |
+          python3 test_filter_bubbles.py \
+            --collect-gap-and-plot \
+            --results-dir filter_bubble_results \
+            --save-dir plots
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gap-sweep-figure
+          path: plots/gap_sweep.png
+          retention-days: 30

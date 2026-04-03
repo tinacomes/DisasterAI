@@ -1,67 +1,86 @@
 % ============================================================
-%  METHODS  —  paste inside your methods section
-%  Requires: amsmath, booktabs, array, xspace (standard)
+%  METHODS  (revised)
+%  Drop-in replacement for the methods section.
+%  Requires: amsmath, booktabs, tikz, tikzlibraries {arrows.meta, positioning, shapes.geometric}
 % ============================================================
 
 \section{Methods}
 
-\subsection{Simulation Model}
+This paper aims to explore how heterogeneous information sources and dynamic trust
+relationships influence collective decision-making in disaster response.
+To this end, an agent-based model is built that combines opinion dynamics frameworks
+with a reinforcement-learning decision layer that captures the opportunities and
+challenges of human-AI interaction in crises.
+The model simulates decentralised disaster relief efforts where human agents,
+characterised by distinct behavioural types, interact with human and AI information
+sources to allocate emergency resources across a spatial environment.
 
-We develop an agent-based model (ABM) of disaster response in which human agents
-form beliefs about local disaster severity, seek information from social contacts
-or an AI source, and dispatch relief tokens accordingly.
-ABMs are well suited to this setting because filter-bubble phenomena emerge from
-the interaction of individual heuristics and network structure rather than from
-aggregate equilibria \citep{Epstein2006,Axelrod1997}.
-Unlike equation-based or compartmental models that assume homogeneous mixing, the
-framework here supports heterogeneous agent types, explicit social networks, and a
-spatially explicit disaster environment --- all of which are necessary to capture
-the near/far coverage gradient and degree-based periphery effects that are our
-secondary outcomes.
+The agent-based modelling (ABM) approach allows us to analyse the trade-offs between
+AI adoption, resulting situational awareness, filter-bubble formation, and relief
+performance.
+By identifying the \emph{Goldilocks zone} where AI alignment transitions from
+amplifying to mitigating filter bubbles, we contribute insights to ongoing discussions
+on trustworthy AI and objective trade-offs in morally charged crisis-management
+scenarios.
+The model expands established opinion dynamics frameworks \citep{geschke2019triple}
+to incorporate the challenges of human-AI interaction in crisis contexts.
 
-The environment is a $30\times30$ grid in which a disaster evolves over discrete
-ticks.
-Each cell carries a severity level between 0 (no impact) and 5 (critical),
-initialised as a Gaussian decay from a randomly placed epicentre.
-At every tick each cell drifts stochastically towards its baseline value and
-receives random shocks (probability $0.10$, magnitude $\pm2$ levels), producing a
-non-stationary information landscape that prevents agents from converging to a
-single correct belief and forces ongoing information-seeking throughout the
-simulation.
+% ============================================================
+\section{Modelling Framework}
 
-One hundred human agents are distributed on the grid ($N=100$, fixed to keep the
-network tractable while preserving meaningful community structure).
-Agents belong to one of two cognitive types, each occupying equal shares of the
-population by default.
-\emph{Exploitative} agents are confirmation-seeking: they have a narrow acceptance
-window $D=2.0$ and a steep acceptance-sensitivity parameter $\delta=3.5$, making
-them resistant to information that diverges substantially from their prior.
-\emph{Exploratory} agents are accuracy-seeking: $D=4.0$ and $\delta=1.2$ give
-them a wide, gradual acceptance curve that admits novel information.
-These two archetypes map onto documented individual differences in information
-processing under uncertainty \citep{HertwigEngel2016,March1991} and have been
-used in prior disaster-response ABMs to represent the range between cautious,
-community-focused responders and risk-tolerant, discovery-oriented ones.
+The simulation is situated on a $30\times30$ grid where disaster severity varies from
+level~0 (no damage) to level~5 (critical need).
+Human agents of two behavioural types---exploitative and exploratory---navigate this
+environment alongside AI agents that provide variable-quality information.
+The model proceeds in discrete time steps where agents sequentially sense their
+immediate environment, seek information from social or AI sources, and allocate
+relief tokens to perceived high-need locations.
 
-The social network is constructed to reflect type-homogeneous community structure:
-exploitative agents are wired predominantly within their own cluster, exploratory
-agents within theirs, with no enforced cross-type edges.
-This follows empirical evidence of homophily in disaster communication networks
-\citep{Bruns2012,Sutton2008} and ensures that the Social Echo Chamber Index
-(Section~\ref{sec:metrics}) captures genuine community-level belief convergence
-rather than individual coincidences.
+The choice of Q-learning for source selection and precision-weighted Bayesian updating
+for belief revision represents a novel integration of reinforcement learning and
+probabilistic reasoning in opinion dynamics modelling.
+While traditional opinion dynamics models such as \citet{deffuant2000mixing} and
+\citet{hegselmann2002opinion} typically assume simple averaging or binary bounded
+confidence, our approach captures the strategic dimension of information seeking and
+the uncertainty inherent in emergency decision-making.
+This methodology bridges classical models in social physics with contemporary
+frameworks for modelling human-AI interaction.
 
-Five AI agents serve the community, each sensing 15\% of the grid per tick.
-Agents query sources using an $\varepsilon$-greedy Q-learning strategy
-($\varepsilon=0.30$, learning rate $\eta=0.10$), selecting among querying a social
-contact, querying the AI, or acting on current beliefs.
-Exploitative agents receive delayed outcome feedback (15--25 ticks) when their
-relief tokens are processed; exploratory agents also receive faster
-information-quality feedback, producing a dual-timeline reward structure that
-generates more realistic trust trajectories than single-signal models
-\citep{Fu2023}.
+% ============================================================
+\subsection{Agent Architecture}
 
-\subsection{AI Alignment and Belief Dynamics}
+Human agents maintain cognitive representations comprising individual belief maps
+about disaster severity across all grid locations and trust profiles for each
+potential information source.
+Each agent operates with a Q-learning table encoding the expected value of
+consulting different source modes (AI, social contact, self-action), while trust
+values reflect accumulated assessments of source accuracy and reliability.
+
+Although both exploitative and exploratory agents share the same direct-sensing
+radius (own cell only), they differ in \emph{interest-point targeting}: exploitative
+agents focus their information-seeking on the \emph{believed epicentre}---the
+cell they currently judge most critical---while exploratory agents direct queries
+towards the \emph{highest-uncertainty area}, the cell whose belief has the greatest
+unresolved variance.
+This distinction, rather than a difference in raw sensing range, produces the
+divergence in information strategies: exploitative agents confirm and refine a focal
+assessment, while exploratory agents actively reduce epistemic uncertainty.
+
+The two types also differ in their acceptance parameters (Table~\ref{tab:S2}).
+Exploitative agents have a narrow acceptance window ($D=2.0$) and steep
+sensitivity ($\delta=3.5$), making them resistant to information that departs
+substantially from their prior.
+Exploratory agents have a wide, gradual acceptance curve ($D=4.0$, $\delta=1.2$)
+that readily incorporates novel reports.
+These archetypes map onto documented individual differences in information
+processing under uncertainty \citep{HertwigEngel2016,March1991}.
+
+AI agents complement the system by sensing 15\% of the grid per tick and responding
+to human queries with reports whose truth content is controlled by the alignment
+parameter $\alpha$ (Section~\ref{sec:alignment}).
+
+% ============================================================
+\subsection{Information Diffusion Mechanisms}
 \label{sec:alignment}
 
 The alignment parameter $\alpha\in[0,1]$ governs the truthfulness of AI reports.
@@ -77,23 +96,67 @@ belief.
 At $\alpha=0$ the AI reports ground truth; at $\alpha=1$ it perfectly confirms the
 agent's prior; intermediate values interpolate linearly.
 This formulation isolates the confirmation effect from other AI failure modes
-(latency, coverage, bias), enabling a clean sweep across the
-truth--confirmation spectrum.
+(latency, coverage, bias), enabling a clean sweep across the truth--confirmation
+spectrum.
 
-Upon receiving a report from any source, an agent updates its belief via a
-Bayesian acceptance mechanism.
-The probability of accepting a report depends on its distance from the current
-belief:
+\begin{figure}[h]
+\centering
+\begin{tikzpicture}[
+    node distance=1.1cm and 2cm,
+    every node/.style={font=\sffamily\small, align=center},
+    process/.style={rectangle, draw, fill=blue!10, text width=4.2cm,
+                    minimum height=1cm, rounded corners},
+    decision/.style={diamond, draw, fill=orange!10, text width=2.2cm,
+                     inner sep=0pt, aspect=2},
+    arrow/.style={-{Stealth[scale=1.2]}, thick}
+]
+
+\node (start)  [circle, draw, fill=gray!20]                             {Start};
+\node (step1)  [process, below=of start]
+    {\textbf{1. Sense Environment}\\Radius: 0 (own cell only)\\Noise: 8\%};
+\node (step2)  [decision, below=of step1, yshift=-0.4cm]
+    {\textbf{2. Select Source}\\ $\varepsilon=0.30$};
+\node (step3)  [process, below=of step2, yshift=-0.4cm]
+    {\textbf{3. Query Source}\\(Self\,/\,Friend\,/\,AI)\\AI: Eq.\,\eqref{eq:alignment}};
+\node (step4)  [process, below=of step3]
+    {\textbf{4. Update Beliefs}\\Bayesian, precision-weighted\\Eq.\,\eqref{eq:acceptance}--\eqref{eq:bayesian}};
+\node (step5)  [process, below=of step4]
+    {\textbf{5. Send Relief}\\Top 5 cells ($L\!\geq\!3$)\\Queue reward};
+\node (step6)  [process, below=of step5]
+    {\textbf{6. Process Rewards}\\15--25 tick delay\\Update $Q$ \& Trust};
+\node (step7)  [process, below=of step6]
+    {\textbf{7. Apply Decay}\\Trust: type-specific rate\\$(0.015$ / $0.030)$};
+
+\draw [arrow] (start) -- (step1);
+\draw [arrow] (step1) -- (step2);
+\draw [arrow] (step2) -- (step3);
+\draw [arrow] (step3) -- (step4);
+\draw [arrow] (step4) -- (step5);
+\draw [arrow] (step5) -- (step6);
+\draw [arrow] (step6) -- (step7);
+\draw [arrow] (step7.west) -- ++(-1.6,0) |- (step1.west)
+    node[pos=0.25, left, rotate=90] {Next tick};
+\end{tikzpicture}
+\caption{Per-tick decision cycle for human agents.
+         Source selection uses an $\varepsilon$-greedy Q-learning strategy.
+         Belief updating follows the precision-weighted Bayesian mechanism
+         (Equations~\ref{eq:acceptance}--\ref{eq:bayesian}).
+         Reward processing is delayed 15--25 ticks to model logistical
+         pipelines; trust updates use agent-type-specific learning rates.}
+\label{fig:cycle}
+\end{figure}
+
+When agents receive a report $r$ from any source, they accept it with probability
 %
 \begin{equation}
-  P(\text{accept}) = \frac{D_{\mathrm{eff}}^{\delta}}{d^{\delta}+D_{\mathrm{eff}}^{\delta}},
-  \qquad d = |r - b|,
+  P(\text{accept}) = \frac{D_{\mathrm{eff}}^{\delta}}
+                          {|r-b|^{\delta}+D_{\mathrm{eff}}^{\delta}},
   \label{eq:acceptance}
 \end{equation}
 %
 where $D_{\mathrm{eff}} = D\cdot(1+0.5\,T_{\mathrm{source}})$ for social contacts
 (trust-widened) and $D_{\mathrm{eff}}=D$ for the AI.
-When a report is accepted, the posterior is precision-weighted:
+If the report is accepted, the posterior is precision-weighted:
 %
 \begin{equation}
   b' = \frac{\pi_{\mathrm{prior}}\,b + \pi_{\mathrm{source}}\,r}
@@ -101,108 +164,177 @@ When a report is accepted, the posterior is precision-weighted:
   \label{eq:bayesian}
 \end{equation}
 %
-with $\pi\propto c/(1-c)$ (odds of current confidence $c$), scaled by a
-type-specific factor (1.5 for exploitative, 0.8 for exploratory) that makes
-exploitative agents more resistant to belief revision.
+with $\pi\propto c/(1-c)$ (confidence odds), scaled by a type-specific factor
+(1.5 for exploitative, 0.8 for exploratory) that calibrates resistance to belief
+revision.
 This mechanism generalises the Deffuant bounded-confidence model
-\citep{Deffuant2000} by replacing a binary accept/reject threshold with a smooth
-probability curve and by coupling threshold width to the source's trust score,
-producing richer dynamics while remaining analytically interpretable.
+\citep{deffuant2000mixing} by replacing binary thresholding with a smooth
+probability curve and by coupling the effective threshold to dynamic source trust,
+producing richer dynamics while remaining analytically interpretable
+\citep{lorenz2017continuous}.
 
-\subsection{Echo-Chamber and Accuracy Metrics}
-\label{sec:metrics}
+When selecting information sources, agents employ an $\varepsilon$-greedy strategy
+($\varepsilon=0.30$) that balances exploration of unfamiliar sources with
+exploitation of trusted relationships.
+The social network is constructed with type-homogeneous community structure:
+exploitative agents are wired predominantly within their own cluster, exploratory
+agents within theirs, with no enforced cross-type edges.
+This follows empirical evidence of homophily in disaster communication networks
+\citep{Bruns2012,Sutton2008}.
 
-We define three primary outcomes.
-The \textbf{Social Echo Chamber Index (SECI)} captures the extent to which an
-agent's social neighbourhood is epistemically insular:
+% ============================================================
+\subsection{Trust Evolution}
+
+Trust dynamics emerge from two parallel processes: direct observation of
+information accuracy and reinforcement learning based on relief outcomes.
+The trust update mechanism combines immediate feedback from ground-truth comparisons
+with delayed rewards from the effectiveness of relief allocation.
+This dual-track approach captures both the cognitive updating of source reliability
+assessments and the pragmatic evaluation of information utility for decision support.
+
+The model uses asymmetric trust learning rates across agent types:
+exploitative agents update trust slowly ($\mathrm{lr}=0.015$), consistent with
+their confirmation-seeking profile; exploratory agents update more rapidly
+($\mathrm{lr}=0.030$), reflecting their higher sensitivity to new evidence.
+This behavioural heterogeneity produces emergent trust differentiation that
+significantly influences collective performance under varying alignment conditions.
+
+% ============================================================
+\subsection{Echo Chamber Quantification}
+
+The Social Echo Chamber Index (SECI) measures within-community belief homogeneity
+relative to population-wide variance, following the approach of
+\citet{cinelli2021echo}.
+Because the social network is type-homogeneous, SECI is computed separately for
+each connected component (community) and then averaged by agent type.
+For a community with internal belief variance $V_c$ and global population variance
+$V_g$:
 %
 \begin{equation}
-  \mathrm{SECI} = 1 - \frac{\mathrm{Var}\!\left(\text{beliefs of friends}\right)}
-                            {\mathrm{Var}\!\left(\text{beliefs of all agents}\right)}.
+  \mathrm{SECI} =
+  \begin{cases}
+    \displaystyle\max\!\left(-1,\;\frac{V_c - V_g}{V_g}\right)
+      & V_c < V_g \quad\text{(echo chamber)}, \\[8pt]
+    \displaystyle\min\!\left(+1,\;\frac{V_c - V_g}{V_{\max} - V_g}\right)
+      & V_c \geq V_g \quad\text{(anti-echo)},
+  \end{cases}
   \label{eq:seci}
 \end{equation}
 %
-$\mathrm{SECI}<0$ indicates that friends hold more homogeneous beliefs than the
-global population (echo chamber); $\mathrm{SECI}=0$ is the null;
-$\mathrm{SECI}>0$ indicates friends are more diverse (anti-echo).
-Computed every five ticks and reported separately for each agent type, SECI is a
-network-normalised measure that does not conflate individual accuracy with
-community insularity.
-Alternative formulations based on opinion fragmentation
-\citep{Bail2018} or information entropy \citep{Sasahara2021} were considered; the
-variance ratio was preferred because it has a natural zero, is comparable across
-agent types, and maps directly onto the information-theoretic notion of surprise
-that motivates the Bayesian update in Equation~\eqref{eq:bayesian}.
+where $V_{\max}=5.0$ is the maximum possible variance on the $[0,5]$ severity
+scale.
+$\mathrm{SECI}<0$ indicates community beliefs are more homogeneous than the global
+pool (echo chamber); $\mathrm{SECI}=0$ is the null; $\mathrm{SECI}>0$ indicates
+the community is more internally diverse (anti-echo).
+The piecewise normalisation keeps the index symmetric on $[-1,+1]$ without
+assuming that the maximum possible variance equals the global variance.
 
-The \textbf{AI Echo Chamber Index (AECI)} measures the fraction of all accepted
-information updates that originate from AI sources during any five-tick window:
+Alternative formulations based on opinion fragmentation \citep{Bail2018} or
+information entropy \citep{Sasahara2021} were considered; the variance-based
+approach was preferred because it has a natural zero, is directly comparable across
+agent types, and maps onto the precision terms in the Bayesian update
+(Equation~\ref{eq:bayesian}).
+
+The AI Echo Chamber Index (AECI) measures the fraction of information updates
+that are actually absorbed from AI sources within each five-tick window:
 %
 \begin{equation}
-  \mathrm{AECI} = \frac{\text{accepted}_{\mathrm{AI}}}
-                       {\text{accepted}_{\mathrm{AI}} + \text{accepted}_{\mathrm{human}}}.
+  \mathrm{AECI} = \frac{\Delta q_{\mathrm{AI}}}
+                       {\Delta q_{\mathrm{AI}} + \Delta q_{\mathrm{human}}},
   \label{eq:aeci}
 \end{equation}
 %
-Unlike a simple query-count ratio, this tracks whether AI information is actually
-absorbed into beliefs, distinguishing reliance from mere querying.
+where $\Delta q$ counts D$\delta$-accepted updates during the window.
+Unlike a simple query-count ratio, this formulation distinguishes
+\emph{reliance}---AI information that passes the acceptance threshold and
+revises beliefs---from mere querying, which may be rejected without effect.
 High AECI signals over-dependence on a potentially confirming source, regardless
 of how often human contacts are also consulted.
 
-\textbf{Belief accuracy (MAE)} is the mean absolute error between agent beliefs
-and true severity, averaged over cells with non-zero severity and over both agent
-types, sampled every five ticks.
-MAE enters the analysis as an operational criterion: a Goldilocks alignment should
-not merely suppress echo chambers but also maintain adequate situational awareness
-for effective relief delivery.
+% ============================================================
+\subsection{Relief Allocation and Performance Evaluation}
 
-To locate the optimal alignment level we construct two composite scores over the
-steady-state window (last 75 simulation ticks).
-Both use range normalisation across the alignment sweep so that each component
-contributes on a $[0,1]$ scale:
+Agents allocate relief tokens to the top five cells they judge to have severity
+$L\geq3$.
+Exploitative agents score cells by confidence-weighted severity; exploratory agents
+add an uncertainty-reduction term that rewards directing resources to cells with
+high epistemic ambiguity.
+Token placement effectiveness is evaluated through delayed reward signals
+(15--25 ticks) that compare allocated resources against actual need distributions
+at the time of delivery.
+
+Performance metrics encompass belief accuracy (mean absolute error against ground
+truth), targeting precision (fraction of tokens directed to cells with actual
+severity $\geq3$), unmet critical needs (cells with severity $\geq4$ receiving zero
+tokens per tick), and spatial coverage deficit (per-cell shortfall averaged near
+and far from the disaster epicentre).
+Together these measures capture both efficiency and equity dimensions of disaster
+response, crucial for evaluating the downstream consequences of information flow.
+
+% ============================================================
+\subsection{Experimental Framework}
+
+The study implements two core experiments and a set of sensitivity sweeps.
+
+\paragraph{Goldilocks alignment sweep.}
+The primary experiment sweeps $\alpha$ across eleven levels ($0.0,0.1,\ldots,1.0$)
+with $N=20$ independent replications per level.
+Replications differ in epicentre location, agent initialisation, and stochastic
+shock sequences.
+Optimal alignment is identified by two composite scores, both constructed over the
+steady-state window (last 75 of 200 ticks) using range normalisation across the
+sweep so each component contributes on a $[0,1]$ scale:
 %
 \begin{align}
-  \text{total\_bubble}_{\mathrm{norm}}(\alpha)
+  \text{total\_bubble}(\alpha)
     &= |\mathrm{SECI}|_{\mathrm{norm}}(\alpha)
-       + |\mathrm{AECI}|_{\mathrm{norm}}(\alpha),
-  \label{eq:bubble} \\
-  \text{total\_score}_{\mathrm{norm}}(\alpha)
+       + |\mathrm{AECI}|_{\mathrm{norm}}(\alpha), \label{eq:bubble}\\
+  \text{total\_score}(\alpha)
     &= |\mathrm{SECI}|_{\mathrm{norm}}(\alpha)
        + |\mathrm{AECI}|_{\mathrm{norm}}(\alpha)
-       + \mathrm{MAE}_{\mathrm{norm}}(\alpha).
-  \label{eq:score}
+       + \mathrm{MAE}_{\mathrm{norm}}(\alpha). \label{eq:score}
 \end{align}
 %
-The Goldilocks optimum $\alpha^*$ is the alignment level that minimises
-$\text{total\_bubble}_{\mathrm{norm}}$; $\alpha^*(+\mathrm{MAE})$ is the
-minimiser of $\text{total\_score}_{\mathrm{norm}}$.
+The Goldilocks optimum $\alpha^*$ minimises total\_bubble; $\alpha^*(+\mathrm{MAE})$
+minimises total\_score.
 Reporting both criteria makes the trade-off between echo-chamber suppression and
-epistemic accuracy explicit.
+belief accuracy explicit.
 
-\subsection{Experimental Design}
+\paragraph{Cognitive gap sweep.}
+A secondary experiment varies the cognitive gap scalar $g\in\{0.0,0.5,1.0,1.5\}$,
+which scales the divergence between exploitative and exploratory acceptance
+parameters from a shared midpoint while preserving their ordinal relationship
+($D_{\mathrm{exploit}}<D_{\mathrm{explor}}$,
+$\delta_{\mathrm{exploit}}>\delta_{\mathrm{explor}}$).
+At $g=0$ both types are cognitively identical, providing a null condition for
+heterogeneity effects; $g=1$ recovers the baseline calibration
+(Table~\ref{tab:S4}).
+This sweep tests whether $\alpha^*$ is robust to within-population cognitive
+diversity.
 
-The primary experiment sweeps $\alpha$ across eleven levels
-($0.0,0.1,\ldots,1.0$) with $N=20$ independent replications per level, each
-using a different random seed.
-Replications differ in epicentre location, agent initialisation, and stochastic
-shock sequences, ensuring that results reflect systematic effects of alignment
-rather than single-run artefacts.
-Boxplots across replications are shown for all steady-state scalar outcomes.
+\paragraph{Factor sensitivity sweeps.}
+One-at-a-time sweeps over agent-type composition, disaster dynamics, and rumour
+probability (detailed in Table~\ref{tab:S8}) test the generalisability of the
+Goldilocks finding across environmental and population variation.
 
-A secondary experiment varies the \emph{cognitive gap scalar}
-$g\in\{0.0,0.5,1.0,1.5\}$, which scales the difference between exploitative and
-exploratory acceptance parameters from a shared midpoint
-($D_{\mathrm{mid}}=3.0$, $\delta_{\mathrm{mid}}=2.35$) while preserving the
-invariant $D_{\mathrm{exploit}}<D_{\mathrm{explor}}$ and
-$\delta_{\mathrm{exploit}}>\delta_{\mathrm{explor}}$.
-At $g=0$ both agent types are cognitively identical, providing a null condition
-for heterogeneity effects; at $g=1$ the parameters recover the baseline
-calibration.
-This sweep tests whether $\alpha^*$ is robust to the degree of within-population
-cognitive diversity.
+Statistical analysis employs non-parametric methods to handle non-normal
+performance distributions across the 20 replications, while time-series analysis
+tracks the evolution of trust and bubble metrics throughout each crisis scenario.
+Spatial and network periphery analyses decompose outcomes by distance to the
+disaster epicentre (nearest vs.\ furthest quartile of cells) and by social-network
+degree (Q1 vs.\ Q4 agents) to examine whether alignment benefits are equitably
+distributed.
 
-Spatial and network periphery analyses decompose outcomes by proximity to the
-disaster epicentre (nearest-quartile vs.\ furthest-quartile cells) and by
-social-network degree (Q1 vs.\ Q4 agents).
-These periphery gaps address whether alignment benefits are equitably distributed
-or concentrated among well-connected, centrally located actors --- a key equity
-concern in humanitarian AI applications.
+% ============================================================
+\subsection{Technical Implementation}
+
+The model is implemented in Python~3.11 using the Mesa~3.x framework for agent
+scheduling, NetworkX for community detection and social-network analysis, and
+NumPy / Matplotlib for computation and visualisation.
+All simulation runs are seeded via \texttt{numpy.random.seed(run\_index)},
+ensuring bit-for-bit reproducibility.
+Results are serialised to JSON after each $(\alpha, \text{run})$ cell; the
+plotting pipeline reads these files without re-running the simulation, so all
+figures can be regenerated without recomputation.
+Full parameter tables and software dependencies are provided in the supplementary
+materials (Tables~S1--S2, S9).

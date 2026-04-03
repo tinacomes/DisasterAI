@@ -70,7 +70,10 @@ ALIGNMENT_SWEEP    = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
 STEADY_STATE_WINDOW = 15
 
 N_RUNS        = 10   # replications for primary alignment sweep
-N_FACTOR_RUNS = 2    # replications for factor sweeps
+N_FACTOR_RUNS = 2    # replications for one-at-a-time factor sweeps (rumour, disaster, mix)
+N_GAP_RUNS    = 10   # replications for cognitive gap sweep — needs more than factor sweeps
+                     # because α* is selected by argmin of a noisy 11-point composite curve;
+                     # N=2 gives SE ≈ σ/√2 ≈ 70% of std, making argmin essentially random
 
 FACTOR_ALPHA       = 0.5
 RUMOR_SWEEP        = [0.0, 0.5, 1.0]
@@ -1465,14 +1468,20 @@ def plot_gap_sweep(gap_results, save_dir):
     for g in g_values:
         results_g = gap_results[g]['all_results']
         metrics_g = compute_goldilocks_metrics(results_g)
-        # α*(bubble): same criterion as the main sweep
-        norm_vals = [metrics_g[a]['total_bubble_norm'] for a in ALIGNMENT_SWEEP]
-        idx    = int(np.argmin(norm_vals))
+        # α*(bubble): use RAW (un-normalised) |SECI| + |AECI| as the criterion.
+        # Range-normalised scores amplify noise when N is small: a single outlier
+        # at one α level rescales the whole curve and makes argmin jump arbitrarily.
+        # Raw scores are on a stable absolute scale and are already shown in panel 2.
+        raw_vals = [abs(metrics_g[a]['seci']) + abs(metrics_g[a]['aeci'])
+                    for a in ALIGNMENT_SWEEP]
+        idx    = int(np.argmin(raw_vals))
         a_star = ALIGNMENT_SWEEP[idx]
         best_alphas.append(a_star)
-        # α*(+MAE): operational composite (bubble + MAE penalty)
-        score_vals = [metrics_g[a]['total_score_norm'] for a in ALIGNMENT_SWEEP]
-        best_score_alphas.append(ALIGNMENT_SWEEP[int(np.argmin(score_vals))])
+        # α*(+MAE): raw bubble + raw MAE (same rationale — avoid normalisation noise)
+        raw_score_vals = [abs(metrics_g[a]['seci']) + abs(metrics_g[a]['aeci'])
+                          + metrics_g[a]['mae']
+                          for a in ALIGNMENT_SWEEP]
+        best_score_alphas.append(ALIGNMENT_SWEEP[int(np.argmin(raw_score_vals))])
         seci_at_star.append(metrics_g[a_star]['seci'])
         seci_stds.append(metrics_g[a_star]['seci_std'])
         aeci_at_star.append(metrics_g[a_star]['aeci'])
@@ -1506,8 +1515,8 @@ def plot_gap_sweep(gap_results, save_dir):
         f'g=0: all agents D={d0:.1f}, δ={dlt0:.2f} (homogeneous midpoint)  |  '
         f'g=1★: D_ex={d1_ex:.1f}/δ_ex={dlt1_ex:.2f} vs D_er={d1_er:.1f}/δ_er={dlt1_er:.2f}  |  '
         f'g=1.5: D_ex={d15_ex:.1f}/δ_ex={dlt15_ex:.2f} vs D_er={d15_er:.1f}/δ_er={dlt15_er:.2f}\n'
-        f'(gap jobs: {N_FACTOR_RUNS} reps × factor_ticks={factor_ticks} — '
-        f'late-run avg covers earlier phase than main sweep; magnitudes not directly comparable)',
+        f'(gap jobs: {N_GAP_RUNS} reps × {gap_results[g_values[0]]["all_results"][0].get("n_ticks", "?")} ticks — '
+        f'α* selected on raw |SECI|+|AECI| to avoid normalisation noise at small N)',
         fontsize=10, fontweight='bold',
     )
 
@@ -1645,8 +1654,13 @@ if __name__ == '__main__':
     )
     parser.add_argument(
         '--skip-gap', action='store_true',
-        help='Skip the gap-scalar sweep (4g × 6α × N_FACTOR_RUNS runs); '
-             'use when running the gap sweep in a separate parallel CI job.',
+        help='Skip the gap-scalar sweep; use when running it in a separate parallel CI job.',
+    )
+    parser.add_argument(
+        '--gap-only', action='store_true',
+        help='Re-run only the gap-scalar sweep (N_GAP_RUNS replications, full ticks) '
+             'and regenerate the gap sweep figure.  Loads all other results from '
+             '--results-file so the remaining plots are not affected.',
     )
     parser.add_argument(
         '--primary-only', action='store_true',
@@ -1671,12 +1685,17 @@ if __name__ == '__main__':
     )
     parser.add_argument(
         '--out-file', default=None,
-        help='Output JSON path for --single-alpha mode.',
+        help='Output JSON path for --single-alpha / --single-gap mode.',
     )
     parser.add_argument(
         '--collect-and-plot', action='store_true',
         help='Load per-alpha JSONs from --results-dir, run factor sweeps, '
              'and produce all plots.  Used after the parallel --single-alpha jobs.',
+    )
+    parser.add_argument(
+        '--collect-gap-and-plot', action='store_true',
+        help='Load bubble_gap_*.json files from --results-dir and regenerate '
+             'gap_sweep.png only.  Used after parallel --single-gap CI jobs.',
     )
     parser.add_argument(
         '--results-dir', default='filter_bubble_results',
@@ -1760,12 +1779,12 @@ if __name__ == '__main__':
     if args.single_gap is not None:
         g = args.single_gap
         d_ex, dlt_ex, d_er, dlt_er = _gap_d_delta(g)
-        factor_base_sg = {**base_params, 'ticks': factor_ticks}
-        print(f'Single-gap mode: g={g}, ticks={factor_ticks}, n_runs={N_FACTOR_RUNS}')
+        gap_base_sg = {**base_params}   # full ticks — gap sweep needs full warm-up
+        print(f'Single-gap mode: g={g}, ticks={base_params["ticks"]}, n_runs={N_GAP_RUNS}')
         g_alpha_results = []
         for alpha in ALIGNMENT_SWEEP:
             params = {
-                **factor_base_sg,
+                **gap_base_sg,
                 'ai_alignment_level': alpha,
                 'd_exploit':    d_ex,
                 'delta_exploit': dlt_ex,
@@ -1773,13 +1792,32 @@ if __name__ == '__main__':
                 'delta_explor': dlt_er,
             }
             g_alpha_results.append(
-                run_replicated(params, N_FACTOR_RUNS, f'g={g} α={alpha:.1f}')
+                run_replicated(params, N_GAP_RUNS, f'g={g} α={alpha:.1f}')
             )
         out = args.out_file or f'filter_bubble_results/bubble_gap_{g}.json'
         os.makedirs(os.path.dirname(out) or '.', exist_ok=True)
         with open(out, 'w') as f:
             json.dump({'gap': g, 'all_results': g_alpha_results}, f)
         print(f'Saved → {out}')
+        import sys; sys.exit(0)
+
+    # ------------------------------------------------------------------
+    # Mode: --collect-gap-and-plot  (gap sweep CI collect step)
+    # ------------------------------------------------------------------
+    if args.collect_gap_and_plot:
+        import glob as _glob
+        results_dir = args.results_dir
+        gap_results = {}
+        for path in sorted(_glob.glob(os.path.join(results_dir, 'bubble_gap_*.json'))):
+            with open(path) as f:
+                d = json.load(f)
+            gap_results[float(d['gap'])] = {'all_results': d['all_results']}
+        if not gap_results:
+            raise FileNotFoundError(f'No bubble_gap_*.json files found in {results_dir}')
+        print(f'Loaded gap results for g={sorted(gap_results)}')
+        os.makedirs(save_dir, exist_ok=True)
+        plot_gap_sweep(gap_results, save_dir)
+        print('gap_sweep.png saved.')
         import sys; sys.exit(0)
 
     # ------------------------------------------------------------------
@@ -1836,6 +1874,45 @@ if __name__ == '__main__':
         print(f"Loading results from {args.results_file} …")
         all_results, rumor_results, disaster_results, mix_results, gap_results = load_results(args.results_file)
         print("Loaded. Regenerating plots …\n")
+    elif args.gap_only:
+        if os.path.exists(args.results_file):
+            print(f"Loading existing primary/factor results from {args.results_file} …")
+            all_results, rumor_results, disaster_results, mix_results, _ = load_results(args.results_file)
+            print("Loaded. Re-running gap sweep only.\n")
+        else:
+            raise FileNotFoundError(
+                f'Results file {args.results_file!r} not found. '
+                'Run the full experiment first, then use --gap-only to rerun just the gap sweep.'
+            )
+        print('=' * 70)
+        print(f'GAP-SCALAR SWEEP ONLY  (N_GAP_RUNS={N_GAP_RUNS}, full ticks={base_params["ticks"]})')
+        print('=' * 70)
+        gap_results = {}
+        for g in GAP_SWEEP:
+            d_ex, dlt_ex, d_er, dlt_er = _gap_d_delta(g)
+            print(f"\n--- g={g}: D_exploit={d_ex:.2f}, δ_exploit={dlt_ex:.2f}, "
+                  f"D_explor={d_er:.2f}, δ_explor={dlt_er:.2f} ---")
+            g_alpha_results = []
+            for alpha in ALIGNMENT_SWEEP:
+                params = {
+                    **base_params,
+                    'ai_alignment_level': alpha,
+                    'd_exploit':    d_ex,
+                    'delta_exploit': dlt_ex,
+                    'd_explor':     d_er,
+                    'delta_explor': dlt_er,
+                }
+                g_alpha_results.append(
+                    run_replicated(params, N_GAP_RUNS, f'g={g} α={alpha:.1f}')
+                )
+            gap_results[g] = {'all_results': g_alpha_results}
+        save_results(all_results, rumor_results, disaster_results, mix_results,
+                     gap_results, args.results_file)
+        # Plot only the gap figure and exit
+        metrics = compute_goldilocks_metrics(all_results)
+        plot_gap_sweep(gap_results, save_dir)
+        print('\nGap sweep figure regenerated. Other plots unchanged.')
+        import sys; sys.exit(0)
     elif args.primary_only:
         if os.path.exists(args.results_file):
             print(f"Loading existing factor/gap results from {args.results_file} …")
@@ -1904,6 +1981,7 @@ if __name__ == '__main__':
             print('GAP-SCALAR SWEEP  (cognitive polarisation: g ∈ ' + str(GAP_SWEEP) + ')')
             print('=' * 70)
             gap_results = {}
+            gap_base = {**base_params}   # full ticks — gap sweep needs same warm-up as primary
             for g in GAP_SWEEP:
                 d_ex, dlt_ex, d_er, dlt_er = _gap_d_delta(g)
                 print(f"\n--- g={g}: D_exploit={d_ex:.2f}, δ_exploit={dlt_ex:.2f}, "
@@ -1911,7 +1989,7 @@ if __name__ == '__main__':
                 g_alpha_results = []
                 for alpha in ALIGNMENT_SWEEP:
                     params = {
-                        **factor_base,          # uses factor_ticks, not primary ticks
+                        **gap_base,
                         'ai_alignment_level': alpha,
                         'd_exploit':    d_ex,
                         'delta_exploit': dlt_ex,
@@ -1919,7 +1997,7 @@ if __name__ == '__main__':
                         'delta_explor': dlt_er,
                     }
                     g_alpha_results.append(
-                        run_replicated(params, N_FACTOR_RUNS,
+                        run_replicated(params, N_GAP_RUNS,
                                        f'g={g} α={alpha:.1f}')
                     )
                 gap_results[g] = {'all_results': g_alpha_results}
