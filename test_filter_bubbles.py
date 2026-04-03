@@ -1685,12 +1685,17 @@ if __name__ == '__main__':
     )
     parser.add_argument(
         '--out-file', default=None,
-        help='Output JSON path for --single-alpha mode.',
+        help='Output JSON path for --single-alpha / --single-gap mode.',
     )
     parser.add_argument(
         '--collect-and-plot', action='store_true',
         help='Load per-alpha JSONs from --results-dir, run factor sweeps, '
              'and produce all plots.  Used after the parallel --single-alpha jobs.',
+    )
+    parser.add_argument(
+        '--collect-gap-and-plot', action='store_true',
+        help='Load bubble_gap_*.json files from --results-dir and regenerate '
+             'gap_sweep.png only.  Used after parallel --single-gap CI jobs.',
     )
     parser.add_argument(
         '--results-dir', default='filter_bubble_results',
@@ -1794,6 +1799,25 @@ if __name__ == '__main__':
         with open(out, 'w') as f:
             json.dump({'gap': g, 'all_results': g_alpha_results}, f)
         print(f'Saved → {out}')
+        import sys; sys.exit(0)
+
+    # ------------------------------------------------------------------
+    # Mode: --collect-gap-and-plot  (gap sweep CI collect step)
+    # ------------------------------------------------------------------
+    if args.collect_gap_and_plot:
+        import glob as _glob
+        results_dir = args.results_dir
+        gap_results = {}
+        for path in sorted(_glob.glob(os.path.join(results_dir, 'bubble_gap_*.json'))):
+            with open(path) as f:
+                d = json.load(f)
+            gap_results[float(d['gap'])] = {'all_results': d['all_results']}
+        if not gap_results:
+            raise FileNotFoundError(f'No bubble_gap_*.json files found in {results_dir}')
+        print(f'Loaded gap results for g={sorted(gap_results)}')
+        os.makedirs(save_dir, exist_ok=True)
+        plot_gap_sweep(gap_results, save_dir)
+        print('gap_sweep.png saved.')
         import sys; sys.exit(0)
 
     # ------------------------------------------------------------------
