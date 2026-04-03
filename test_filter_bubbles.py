@@ -71,7 +71,7 @@ STEADY_STATE_WINDOW = 15
 
 N_RUNS        = 10   # replications for primary alignment sweep
 N_FACTOR_RUNS = 2    # replications for one-at-a-time factor sweeps (rumour, disaster, mix)
-N_GAP_RUNS    = 10   # replications for cognitive gap sweep — needs more than factor sweeps
+N_GAP_RUNS    = 20   # replications for cognitive gap sweep — matches N_RUNS so normalised α* is stable
                      # because α* is selected by argmin of a noisy 11-point composite curve;
                      # N=2 gives SE ≈ σ/√2 ≈ 70% of std, making argmin essentially random
 
@@ -1447,7 +1447,8 @@ def plot_gap_sweep(gap_results, save_dir):
     g=0 → all agents identical at (D=3.0, δ=2.35).
     g=1 (baseline) → (D_ex=2.0, δ_ex=3.5) vs (D_er=4.0, δ_er=1.2).
 
-    α* uses total_bubble_norm so g=1 matches the primary alignment sweep.
+    α* uses the same range-normalised criteria (total_bubble_norm / total_score_norm)
+    as the primary alignment sweep, so g=1.0 reproduces the baseline α*.
 
     Panel layout:
       (0,0) α* bar chart — directly comparable across g
@@ -1468,20 +1469,15 @@ def plot_gap_sweep(gap_results, save_dir):
     for g in g_values:
         results_g = gap_results[g]['all_results']
         metrics_g = compute_goldilocks_metrics(results_g)
-        # α*(bubble): use RAW (un-normalised) |SECI| + |AECI| as the criterion.
-        # Range-normalised scores amplify noise when N is small: a single outlier
-        # at one α level rescales the whole curve and makes argmin jump arbitrarily.
-        # Raw scores are on a stable absolute scale and are already shown in panel 2.
-        raw_vals = [abs(metrics_g[a]['seci']) + abs(metrics_g[a]['aeci'])
-                    for a in ALIGNMENT_SWEEP]
-        idx    = int(np.argmin(raw_vals))
+        # α* uses the same range-normalised criteria as the primary alignment sweep
+        # (total_bubble_norm / total_score_norm) so g=1.0 reproduces the baseline α*.
+        # N_GAP_RUNS=20 matches N_RUNS, keeping normalisation stable.
+        norm_bubble_vals = [metrics_g[a]['total_bubble_norm'] for a in ALIGNMENT_SWEEP]
+        idx    = int(np.argmin(norm_bubble_vals))
         a_star = ALIGNMENT_SWEEP[idx]
         best_alphas.append(a_star)
-        # α*(+MAE): raw bubble + raw MAE (same rationale — avoid normalisation noise)
-        raw_score_vals = [abs(metrics_g[a]['seci']) + abs(metrics_g[a]['aeci'])
-                          + metrics_g[a]['mae']
-                          for a in ALIGNMENT_SWEEP]
-        best_score_alphas.append(ALIGNMENT_SWEEP[int(np.argmin(raw_score_vals))])
+        norm_score_vals  = [metrics_g[a]['total_score_norm']  for a in ALIGNMENT_SWEEP]
+        best_score_alphas.append(ALIGNMENT_SWEEP[int(np.argmin(norm_score_vals))])
         seci_at_star.append(metrics_g[a_star]['seci'])
         seci_stds.append(metrics_g[a_star]['seci_std'])
         aeci_at_star.append(metrics_g[a_star]['aeci'])
@@ -1516,7 +1512,7 @@ def plot_gap_sweep(gap_results, save_dir):
         f'g=1★: D_ex={d1_ex:.1f}/δ_ex={dlt1_ex:.2f} vs D_er={d1_er:.1f}/δ_er={dlt1_er:.2f}  |  '
         f'g=1.5: D_ex={d15_ex:.1f}/δ_ex={dlt15_ex:.2f} vs D_er={d15_er:.1f}/δ_er={dlt15_er:.2f}\n'
         f'(gap jobs: {N_GAP_RUNS} reps × {gap_results[g_values[0]]["all_results"][0].get("n_ticks", "?")} ticks — '
-        f'α* selected on raw |SECI|+|AECI| to avoid normalisation noise at small N)',
+        f'α* selected by range-normalised composite, matching primary sweep criterion)',
         fontsize=10, fontweight='bold',
     )
 
