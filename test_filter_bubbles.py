@@ -71,7 +71,7 @@ STEADY_STATE_WINDOW = 15
 
 N_RUNS        = 10   # replications for primary alignment sweep
 N_FACTOR_RUNS = 2    # replications for one-at-a-time factor sweeps (rumour, disaster, mix)
-N_GAP_RUNS    = 20   # replications for cognitive gap sweep — matches N_RUNS so normalised α* is stable
+N_GAP_RUNS    = 10   # replications for cognitive gap sweep; full 250-tick runs give stable steady-state, so N=10 suffices
                      # because α* is selected by argmin of a noisy 11-point composite curve;
                      # N=2 gives SE ≈ σ/√2 ≈ 70% of std, making argmin essentially random
 
