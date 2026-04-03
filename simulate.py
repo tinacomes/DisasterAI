@@ -59,16 +59,6 @@ def run_one(params):
     for tick in range(params['ticks']):
         model.step()
 
-        if model.seci_data:
-            s = model.seci_data[-1]
-            seci_exploit.append(float(s[1]))
-            seci_explor.append(float(s[2]))
-
-        if model.aeci_data:
-            a = model.aeci_data[-1]
-            aeci_exploit.append(float(a[1]))
-            aeci_explor.append(float(a[2]))
-
         # Per-tick AI query ratio (delta of cumulative accum_calls counters)
         ai_ex = tot_ex = ai_er = tot_er = 0
         for _ag in model.agent_list:
@@ -99,17 +89,30 @@ def run_one(params):
             _win_er_total += er_n
 
         if tick % 5 == 0:
+            # SECI and AECI: collect only at the same cadence as MAE/precision so
+            # they share the metric_ticks x-axis without repeated values between
+            # computation points (the model recomputes both every 5 ticks).
+            seci_exploit.append(float(model.seci_data[-1][1]) if model.seci_data else float('nan'))
+            seci_explor.append( float(model.seci_data[-1][2]) if model.seci_data else float('nan'))
+            aeci_exploit.append(float(model.aeci_data[-1][1]) if model.aeci_data else float('nan'))
+            aeci_explor.append( float(model.aeci_data[-1][2]) if model.aeci_data else float('nan'))
+
             ex_errors, er_errors = [], []
             for agent in model.agent_list:
                 if not isinstance(agent, HumanAgent):
                     continue
-                # Filter to informed beliefs only (exclude default L0 priors)
-                informed = [(c, b) for c, b in agent.beliefs.items()
-                            if isinstance(b, dict) and b.get('confidence', 0) > 0.1]
+                # MAE over actual disaster cells only (disaster_grid >= 1).
+                # This measures whether the agent FOUND the disaster, not whether
+                # they are confident about the majority of non-disaster cells.
+                # Filtering by confidence > 0.1 instead gave lower MAE at high α
+                # because confirming AI builds confidence on correct L0 (no-disaster)
+                # cells, dominating the average with 0-error entries.
+                disaster_beliefs = [(c, b) for c, b in agent.beliefs.items()
+                                    if isinstance(b, dict) and model.disaster_grid[c] >= 1]
                 err = float(np.mean([
                     abs(b.get('level', 0) - model.disaster_grid[c])
-                    for c, b in informed
-                ])) if informed else float('nan')
+                    for c, b in disaster_beliefs
+                ])) if disaster_beliefs else float('nan')
                 if agent.agent_type == 'exploitative':
                     ex_errors.append(err)
                 else:

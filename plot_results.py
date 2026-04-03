@@ -57,7 +57,8 @@ def load_and_aggregate(path):
         'condition': data['condition'],
         'n_runs':    data.get('n_runs', len(runs)),
         'metric_ticks': runs[0]['metric_ticks'],
-        'n_ticks':   len(runs[0]['seci_exploit']),
+        # seci/aeci now sampled at metric_ticks cadence; unmet_needs stays per-tick
+        'n_ticks':   len(runs[0]['unmet_needs']),
     }
     for key in keys:
         arrays = []
@@ -176,54 +177,103 @@ def plot_goldilocks(alpha_r, save_dir):
             for a in alphas
         ]
 
-    seci_ms  = ss_pair('seci_exploit', 'seci_explor')
-    aeci_ms  = ss_pair('aeci_exploit', 'aeci_explor')
-    mae_ms   = ss_pair('mae_exploit',  'mae_explor')
-    prec_ms  = ss_pair('prec_exploit', 'prec_explor')
-    unmet_ms = [(ss(alpha_r[a]['unmet_needs_mean']),
-                 ss(alpha_r[a]['unmet_needs_std'])) for a in alphas]
+    def ss_runs_pair(key_e, key_r=None):
+        """Per-run steady-state values averaged across exploit/explor, one list per alpha."""
+        key_r = key_r or key_e.replace('exploit', 'explor')
+        result = []
+        for a in alphas:
+            runs_e = alpha_r[a].get(f'{key_e}_ss_runs', [])
+            runs_r = alpha_r[a].get(f'{key_r}_ss_runs', [])
+            # Average exploit and explor per corresponding run index
+            n = max(len(runs_e), len(runs_r))
+            paired = []
+            for i in range(n):
+                ve = runs_e[i] if i < len(runs_e) else float('nan')
+                vr = runs_r[i] if i < len(runs_r) else float('nan')
+                paired.append(float(np.nanmean([ve, vr])))
+            result.append(paired)
+        return result
+
+    seci_ms   = ss_pair('seci_exploit', 'seci_explor')
+    aeci_ms   = ss_pair('aeci_exploit', 'aeci_explor')
+    mae_ms    = ss_pair('mae_exploit',  'mae_explor')
+    prec_ms   = ss_pair('prec_exploit', 'prec_explor')
+    unmet_ms  = [(ss(alpha_r[a]['unmet_needs_mean']),
+                  ss(alpha_r[a]['unmet_needs_std'])) for a in alphas]
+
+    seci_runs  = ss_runs_pair('seci_exploit', 'seci_explor')
+    aeci_runs  = ss_runs_pair('aeci_exploit', 'aeci_explor')
+    mae_runs   = ss_runs_pair('mae_exploit',  'mae_explor')
+    prec_runs  = ss_runs_pair('prec_exploit', 'prec_explor')
+    unmet_runs = [alpha_r[a].get('unmet_needs_ss_runs', []) for a in alphas]
 
     total_vals = [abs(s) + abs(ae) for (s, _), (ae, _) in zip(seci_ms, aeci_ms)]
     best_alpha = alphas[int(np.nanargmin(total_vals))]
-    n_label = f', N={n_runs} per level' if n_runs else ''
+    n_label = f'N={n_runs} replications per level' if n_runs else 'N=1'
 
     fig, axes = plt.subplots(2, 3, figsize=(18, 10))
     fig.suptitle(
-        f'Goldilocks AI Alignment (α*={best_alpha}) — mean ± std{n_label}',
+        f'Goldilocks AI Alignment (α*={best_alpha}) — quantiles per α  ({n_label})',
         fontsize=13, fontweight='bold'
     )
 
-    def ep(ax, ms_list, color, ylabel, title, ylim=(None, None)):
+    def ep(ax, ms_list, runs_list, color, ylabel, title, ylim=(None, None), hline=None):
+        """Scatter dots per alpha (no connecting line).  Boxplots when N > 1."""
         means = [m for m, _ in ms_list]
         stds  = [s for _, s in ms_list]
-        _eb(ax, alphas, means, stds, color)
+        use_box = n_runs and n_runs > 1 and any(len(r) > 1 for r in runs_list)
+        if use_box:
+            # Boxplot at each alpha position; positions are alpha values
+            bp = ax.boxplot(
+                [r for r in runs_list],
+                positions=alphas,
+                widths=max(0.04, (max(alphas) - min(alphas)) / len(alphas) * 0.4),
+                patch_artist=True,
+                showfliers=True,
+                manage_ticks=False,
+            )
+            for patch in bp['boxes']:
+                patch.set_facecolor(color)
+                patch.set_alpha(0.4)
+            for element in ('whiskers', 'caps', 'medians', 'fliers'):
+                for item in bp[element]:
+                    item.set_color(color)
+            # Mark the mean with an X
+            ax.scatter(alphas, means, marker='x', color=color, s=60, zorder=5,
+                       linewidths=2, label='Mean')
+        else:
+            # N=1: simple scatter dot at each alpha, no connecting line
+            ax.scatter(alphas, means, color=color, s=80, zorder=5)
+            # Draw vertical error bars manually (capsize style)
+            for xi, mi, si in zip(alphas, means, stds):
+                if si > 0:
+                    ax.errorbar(xi, mi, yerr=si, fmt='none', color=color,
+                                capsize=5, capthick=1.5, linewidth=1.5)
         ax.axvline(best_alpha, color='gold', linestyle='--', linewidth=2,
                    label=f'α*={best_alpha}')
-        _finish(ax, title, 'AI Alignment Level (α)', ylabel, ylim)
+        _finish(ax, title, 'AI Alignment Level (α)', ylabel, ylim, hline=hline)
 
-    ep(axes[0, 0], seci_ms, 'b', 'SECI (-1 to +1)',
-       'Social Echo Chamber\n(negative = stronger bubble)', (-1.1, 1.1))
-    axes[0, 0].axhline(0, color='k', linestyle=':', alpha=0.5)
+    ep(axes[0, 0], seci_ms, seci_runs, 'b', 'SECI (-1 to +1)',
+       'Social Echo Chamber\n(negative = stronger bubble)', (-1.1, 1.1), hline=0)
 
-    ep(axes[0, 1], aeci_ms, 'r', 'AECI (-1 to +1)',
-       'AI-Induced Bubble\n(negative = stronger AI bubble)', (-1.1, 1.1))
-    axes[0, 1].axhline(0, color='k', linestyle=':', alpha=0.5)
+    ep(axes[0, 1], aeci_ms, aeci_runs, 'r', 'AECI (-1 to +1)',
+       'AI-Induced Bubble\n(negative = stronger AI bubble)', (-1.1, 1.1), hline=0)
 
     ax = axes[0, 2]
-    ax.plot(alphas, total_vals, 'k-o', linewidth=2.5, label='|SECI|+|AECI|')
-    ax.plot(best_alpha, min(total_vals), 'g*', markersize=18, zorder=5,
+    ax.scatter(alphas, total_vals, color='k', s=80, zorder=5, label='|SECI|+|AECI|')
+    ax.plot(best_alpha, min(total_vals), 'g*', markersize=18, zorder=6,
             label=f'α*={best_alpha}')
     ax.fill_between(alphas, total_vals, alpha=0.15, color='purple')
     ax.axvline(best_alpha, color='gold', linestyle='--', linewidth=2)
     _finish(ax, 'Total Bubble Intensity\n(minimise)', 'α', '|SECI|+|AECI|', (0, None))
 
-    ep(axes[1, 0], mae_ms, 'm', 'Mean Absolute Error',
-       'Belief Accuracy\n(lower = beliefs closer to ground truth)')
+    ep(axes[1, 0], mae_ms, mae_runs, 'm', 'Mean Absolute Error',
+       'Belief Accuracy on Disaster Cells\n(lower = agent found the disaster)')
 
-    ep(axes[1, 1], unmet_ms, 'darkorange', 'Unmet high-need cells',
+    ep(axes[1, 1], unmet_ms, unmet_runs, 'darkorange', 'Unmet high-need cells',
        'Unmet Needs (level ≥3, 0 tokens)\n(lower = better disaster response)')
 
-    ep(axes[1, 2], prec_ms, 'teal', 'Correct / Total targets',
+    ep(axes[1, 2], prec_ms, prec_runs, 'teal', 'Correct / Total targets',
        'Relief Targeting Precision\n(higher = relief on high-need cells)', (0, 1.05))
 
     plt.tight_layout()
@@ -268,13 +318,13 @@ def plot_timeseries(alpha_r, save_dir):
         ts    = res['metric_ticks']
         label = f'α={alpha}' + (' ★' if alpha == best_alpha else '')
 
-        # SECI — separate exploit and explor panels
-        _band(ax_seci_ex, tf, res['seci_exploit_mean'], res['seci_exploit_std'], color, label)
-        _band(ax_seci_er, tf, res['seci_explor_mean'],  res['seci_explor_std'],  color, label)
+        # SECI — sampled at metric_ticks cadence (no repeated values)
+        _band(ax_seci_ex, ts[:len(res['seci_exploit_mean'])], res['seci_exploit_mean'], res['seci_exploit_std'], color, label)
+        _band(ax_seci_er, ts[:len(res['seci_explor_mean'])],  res['seci_explor_mean'],  res['seci_explor_std'],  color, label)
 
-        # AECI — separate exploit and explor panels
-        _band(ax_aeci_ex, tf, res['aeci_exploit_mean'], res['aeci_exploit_std'], color, label)
-        _band(ax_aeci_er, tf, res['aeci_explor_mean'],  res['aeci_explor_std'],  color, label)
+        # AECI — sampled at metric_ticks cadence
+        _band(ax_aeci_ex, ts[:len(res['aeci_exploit_mean'])], res['aeci_exploit_mean'], res['aeci_exploit_std'], color, label)
+        _band(ax_aeci_er, ts[:len(res['aeci_explor_mean'])],  res['aeci_explor_mean'],  res['aeci_explor_std'],  color, label)
 
         # MAE — combined, sampled
         mae_m = (np.array(res['mae_exploit_mean']) + np.array(res['mae_explor_mean'])) / 2

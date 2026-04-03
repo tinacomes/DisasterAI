@@ -150,7 +150,7 @@ class HumanAgent(Agent):
 
                 # Calculate distance from agent for sensing
                 distance_from_agent = math.sqrt((x - self.pos[0])**2 + (y - self.pos[1])**2)
-                sense_radius = 2  # Same for both agent types
+                sense_radius = 0  # Own cell only — 100 agents × r=2 covers 94% of grid per tick, eliminating information scarcity
 
                 # If cell is within sensing range, initialize with noisy perception of actual disaster
                 if distance_from_agent <= sense_radius:
@@ -345,7 +345,7 @@ class HumanAgent(Agent):
                 if self.pos and cell:
                     distance = math.sqrt((cell[0] - self.pos[0])**2 + (cell[1] - self.pos[1])**2)
                     # Scale by sensing radius (same for both agent types)
-                    radius = 2
+                    radius = 1  # Reference scale for decay (sensing_radius=0, so any distance is "far")
                     distance_factor = min(1.5, 1.0 + (distance / (2 * radius)))
                 else:
                     distance_factor = 1.0
@@ -422,7 +422,7 @@ class HumanAgent(Agent):
 
     def sense_environment(self):
         pos = self.pos
-        radius = 2  # Same for both agent types - behavioral differences should be in information-seeking, not perception
+        radius = 0  # Own cell only — 100 agents × r=2 covers 94% of grid per tick, eliminating information scarcity
         cells = self.model.grid.get_neighborhood(pos, moore=True, radius=radius, include_center=True)
         for cell in cells:
             if 0 <= cell[0] < self.model.width and 0 <= cell[1] < self.model.height:
@@ -818,14 +818,23 @@ class HumanAgent(Agent):
             confidence_scaling = min(1.0, belief_conf / 0.5)  # Full strength at 0.5+ confidence
 
             # --- Accuracy score: reported vs current reference ---
-            # For EXPLORERS querying REMOTE cells, the reference may be contaminated if
-            # the info was ACCEPTED (belief updated toward reported). If the info was
-            # REJECTED (was_accepted=False), the belief is unchanged = stored_prior,
-            # so we can evaluate safely using stored_prior.
-            # Accepted remote queries are still deferred (rely on process_reward Fix 1).
+            # For EXPLORERS querying REMOTE cells that were ACCEPTED, reference_level
+            # (current belief) is contaminated — the belief already moved toward the
+            # report, creating a circular evaluation. Using stored_prior here would
+            # give a "confirmation" score (how much did report differ from prior?),
+            # not an accuracy score.
+            # FIX BUG 1: Override reference_level with model ground truth so explorers
+            # receive genuine accuracy feedback for accepted remote AI queries.
+            # Truthful AI (α≈0): reported≈truth → error≈0 → Q+1.0 → explorers learn AI is good.
+            # Confirming AI (α≈1): reported≈prior (often wrong) → error large → Q−0.6 →
+            # explorers learn confirming AI is unreliable.
+            # This creates the Q-learning asymmetry that drives the sweet-spot effect.
             if is_remote_cell and self.agent_type == "exploratory" and was_accepted:
-                # Accepted remote query: belief is contaminated, defer to sensing/relief feedback
-                continue
+                if 0 <= cell[0] < self.model.width and 0 <= cell[1] < self.model.height:
+                    reference_level = int(self.model.disaster_grid[cell[0], cell[1]])
+                else:
+                    continue  # out-of-bounds cell: skip safely
+                # Fall through — Q/trust update proceeds with ground-truth reference
             # For rejected remote queries (was_accepted=False) or local cells:
             # use reference_level (which is stored_prior for rejected items, as belief unchanged)
             level_error = abs(reported_level - reference_level)
@@ -1016,10 +1025,6 @@ class HumanAgent(Agent):
             include_center=True
         )
 
-        # Debug info similar to AI agent
-        # if hasattr(self.model, 'debug_mode') and self.model.debug_mode and random.random() < 0.05:
-            #print(f"DEBUG: Human {self.unique_id} asked to report on {len(cells_to_report_on)} cells around {interest_point}")
-
         # Track how many cells had direct beliefs vs guesses
         known_cells = 0
         guessed_cells = 0
@@ -1066,20 +1071,14 @@ class HumanAgent(Agent):
                             report[cell] = guessed_value
                             guessed_cells += 1
 
-        # Debug output for comparison with AI
-        #if hasattr(self.model, 'debug_mode') and self.model.debug_mode and random.random() < 0.05:
-           # total_reported = len(report)
-            #print(f"DEBUG: Human {self.unique_id} reported on {total_reported} cells "
-                  #f"({known_cells} known, {guessed_cells} guessed)")
-
         return report
 
     def is_within_sensing_range(self, cell):
         """Check if a cell is within the agent's sensing radius (Moore neighborhood)."""
         if not self.pos or not cell:
             return False
-        sensing_radius = 2
-        return abs(cell[0] - self.pos[0]) <= sensing_radius and abs(cell[1] - self.pos[1]) <= sensing_radius
+        sensing_radius = 0  # Own cell only
+        return cell[0] == self.pos[0] and cell[1] == self.pos[1]
 
     def find_believed_epicenter(self):
         """
@@ -1152,9 +1151,6 @@ class HumanAgent(Agent):
 
         # --- Fallback if no L1+ candidates found ---
         if not candidates:
-            #if self.model.debug_mode:
-                #print(f"Agent {self.unique_id} ({self.agent_type}): No L{min_level_to_explore}+ targets found. Using fallback.")
-
             # NEW APPROACH: Look for L0 cells with highest uncertainty (lowest confidence)
             l0_candidates = []
 
@@ -1183,11 +1179,6 @@ class HumanAgent(Agent):
                 l0_candidates.sort(key=lambda x: x['score'], reverse=True)
                 # Take the top candidate(s)
                 candidates = l0_candidates[:num_targets]
-
-                #if self.model.debug_mode:
-                 #   print(f"  Found {len(l0_candidates)} L0 candidates, using highest uncertainty ones")
-                  #  for c in candidates[:min(3, len(candidates))]:
-                   #     print(f"  L0 Candidate: Cell:{c['cell']} Uncertainty:{c['score']:.3f} Conf:{c['conf']:.2f}")
             else:
                 # Ultimate fallback: pick some random cells
                 random_cells = []
@@ -1209,12 +1200,6 @@ class HumanAgent(Agent):
         # Sort by score (highest score first) and select top candidates
         if candidates:
             candidates.sort(key=lambda x: x['score'], reverse=True)
-            # Debug print top candidates periodically
-            #if self.model.debug_mode and self.model.tick % 10 == 1 and random.random() < 0.2:
-               # print(f"DEBUG Tick {self.model.tick} Agt {self.unique_id} Top Explore Candidates:")
-                #for cand in candidates[:min(5, len(candidates))]:
-                    #print(f"  Cell:{cand.get('cell')} Lvl:{cand.get('level')} Conf:{cand.get('conf'):.2f} Score:{cand.get('score'):.3f}")
-
             self.exploration_targets = [c['cell'] for c in candidates[:num_targets]]
         else:
             # Final fallback if all else fails
@@ -1437,7 +1422,7 @@ class HumanAgent(Agent):
                         else:
                             # Absolute fallback: pick a random cell OUTSIDE sensing range
                             # Offset by at least sensing_radius + 1 to ensure outside
-                            offset = 3  # sensing_radius (2) + 1
+                            offset = 1  # sensing_radius (0) + 1
                             interest_point = (
                                 (self.pos[0] + offset + random.randrange(self.model.width - 2*offset)) % self.model.width,
                                 (self.pos[1] + offset + random.randrange(self.model.height - 2*offset)) % self.model.height
@@ -1453,7 +1438,7 @@ class HumanAgent(Agent):
 
                 # Fallback if uncertainty search fails - pick cell OUTSIDE sensing range
                 if not interest_point:
-                    offset = 3  # sensing_radius (2) + 1
+                    offset = 1  # sensing_radius (0) + 1
                     interest_point = (
                         (self.pos[0] + offset + random.randrange(max(1, self.model.width - 2*offset))) % self.model.width,
                         (self.pos[1] + offset + random.randrange(max(1, self.model.height - 2*offset))) % self.model.height
@@ -1473,22 +1458,9 @@ class HumanAgent(Agent):
                     print(f"Agent {self.unique_id}: Interest point {interest_point} out of bounds, skipping seek_information.")
                 return
 
-            # Debug logging
-            #if self.model.debug_mode and random.random() < 0.05:  # Only log ~5% of decisions
-                #print(f"Tick {self.model.tick} Agent {self.unique_id} ({self.agent_type}) selected interest_point: {interest_point}")
-               # print(f" > My belief: {self.beliefs.get(interest_point, {})}")
-                #print(f" > Ground truth: {self.model.disaster_grid[interest_point[0], interest_point[1]]}")
-
-
             if not interest_point:
                 print(f"Agent {self.unique_id}: No valid interest point, skipping seek_information.")
                 return
-
-            # Debug logging
-            #if self.model.debug_mode and random.random() < 0.05:  # Only log ~5% of decisions to avoid spam
-               # print(f"Tick {self.model.tick} Agent {self.unique_id} ({self.agent_type}) selected interest_point: {interest_point}")
-               # print(f" > My belief: {self.beliefs.get(interest_point, {})}")
-                #print(f" > Ground truth: {self.model.disaster_grid[interest_point[0], interest_point[1]]}")
 
             # Source selection (epsilon-greedy with type-specific biases)
             # Use 3-mode structure: self_action, human, ai
@@ -1533,18 +1505,6 @@ class HumanAgent(Agent):
                 # Choose highest scoring mode
                 chosen_mode = max(scores, key=scores.get)
                 decision_factors['chosen_mode'] = chosen_mode
-
-            # Log decision factors periodically
-            #if self.model.tick % 10 == 0 and random.random() < 0.2:  # Log ~20% of decisions every 10 ticks
-               # if self.model.debug_mode:
-                   # print(f"\nAgent {self.unique_id} ({self.agent_type}) source selection:")
-                    #print(f"  Decision type: {decision_factors['selection_type']}")
-                    #print(f"  Chosen mode: {decision_factors['chosen_mode']}")
-                    #if decision_factors['selection_type'] == 'exploitation':
-                        #print(f"  Base Q-values: {decision_factors['base_scores']}")
-                        #print(f"  Applied biases: {decision_factors['biases']}")
-                        #print(f"  Final scores: {decision_factors['final_scores']}")
-                    #print(f"  AI alignment level: {self.model.ai_alignment_level}")
 
             self.tokens_this_tick = {chosen_mode: 1}
             self.last_queried_source_ids = []
@@ -1606,7 +1566,7 @@ class HumanAgent(Agent):
                 source_agent = self.model.ais.get(source_id)
 
                 if source_agent:
-                    reports = source_agent.report_beliefs(interest_point, query_radius, self.beliefs, self.trust.get(source_id, 0.1))
+                    reports = source_agent.report_beliefs(interest_point, query_radius, self, self.trust.get(source_id, 0.1))
 
                     # track AI source
                     self.last_queried_source_ids = [source_id]
@@ -1617,10 +1577,6 @@ class HumanAgent(Agent):
                     # Track which cells got info from which AI
                     for cell, reported_value in reports.items():
                         self.ai_info_sources[cell] = source_id
-
-                    # DEBUG PRINT to track AI source queries
-                    #if self.model.debug_mode and random.random() < 0.1:  # 10% of the time
-                        #print(f"DEBUG: Agent {self.unique_id} queried AI {source_id} for {len(reports)} cells")
 
                     self.accum_calls_ai += 1
                     self.accum_calls_total += 1
@@ -1687,7 +1643,9 @@ class HumanAgent(Agent):
                 max_believed_level = max(max_believed_level, level)
 
                 if level >= 3:
-                    score = (level / 5.0) * (confidence ** 1.5) if self.agent_type == "exploitative" else (
+                    # Linear confidence prevents confirming AI from gaining 5× volume advantage
+                    # over truthful AI through confidence amplification alone (confidence^1.5 → 5.2× ratio)
+                    score = (level / 5.0) * confidence if self.agent_type == "exploitative" else (
                         (level / 5.0) * 0.7 + (1.0 - confidence) * 0.3  # Prioritize level (70%) and exploration (30%)
                     )
                     if score > 0.01:
@@ -1768,10 +1726,6 @@ class HumanAgent(Agent):
                 correct_in_batch = 0
                 incorrect_in_batch = 0
                 cell_rewards = []
-
-                # possible diagnostic for reward processing
-                #if self.model.debug_mode and random.random() < 0.1:
-                    #print(f"Agent {self.unique_id} processing rewards for {len(cells_and_beliefs)} cells")
 
                 for cell, belief_level in cells_and_beliefs:
                     if not (0 <= cell[0] < self.model.width and 0 <= cell[1] < self.model.height):
@@ -1994,15 +1948,6 @@ class HumanAgent(Agent):
         self.update_trust_for_accuracy()
         self.apply_trust_decay()
         self.apply_confidence_decay()
-        #confidence_decay_rate = 0.005 # Start very small and tune
-
-        #confidence decay
-        #for cell in self.beliefs:
-           # if isinstance(self.beliefs[cell], dict):
-            #  current_conf = self.beliefs[cell].get('confidence', 0.1)
-              # Prevent decay below a minimum floor, maybe slightly above initial
-           #   min_conf_floor = 0.05
-            #  self.beliefs[cell]['confidence'] = max(min_conf_floor, current_conf - confidence_decay_rate)
         return reward
 
     def smooth_friend_trust(self):
@@ -2118,12 +2063,19 @@ class AIAgent(Agent):
                     knowledge_map[cell[0], cell[1]] = 1
             self.model.ai_knowledge_maps[self.unique_id] = knowledge_map
 
-    def report_beliefs(self, interest_point, query_radius, caller_beliefs, caller_trust_in_ai):
+    def report_beliefs(self, interest_point, query_radius, caller, caller_trust_in_ai):
         """
         Reports AI's beliefs about cells within query_radius of interest_point,
         applying alignment based on caller's trust and beliefs.
+
+        `caller` is the querying HumanAgent. Its beliefs and agent_type are used
+        in the alignment formula. For exploitative callers the AI confirms the
+        community's network-consensus belief (not the individual prior) so that
+        confirming AI amplifies social echo chambers rather than locking in
+        idiosyncratic individual beliefs.
         """
         report = {}
+        caller_beliefs = caller.beliefs if hasattr(caller, 'beliefs') else {}
 
         # Safety checks for interest_point
         if interest_point is None:
@@ -2143,11 +2095,6 @@ class AIAgent(Agent):
         cells_to_report_on = self.model.grid.get_neighborhood(
             interest_point, moore=True, radius=query_radius, include_center=True
         )
-
-        # Debug info
-        #if hasattr(self.model, 'debug_mode') and self.model.debug_mode and random.random() < 0.05:
-            #print(f"DEBUG: AI {self.unique_id} asked to report on area around {interest_point} with radius {query_radius}")
-            #print(f"DEBUG: This gives {len(cells_to_report_on)} potential cells to report on")
 
         valid_cells_in_query = []
         sensed_vals_list = []
@@ -2231,14 +2178,20 @@ class AIAgent(Agent):
                     valid_cells_in_query.append(cell)
                     sensed_vals_list.append(int(value_to_use))
 
-                    # Track guessed values for debugging
-                    #if is_guessed and hasattr(self.model, 'debug_mode') and self.model.debug_mode and random.random() < 0.02:
-                        #print(f"DEBUG: AI {self.unique_id} guessed value {value_to_use} for cell {cell}")
-
-                    # Get the CALLER'S belief for this cell (for alignment)
+                    # Get the belief level that the confirming AI should target.
+                    # For exploitative callers: use the network-consensus belief so that
+                    # confirming AI amplifies the community's shared narrative (echo chamber).
+                    # Without this, confirming individual priors disrupts social convergence
+                    # and makes SECI less negative than the no-AI control — the opposite of H1.
+                    # For exploratory callers: use individual belief (unchanged behaviour).
                     caller_belief_info = caller_beliefs.get(cell, {'level': 0, 'confidence': 0.1})
                     human_level = caller_belief_info.get('level', 0)
                     human_confidence = caller_belief_info.get('confidence', 0.1)
+                    if (hasattr(caller, 'agent_type') and caller.agent_type == "exploitative"
+                            and hasattr(caller, 'get_network_consensus')):
+                        net_level, net_conf = caller.get_network_consensus(cell)
+                        if net_level is not None and net_conf >= 0.2:
+                            human_level = int(round(net_level))   # confirm community belief
                     human_vals_list.append(int(human_level))
                     human_confidence_list.append(human_confidence)
 
@@ -2247,10 +2200,6 @@ class AIAgent(Agent):
             if hasattr(self.model, 'debug_mode') and self.model.debug_mode and random.random() < 0.1:
                 print(f"DEBUG: AI {self.unique_id} has no data to report!")
             return {}
-
-        # Debug output
-        #if hasattr(self.model, 'debug_mode') and self.model.debug_mode and random.random() < 0.1:
-            #print(f"DEBUG: AI {self.unique_id} has data for {len(valid_cells_in_query)} cells out of {len(cells_to_report_on)} requested")
 
         # Convert to numpy arrays for alignment logic
         sensed_vals = np.array(sensed_vals_list)
@@ -2452,6 +2401,7 @@ class DisasterModel(Model):
             pos = (random.randrange(width), random.randrange(height))
             self.grid.place_agent(agent, pos)
             agent.pos = pos
+            agent.initial_pos = pos  # fixed spawn location for spatial periphery classification
 
         # validate_social_network(self, save_dir="analysis_plots") #debug
 
@@ -2469,7 +2419,6 @@ class DisasterModel(Model):
         # Find connected components in the social network
         # Note: This assumes node IDs 0..N-1 correspond to agent indices
         components = list(nx.connected_components(self.social_network))
-        #print(f"Found {len(components)} network components.") # Debug print
 
         for i, component_nodes in enumerate(components):
             # Decide if this component gets a rumor
@@ -2484,7 +2433,6 @@ class DisasterModel(Model):
                           (potential_rumor_epicenter[1] - self.epicenter[1])**2
                     if dist_sq >= min_sep_dist_sq:
                         rumor_epicenter = potential_rumor_epicenter
-                        # print(f"  Assigning rumor at {rumor_epicenter} to component {i} (size {len(component_nodes)})") # Debug
                         break
                     attempts += 1
 
@@ -2566,13 +2514,9 @@ class DisasterModel(Model):
 
     def debug_log(self, message, force=False):
         """Log debug messages if debug mode is enabled or forced."""
-        #if self.debug_mode or force:
-           # print(f"[DEBUG] Tick {self.tick}: {message}")
 
     def calculate_aeci_variance(self):
         """Calculate AI Echo Chamber Index variance on a [-1, +1] scale."""
-        #print(f"\nDEBUG: Starting AECI variance calculation at tick {self.tick}")
-        
         aeci_variance = 0.0  # Default neutral value
         
         # Classify AI-reliant agents by accepted_ai (actual belief influence),
@@ -2588,10 +2532,7 @@ class DisasterModel(Model):
                 continue
             if agent.accepted_ai >= min_accepted_ai:
                 ai_reliant_agents.append(agent)
-        
-        # Debug print
-        #print(f"  Found {len(ai_reliant_agents)}/{len(self.humans)} AI-reliant agents")
-        
+
         # Get global belief variance
         all_beliefs = []
         for agent in self.humans.values():
@@ -2604,10 +2545,8 @@ class DisasterModel(Model):
         # Calculate global variance with safety check
         if len(all_beliefs) > 1:
             global_var = np.var(all_beliefs)
-            #print(f"  Global belief variance: {global_var:.4f}")
         else:
             global_var = 0.0
-            #print("  WARNING: Not enough global beliefs to calculate variance")
             
         # Only proceed if we have a valid global variance and AI-reliant agents
         if global_var > 0 and ai_reliant_agents:
@@ -2623,8 +2562,7 @@ class DisasterModel(Model):
             # Calculate AI-reliant variance with safety check
             if len(ai_reliant_beliefs) > 1:
                 ai_reliant_var = np.var(ai_reliant_beliefs)
-                #print(f"  AI-reliant beliefs variance: {ai_reliant_var:.4f}")
-                
+
                 # Calculate variance effect
                 # Negative means AI reduces variance (echo chamber)
                 # Positive means AI increases variance (diversification)
@@ -2637,16 +2575,9 @@ class DisasterModel(Model):
                     # Find a reasonable upper bound for normalization
                     max_possible_var = 5.0  # Given belief levels are 0-5, max variance is around 5
                     aeci_variance = min(1, var_diff / (max_possible_var - global_var))
-                
-                #print(f"  AECI variance effect: {aeci_variance:.4f}")
-            #else:
-            #    print("  WARNING: Not enough AI-reliant beliefs to calculate variance")
-        #else:
-        #    print(f"  WARNING: Invalid global variance ({global_var}) or no AI-reliant agents")
-        
+
         # Create a CORRECTLY formatted tuple
         aeci_variance_tuple = (self.tick, aeci_variance)
-        #print(f"  Returning AECI variance tuple: {aeci_variance_tuple}")
         
         # Update metrics dictionary with consistent format
         self._last_metrics['aeci_variance'] = {
@@ -2820,10 +2751,6 @@ class DisasterModel(Model):
             # Store the knowledge map
             self.ai_knowledge_maps[ai_id] = knowledge_map
 
-            #if self.debug_mode:
-                #coverage = np.sum(knowledge_map) / (self.width * self.height) * 100
-                #print(f"DEBUG: {ai_id} has knowledge of {coverage:.1f}% of the grid")
-
     def track_ai_usage_patterns(model, tick_interval=10, save_dir="analysis_plots"):
         """Track and plot AI usage patterns over time with proper bounds."""
         os.makedirs(save_dir, exist_ok=True)
@@ -2970,7 +2897,6 @@ class DisasterModel(Model):
             max_change = np.max(grid_change)
             if max_change >= self.event_threshold:
                 self.event_ticks.append(self.tick)
-                # print(f"Tick {self.tick}: Significant disaster event detected (max change: {max_change})")
 
     def update_ai_knowledge_maps(self):
         """Update knowledge maps after AIs have sensed the environment."""
@@ -3330,46 +3256,49 @@ class DisasterModel(Model):
 
             self.belief_variance_data.append((self.tick, var_exploit, var_explor))
 
-            # --- AECI Calculation (SECI-style peer-group methodology) ---
-            # Mirrors SECI exactly, but "friend network" → "AI-peer network".
-            # AI-reliant agents are classified by accepted_ai (actual belief
-            # updates accepted from AI), not query count. The feedback loop
-            # means agents that validated AI info as accurate build higher AI
-            # trust and accept more AI updates.
+            # --- AECI Calculation: Confidence-Weighted Belief Error ---
             #
-            # AECI: within-type AI-heavy vs AI-light comparison.
-            # The old formula compared AI-reliant agents to the global population,
-            # which conflated natural type homogeneity (exploiters have narrow D/δ
-            # so they naturally converge more than explorers) with AI-induced
-            # homogeneity.  The result was AECI negative even at α=0 (truthful AI).
+            # The previous variance-based formula failed because confirming AI
+            # (α=0.9) changes CONFIDENCE not LEVEL (d=0 → reported level ≈ prior
+            # level), so level variance is unchanged → AECI ≈ 0 regardless of α.
             #
-            # New formula: for each type, split agents into top-50% and bottom-50%
-            # by cum_accepted_ai.  Compare variance of beliefs in the AI-heavy half
-            # to the AI-light half — both within the same type, so type-level
-            # homogeneity cancels out.  If AI reinforcement (confirming α) is causing
-            # an echo chamber, the AI-heavy agents will have MORE uniform beliefs
-            # (locked on the false epicenter) vs the AI-light agents who explored
-            # more independently.
-            #   AECI < 0 → AI-heavy more homogeneous than AI-light → echo chamber
-            #   AECI ≈ 0 → no AI-driven convergence
-            #   AECI > 0 → AI-heavy more diverse (AI is broadening perspectives)
+            # New formula: for each agent compute the mean of
+            #   confidence × |believed_level − true_level|
+            # over all L1+ cells (high enough belief to matter).  This "confident
+            # error" is the actual echo-chamber signal: agents locked into
+            # confirming AI accumulate high-confidence FALSE beliefs.
+            #
+            # Within each type split by cum_accepted_ai (who queried AI most):
+            #   heavy_err > light_err → AI-heavy agents have more confident false
+            #   beliefs → algorithmic echo chamber → AECI > 0
+            #   heavy_err < light_err → AI corrects beliefs → AECI < 0
+            #   AECI ≈ 0 → AI usage has no directional effect on belief accuracy
+            #
+            # Normalised to [-1, +1]:
+            #   positive half: (heavy_err − light_err) / max(heavy_err, light_err)
+            #   negative half: (heavy_err − light_err) / max(light_err, 1e-6)
             aeci_exp = []
             aeci_expl = []
 
-            def _beliefs_l1(agents):
-                """Return L1+ belief levels from informed beliefs (confidence > 0.1).
-                Excludes the ~900 default L0 priors that every agent holds for
-                unvisited cells — these would dilute the AI-heavy vs AI-light
-                variance comparison with uninformative data."""
-                levels = []
+            def _weighted_error(agents):
+                """Mean confidence × |believed_level − truth| over L1+ beliefs.
+                AI echo chamber = high confidence in WRONG beliefs."""
+                errors = []
                 for a in agents:
-                    for binfo in a.beliefs.values():
-                        if (isinstance(binfo, dict)
-                                and binfo.get('confidence', 0) > 0.1):
-                            lv = binfo.get('level', 0)
-                            if not np.isnan(lv) and lv >= 1:
-                                levels.append(float(lv))
-                return levels
+                    for cell, binfo in a.beliefs.items():
+                        if not isinstance(binfo, dict):
+                            continue
+                        conf = binfo.get('confidence', 0)
+                        if conf <= 0.1:
+                            continue
+                        lv = binfo.get('level', 0)
+                        if lv < 1:
+                            continue
+                        if not (0 <= cell[0] < self.width and 0 <= cell[1] < self.height):
+                            continue
+                        truth = float(self.disaster_grid[cell[0], cell[1]])
+                        errors.append(conf * abs(float(lv) - truth))
+                return float(np.mean(errors)) if errors else 0.0
 
             for agent_type_label, aeci_list in [("exploitative", aeci_exp),
                                                   ("exploratory",  aeci_expl)]:
@@ -3379,27 +3308,27 @@ class DisasterModel(Model):
                 if len(type_agents) < 4:
                     continue  # need at least 2 per half
 
-                # Median split by cumulative AI acceptance within this type
-                sorted_agents = sorted(type_agents, key=lambda a: a.cum_accepted_ai)
+                # Median split by total AI calls within this type.
+                # Using accum_calls_ai (total queries, not just accepted) gives genuine
+                # variation at high α where acceptance rate ≈ 100% for all agents and
+                # cum_accepted_ai is near-uniform → meaningless split.
+                # Agents who queried AI more (encountered more uncertain cells) get more
+                # belief reinforcements → higher confident error when AI confirms false beliefs.
+                sorted_agents = sorted(type_agents, key=lambda a: a.accum_calls_ai)
                 mid = len(sorted_agents) // 2
                 ai_light = sorted_agents[:mid]
                 ai_heavy = sorted_agents[mid:]
 
-                light_beliefs = _beliefs_l1(ai_light)
-                heavy_beliefs = _beliefs_l1(ai_heavy)
-                if len(light_beliefs) < 2 or len(heavy_beliefs) < 2:
-                    continue
+                light_err = _weighted_error(ai_light)
+                heavy_err = _weighted_error(ai_heavy)
 
-                light_var = np.var(light_beliefs)
-                heavy_var = np.var(heavy_beliefs)
-                baseline  = max(light_var, 1e-6)
-
-                var_diff = heavy_var - baseline
-                if var_diff < 0:  # AI-heavy more homogeneous → echo chamber
-                    aeci_val = max(-1.0, var_diff / baseline)
-                else:             # AI-heavy more diverse → diversification
-                    denom = max_possible_var - baseline
-                    aeci_val = min(1.0, var_diff / denom) if denom > 1e-9 else 0.0
+                err_diff = heavy_err - light_err
+                if err_diff >= 0:   # AI-heavy more confident-wrong → echo chamber
+                    denom = max(heavy_err, 1e-6)
+                    aeci_val = min(1.0, err_diff / denom)
+                else:               # AI-heavy more accurate → AI breaks echo chamber
+                    denom = max(light_err, 1e-6)
+                    aeci_val = max(-1.0, err_diff / denom)
 
                 aeci_list.append(aeci_val)
 
@@ -4134,85 +4063,6 @@ def track_component_seci_evolution(model, tick_interval=10, save_dir="analysis_p
                   dpi=300, bbox_inches='tight')
         plt.close()
 
-def plot_component_seci_distribution(results_dict, title_suffix=""):
-    """Plots the distribution of SECI values across different components"""
-    
-    # Extract component SECI data
-    component_seci = results_dict.get('component_seci')
-    component_seci_data = results_dict.get('component_seci_data', [])
-    
-    # Check if we have component-level data
-    has_component_level_data = False
-    if component_seci_data:
-        # Check for component_values key in any item
-        for tick_data in component_seci_data:
-            if isinstance(tick_data, dict) and 'component_values' in tick_data:
-                has_component_level_data = True
-                break
-    
-    # If no component-level data, fall back to average values
-    if not has_component_level_data:
-        print(f"No component-level SECI data available for {title_suffix}")
-        # Extract all SECI values from the array data
-        all_seci_values = []
-        if component_seci is not None and isinstance(component_seci, np.ndarray):
-            if component_seci.ndim == 3 and component_seci.shape[2] > 1:
-                # Get values from column 1
-                all_seci_values = component_seci[:, :, 1].flatten()
-                all_seci_values = all_seci_values[~np.isnan(all_seci_values)]
-    else:
-        # Collect all component values from all ticks
-        all_seci_values = []
-        for tick_data in component_seci_data:
-            if isinstance(tick_data, dict) and 'component_values' in tick_data:
-                component_values = tick_data['component_values']
-                if isinstance(component_values, dict):
-                    all_seci_values.extend(component_values.values())
-    
-    # Filter out non-numeric values
-    all_seci_values = [v for v in all_seci_values if isinstance(v, (int, float)) and not np.isnan(v)]
-    
-    # Create the figure
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
-    
-    # Plot 1: SECI distribution histogram
-    if all_seci_values:
-        ax1.hist(all_seci_values, bins=30, range=(0, 1),
-                 color='skyblue', edgecolor='black', alpha=0.7)
-        ax1.axvline(np.mean(all_seci_values), color='red', linestyle='--', linewidth=2,
-                   label=f'Mean: {np.mean(all_seci_values):.3f}')
-        ax1.axvline(np.median(all_seci_values), color='green', linestyle='--', linewidth=2,
-                   label=f'Median: {np.median(all_seci_values):.3f}')
-        ax1.set_xlabel('Component SECI Value')
-        ax1.set_ylabel('Frequency')
-        ax1.set_title(f'Component SECI Distribution {title_suffix}')
-        ax1.legend()
-        ax1.grid(True, alpha=0.3)
-    else:
-        ax1.text(0.5, 0.5, 'No component SECI data', ha='center', va='center')
-    
-    # Plot 2: Evolution of average component SECI
-    if component_seci is not None and isinstance(component_seci, np.ndarray):
-        if component_seci.ndim == 3 and component_seci.shape[1] > 0:
-            mean_seci = np.nanmean(component_seci[:, :, 1], axis=0)
-            ticks = np.arange(len(mean_seci))
-            
-            ax2.plot(ticks, mean_seci, 'b-', linewidth=2, label='Mean')
-            ax2.set_xlabel('Tick')
-            ax2.set_ylabel('Average Component SECI')
-            ax2.set_title(f'Component SECI Evolution {title_suffix}')
-            ax2.legend()
-            ax2.grid(True, alpha=0.3)
-        else:
-            ax2.text(0.5, 0.5, 'Invalid component SECI shape', ha='center', va='center')
-    else:
-        ax2.text(0.5, 0.5, 'No component SECI evolution data', ha='center', va='center')
-    
-    plt.tight_layout()
-    save_path = f"agent_model_results/component_seci_distribution_{title_suffix}.png"
-    plt.savefig(save_path.replace('(','').replace(')','').replace('=','_'))
-    plt.close()
-
 def run_simulation(params):
     model = DisasterModel(**params)
     for _ in range(params.get("ticks", 150)):
@@ -4593,65 +4443,6 @@ def experiment_learning_trust(base_params, learning_rate_values, epsilon_values,
         results[(lr, eps)] = aggregate_simulation_results(num_runs, params)
     return results
 
-#Debug helper function
-def debug_aeci_variance_data(results_dict, title_suffix=""):
-    """Inspects and prints detailed AECI variance data structure"""
-    print(f"\n=== AECI Variance Data Inspection for {title_suffix} ===")
-    
-    # Get aeci_variance data
-    aeci_var_data = results_dict.get("aeci_variance")
-    
-    # Basic data check
-    if aeci_var_data is None:
-        print("ERROR: aeci_variance data is None")
-        return
-    
-    if not isinstance(aeci_var_data, np.ndarray):
-        print(f"ERROR: aeci_variance isn't a numpy array (type: {type(aeci_var_data)})")
-        if isinstance(aeci_var_data, list):
-            print(f"  List length: {len(aeci_var_data)}")
-            for i, item in enumerate(aeci_var_data[:3]):
-                print(f"  Item {i}: {type(item)} - {item}")
-        return
-    
-    # Array shape analysis
-    print(f"AECI Variance array shape: {aeci_var_data.shape}")
-    
-    # Inspect dimensions
-    if aeci_var_data.ndim >= 3:
-        # Expected shape: (runs, ticks, 2) where 2nd dim is [tick, value]
-        print(f"First dimension (runs): {aeci_var_data.shape[0]}")
-        print(f"Second dimension (ticks): {aeci_var_data.shape[1]}")
-        print(f"Third dimension (data): {aeci_var_data.shape[2]}")
-        
-        # Inspect first few values
-        print("\nSample values:")
-        for run in range(min(2, aeci_var_data.shape[0])):
-            print(f"Run {run}:")
-            tick_slice = slice(0, min(5, aeci_var_data.shape[1]))
-            print(f"  First 5 ticks: {aeci_var_data[run, tick_slice, :]}")
-            
-            # Check if values are in expected range [-1,1]
-            if aeci_var_data.shape[2] > 1:
-                values = aeci_var_data[run, :, 1]
-                min_val, max_val = np.nanmin(values), np.nanmax(values)
-                print(f"  Value range: [{min_val:.4f}, {max_val:.4f}]")
-                print(f"  Mean value: {np.nanmean(values):.4f}")
-                print(f"  Contains NaN: {np.isnan(values).any()}")
-                print(f"  Contains Inf: {np.isinf(values).any()}")
-    else:
-        print(f"WARNING: Expected 3D array, got {aeci_var_data.ndim}D")
-        # Try to analyze based on actual dimensions
-        if aeci_var_data.ndim == 2:
-            print("Assuming array format is (runs, values):")
-            for run in range(min(2, aeci_var_data.shape[0])):
-                print(f"Run {run}: {aeci_var_data[run, :]}")
-        elif aeci_var_data.ndim == 1:
-            print("Assuming array is a flat list of values:")
-            print(f"Values: {aeci_var_data[:min(10, len(aeci_var_data))]}")
-    
-    print("=== End AECI Variance Data Inspection ===\n")
-
 # Helper function
 def safe_stack(data_list):
     """Safely stacks a list of numpy arrays, handling empty lists/arrays and AECI variance data."""
@@ -4736,37 +4527,6 @@ def calculate_metric_stats(data_list):
 #########################################
 # Plotting Functions
 #########################################
-
-# helper function
-def _plot_mean_iqr(ax, ticks, data_array, data_index, label, color, linestyle='-'):
-    """Helper to plot mean and IQR band."""
-    # --- Robust Check ---
-    if data_array is None or data_array.size == 0 or data_array.ndim < 2 or data_array.shape[1] == 0 or data_index >= data_array.shape[2]:
-        print(f"Warning: Skipping plot for {label} due to invalid data shape {data_array.shape if data_array is not None else 'None'} or index {data_index}.")
-        return
-    T = data_array.shape[1] # Get number of ticks from data
-    # Ensure ticks array matches data length
-    if ticks is None or len(ticks) != T:
-        print(f"Warning: Tick length mismatch for {label} ({len(ticks) if ticks is not None else 'None'} vs {T}). Using default range.")
-        ticks = np.arange(T) # Default ticks if mismatch
-
-    # --- Calculate Stats ---
-    try:
-        mean = np.mean(data_array[:, :, data_index], axis=0)
-        lower = np.percentile(data_array[:, :, data_index], 25, axis=0)
-        upper = np.percentile(data_array[:, :, data_index], 75, axis=0)
-    except IndexError: # Handle cases where percentile calculation might fail on edge cases
-         print(f"Warning: Could not calculate percentiles for {label}. Plotting mean only.")
-         mean = np.mean(data_array[:, :, data_index], axis=0)
-         lower = mean
-         upper = mean
-    except Exception as e:
-         print(f"Error calculating stats for {label}: {e}")
-         return # Skip plotting this line
-
-    # --- Plot Mean and IQR Band ---
-    ax.plot(ticks, mean, label=label, color=color, linestyle=linestyle)
-    ax.fill_between(ticks, lower, upper, color=color, alpha=0.4) # Draws the shaded band
 
 def safe_plot(ax, data_array, col_idx, label, color, linestyle='-', is_ratio=True, ticks=None):
     """
@@ -5020,15 +4780,6 @@ def plot_grid_state(model, tick, save_dir="grid_plots"):
         # *** FIX: Use confidence_count_grid for division ***
         avg_confidence_grid[valid_counts] = confidence_sum_grid[valid_counts] / confidence_count_grid[valid_counts]
 
-        # Optional: Print stats just before plotting (for debugging)
-        # print(f"\n--- Tick {tick} Confidence Plot Stats ---")
-        # if np.isnan(avg_confidence_grid).any():
-        #     print(f"  Min: {np.nanmin(avg_confidence_grid):.4f}, Max: {np.nanmax(avg_confidence_grid):.4f}, Mean: {np.nanmean(avg_confidence_grid):.4f}")
-        # elif avg_confidence_grid.size > 0:
-        #     print(f"  Min: {np.min(avg_confidence_grid):.4f}, Max: {np.max(avg_confidence_grid):.4f}, Mean: {np.mean(avg_confidence_grid):.4f}")
-        # else: print("  Grid is empty!")
-        # print(f"--- End Confidence Plot Stats ---")
-
 
     # Use a sequential colormap like 'magma' or 'plasma' for confidence (0 to 1)
     im_conf = ax[0, 2].imshow(avg_confidence_grid.T, cmap='magma', origin='lower', vmin=0, vmax=1, interpolation='nearest')
@@ -5097,150 +4848,9 @@ def plot_grid_state(model, tick, save_dir="grid_plots"):
 
 
     # --- Final Touches for Layout ---
-    # plt.tight_layout(rect=[0, 0.03, 1, 0.95]) # Adjust layout to make room for suptitle
     filepath = os.path.join(save_dir, f"grid_state_tick_{tick:04d}.png")
     plt.savefig(filepath)
     plt.close(fig) # Close figure to free memory
-
-def plot_summary_echo_indices_vs_alignment(results_b, alignment_values, title_suffix="Exp B"):
-    """Plots the mean values of echo chamber indices vs AI alignment as boxplots.
-    This function aggregates data across the entire simulation run, not just final values."""
-    num_params = len(alignment_values)
-    boxplot_width = 0.15
-
-    fig, axes = plt.subplots(2, 2, figsize=(14, 10), sharex=True)
-    fig.suptitle(f"Echo Chamber Indices vs AI Alignment ({title_suffix})", fontsize=16)
-
-    # For each metric, we'll gather data across all timestamps for each alignment level
-    seci_exploit_data = []
-    seci_explor_data = []
-    aeci_var_data = []
-    aeci_call_exploit_data = []
-    aeci_call_explor_data = []
-    comp_ai_trust_var_data = []
-
-    # Collect data for each alignment level
-    alignment_labels = []
-    for align in alignment_values:
-        alignment_labels.append(str(align))
-        res = results_b.get(align)
-        if not res:
-            # Add empty data for this alignment level to keep positions consistent
-            seci_exploit_data.append([])
-            seci_explor_data.append([])
-            aeci_var_data.append([])
-            aeci_call_exploit_data.append([])
-            aeci_call_explor_data.append([])
-            comp_ai_trust_var_data.append([])
-            continue
-
-        # Extract time-series data and calculate means across all time steps
-        def get_all_values(data_array, col_index):
-            if data_array is None or not isinstance(data_array, np.ndarray) or data_array.size == 0:
-                return []
-
-            if data_array.ndim < 3 or data_array.shape[1] == 0 or col_index >= data_array.shape[2]:
-                return []
-
-            # Get all values for all runs and all time steps
-            # Reshape to flatten across runs and time steps
-            values = data_array[:, :, col_index].flatten()
-
-            # Handle NaNs and infinities
-            values = values[~np.isnan(values) & ~np.isinf(values)]
-
-            # IMPORTANT: Don't clip SECI or AECI-Var! They range from -1 to +1
-            # Negative values indicate echo chambers, which we need to see!
-            # Only AI call ratios are true [0,1] proportions
-
-            return values
-
-        # Collect data for each metric
-        seci_exploit_data.append(get_all_values(res.get("seci"), 1))
-        seci_explor_data.append(get_all_values(res.get("seci"), 2))
-        aeci_var_data.append(get_all_values(res.get("aeci_variance"), 1))
-        aeci_call_exploit_data.append(get_all_values(res.get("aeci"), 1))
-        aeci_call_explor_data.append(get_all_values(res.get("aeci"), 2))
-        comp_ai_trust_var_data.append(get_all_values(res.get("component_ai_trust_variance"), 1))
-
-    # Plot SECI boxplots
-    ax = axes[0, 0]
-    positions = np.arange(len(alignment_values))
-    bplot_exploit = ax.boxplot(seci_exploit_data, positions=positions-boxplot_width/2,
-                             widths=boxplot_width, patch_artist=True,
-                             boxprops=dict(facecolor='maroon', alpha=0.7),
-                             flierprops=dict(marker='o', markerfacecolor='maroon', markersize=3, alpha=0.7),
-                             medianprops=dict(color='black'))
-    bplot_explor = ax.boxplot(seci_explor_data, positions=positions+boxplot_width/2,
-                             widths=boxplot_width, patch_artist=True,
-                             boxprops=dict(facecolor='salmon', alpha=0.7),
-                             flierprops=dict(marker='o', markerfacecolor='salmon', markersize=3, alpha=0.7),
-                             medianprops=dict(color='black'))
-    ax.set_ylabel("SECI Value")
-    ax.set_title("Social Echo Chamber (SECI)\n(Negative = Echo Chamber, Positive = Diversification)")
-    ax.legend([bplot_exploit["boxes"][0], bplot_explor["boxes"][0]], ['Exploit', 'Explor'], loc='best')
-    ax.grid(True, axis='y', linestyle='--', alpha=0.6)
-    ax.axhline(0, color='black', linestyle='-', linewidth=0.8, alpha=0.5)  # Zero reference line
-    ax.set_ylim(-1.05, 1.05)  # SECI ranges from -1 to +1, allow full range
-
-    # Plot AECI Variance boxplots
-    ax = axes[0, 1]
-    bplot_aeci_var = ax.boxplot(aeci_var_data, positions=positions,
-                              widths=boxplot_width*1.5, patch_artist=True,
-                              boxprops=dict(facecolor='magenta', alpha=0.7),
-                              flierprops=dict(marker='o', markerfacecolor='magenta', markersize=3, alpha=0.7),
-                              medianprops=dict(color='black'))
-    ax.set_ylabel("AI Belief Variance Reduction")
-    ax.set_title("AI Echo Chamber (AECI-Var)\n(Negative = AI Echo Chamber, Positive = AI Diversifies)")
-    ax.legend([bplot_aeci_var["boxes"][0]], ['AI Reliant Group'], loc='best')
-    ax.grid(True, axis='y', linestyle='--', alpha=0.6)
-    ax.axhline(0, color='black', linestyle='-', linewidth=0.8, alpha=0.5)  # Zero reference line
-    ax.set_ylim(-1.05, 1.05)  # AECI-Var ranges from -1 to +1, allow full range
-
-    # Plot AI Call Ratio boxplots
-    ax = axes[1, 0]
-    bplot_call_exploit = ax.boxplot(aeci_call_exploit_data, positions=positions-boxplot_width/2,
-                                  widths=boxplot_width, patch_artist=True,
-                                  boxprops=dict(facecolor='darkblue', alpha=0.7),
-                                  flierprops=dict(marker='o', markerfacecolor='darkblue', markersize=3, alpha=0.7),
-                                  medianprops=dict(color='black'))
-    bplot_call_explor = ax.boxplot(aeci_call_explor_data, positions=positions+boxplot_width/2,
-                                 widths=boxplot_width, patch_artist=True,
-                                 boxprops=dict(facecolor='skyblue', alpha=0.7),
-                                 flierprops=dict(marker='o', markerfacecolor='skyblue', markersize=3, alpha=0.7),
-                                 medianprops=dict(color='black'))
-    ax.set_ylabel("AI Call Ratio")
-    ax.set_title("AI Usage (AECI Call Ratio)")
-    ax.legend([bplot_call_exploit["boxes"][0], bplot_call_explor["boxes"][0]], ['Exploit', 'Explor'], loc='best')
-    ax.grid(True, axis='y', linestyle='--', alpha=0.6)
-    ax.set_ylim(0, 1)
-
-    # Plot Component AI Trust Variance boxplots
-    ax = axes[1, 1]
-    bplot_ai_trust_var = ax.boxplot(comp_ai_trust_var_data, positions=positions,
-                                   widths=boxplot_width*1.5, patch_artist=True,
-                                   boxprops=dict(facecolor='cyan', alpha=0.7),
-                                   flierprops=dict(marker='o', markerfacecolor='cyan', markersize=3, alpha=0.7),
-                                   medianprops=dict(color='black'))
-    ax.set_ylabel("Component AI Trust Variance")
-    ax.set_title("AI Trust Clustering")
-    ax.legend([bplot_ai_trust_var["boxes"][0]], ['Component AI Trust Var.'], loc='best')
-    ax.grid(True, axis='y', linestyle='--', alpha=0.6)
-    ax.set_ylim(bottom=0)
-
-    # Set common x-axis properties
-    for ax_row in axes:
-        for ax in ax_row:
-            ax.set_xticks(positions)
-            ax.set_xticklabels(alignment_labels)
-            ax.set_xlabel("AI Alignment Level")
-
-    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-    save_path = f"agent_model_results/boxplot_echo_{title_suffix}.png"
-    plt.savefig(save_path.replace('(','').replace(')','').replace('=','_'))
-    plt.close(fig)
-
-    return fig
 
 def plot_summary_performance_vs_alignment(results_b, alignment_values, title_suffix="Exp B"):
     """Plots summary performance metrics vs AI alignment across the entire simulation."""
@@ -5941,7 +5551,6 @@ def plot_individual_beliefs(model, agent_ids, tick, save_dir="grid_plots/individ
     for i in range(plot_idx, len(axes_flat)):
         axes_flat[i].axis('off')
 
-    # plt.tight_layout(rect=[0, 0.03, 1, 0.95])
     filepath = os.path.join(save_dir, f"individual_beliefs_tick_{tick:04d}.png")
     plt.savefig(filepath)
     plt.close(fig)
@@ -8135,119 +7744,5 @@ if __name__ == "__main__":
         print(f"\n--- Plotting Advanced Bubble Mechanics for {param_name_b} ---")
         plot_phase_diagram_bubbles(results_b, all_alignment_values, param_name="AI Alignment")
         plot_tipping_point_waterfall(results_b, all_alignment_values, param_name="AI Alignment")
-
-    ##############################################
-    # Experiment C: Vary Disaster Dynamics and Shock Magnitude
-    ##############################################
-    # COMMENTED OUT - Focus on Experiments A and B
-    # print("\n=== STARTING EXPERIMENT C ===")
-    #
-    # try:
-    #     dynamics_values = [1, 2, 3]
-    #     shock_values = [1, 2, 3]
-    #
-    #     print(f"Running experiment with {len(dynamics_values)}x{len(shock_values)} parameter combinations...")
-    #     results_c = experiment_disaster_dynamics(base_params, dynamics_values, shock_values, num_runs)
-    #
-    #     print(f"Got results for {len(results_c)} parameter combinations")
-    #
-    #     # Debug the structure of results_c
-    #     print("Parameter combinations in results_c:")
-    #     for key in sorted(results_c.keys()):
-    #         print(f"  {key}: {type(results_c[key])}")
-    #
-    #     # Generate visualizations with robust error handling
-    #     print("\n--- Creating Visualizations ---")
-    #
-    #     try:
-    #         print("Generating comprehensive analysis...")
-    #         plot_experiment_c_comprehensive(results_c, dynamics_values, shock_values)
-    #         print("Comprehensive analysis complete")
-    #     except Exception as e:
-    #         print(f"Error in comprehensive analysis: {e}")
-    #         import traceback
-    #         traceback.print_exc()
-    #
-    #     try:
-    #         print("Generating evolution plots...")
-    #         plot_experiment_c_evolution(results_c, dynamics_values, shock_values)
-    #         print("Evolution plots complete")
-    #     except Exception as e:
-    #         print(f"Error in evolution plots: {e}")
-    #         import traceback
-    #         traceback.print_exc()
-    #
-    #     # Debug one specific parameter combination
-    #     if (1, 1) in results_c:
-    #         print("\nExamining data for dynamics=1, shock=1:")
-    #         sample_result = results_c[(1, 1)]
-    #         for key in sorted(sample_result.keys()):
-    #             if isinstance(sample_result[key], np.ndarray):
-    #                 print(f"  {key}: ndarray with shape {sample_result[key].shape}")
-    #             elif isinstance(sample_result[key], list):
-    #                 print(f"  {key}: list with {len(sample_result[key])} items")
-    #             else:
-    #                 print(f"  {key}: {type(sample_result[key])}")
-    #
-    # except Exception as e:
-    #     print(f"Experiment C failed: {e}")
-    #     import traceback
-    #     traceback.print_exc()
-    #
-    # print("=== EXPERIMENT C COMPLETED ===")
-
-    ##############################################
-    # Experiment D: Vary Learning Rate and Epsilon
-    ##############################################
-    # COMMENTED OUT - Focus on Experiments A and B
-    # learning_rate_values = [0.03, 0.05, 0.07]
-    # epsilon_values = [0.2, 0.3]
-    # results_d = experiment_learning_trust(base_params, learning_rate_values, epsilon_values, num_runs)
-    #
-    # # --- Plot 1: Final SECI vs LR/Epsilon (Bar Chart) ---
-    # fig_d_seci, ax_d_seci = plt.subplots(1, 2, figsize=(12, 5), sharey=True)
-    # fig_d_seci.suptitle("Experiment D: Final SECI vs Learning Rate / Epsilon (Mean & IQR)")
-    # bar_width = 0.35
-    #
-    # for idx, eps in enumerate(epsilon_values):
-    #     means_exploit = []; errors_exploit = [[],[]]
-    #     means_explor = []; errors_explor = [[],[]]
-    #
-    #     for lr in learning_rate_values:
-    #         res_key = (lr, eps)
-    #         if res_key not in results_d: continue
-    #         res = results_d[res_key]
-    #
-    #         if res["seci"].ndim >= 3 and res["seci"].shape[1] > 0:
-    #             seci_exploit_final = res["seci"][:, -1, 1]
-    #             seci_explor_final = res["seci"][:, -1, 2]
-    #
-    #             mean_exp = np.mean(seci_exploit_final); p25_exp = np.percentile(seci_exploit_final, 25); p75_exp = np.percentile(seci_exploit_final, 75)
-    #             mean_er = np.mean(seci_explor_final); p25_er = np.percentile(seci_explor_final, 25); p75_er = np.percentile(seci_explor_final, 75)
-    #
-    #             means_exploit.append(mean_exp); errors_exploit[0].append(mean_exp-p25_exp); errors_exploit[1].append(p75_exp-mean_exp)
-    #             means_explor.append(mean_er); errors_explor[0].append(mean_er-p25_er); errors_explor[1].append(p75_er-mean_er)
-    #         else:
-    #             means_exploit.append(0); errors_exploit[0].append(0); errors_exploit[1].append(0)
-    #             means_explor.append(0); errors_explor[0].append(0); errors_explor[1].append(0)
-    #
-    #     x_pos = np.arange(len(learning_rate_values))
-    #     ax = ax_d_seci[idx]
-    #     rects1 = ax.bar(x_pos - bar_width/2, means_exploit, bar_width, yerr=errors_exploit, capsize=4, label='Exploitative', color='tab:blue', error_kw=dict(alpha=0.5))
-    #     rects2 = ax.bar(x_pos + bar_width/2, means_explor, bar_width, yerr=errors_explor, capsize=4, label='Exploratory', color='tab:orange', error_kw=dict(alpha=0.5))
-    #
-    #     ax.set_xlabel("Learning Rate")
-    #     ax.set_ylabel("Mean Final SECI")
-    #     ax.set_title(f"Epsilon = {eps}")
-    #     ax.set_xticks(x_pos)
-    #     ax.set_xticklabels(learning_rate_values)
-    #     ax.legend()
-    #     ax.grid(True, axis='y', linestyle='--', alpha=0.6)
-    #     ax.set_ylim(bottom=0)
-    #
-    # plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-    # plt.savefig("agent_model_results/experiment_d_seci.png")
-    # plt.close(fig_d_seci)
-    # gc.collect()
 
 # Note: Google Drive is mounted at the top of the file for Colab compatibility
