@@ -1709,9 +1709,12 @@ if __name__ == '__main__':
     )
     parser.add_argument(
         '--single-gap', type=float, default=None, metavar='G',
-        help='Run N_FACTOR_RUNS replications for one gap-scalar value (over all '
-             'alignment levels) and save the result to --out-file.  '
-             'Used by the CI matrix job.',
+        help='Run N_GAP_RUNS replications for one (g, α) pair and save the result '
+             'to --out-file.  Requires --gap-alpha.  Used by the CI matrix job.',
+    )
+    parser.add_argument(
+        '--gap-alpha', type=float, default=None, metavar='ALPHA',
+        help='Alignment level for --single-gap mode (required when used in CI matrix).',
     )
     args = parser.parse_args()
 
@@ -1774,30 +1777,28 @@ if __name__ == '__main__':
         import sys; sys.exit(0)
 
     # ------------------------------------------------------------------
-    # Mode: --single-gap  (one parallel CI worker per gap-scalar value)
+    # Mode: --single-gap  (one parallel CI worker per g × α cell)
     # ------------------------------------------------------------------
     if args.single_gap is not None:
-        g = args.single_gap
+        g     = args.single_gap
+        alpha = args.gap_alpha          # required when used in CI matrix
         d_ex, dlt_ex, d_er, dlt_er = _gap_d_delta(g)
-        gap_base_sg = {**base_params}   # full ticks — gap sweep needs full warm-up
-        print(f'Single-gap mode: g={g}, ticks={base_params["ticks"]}, n_runs={N_GAP_RUNS}')
-        g_alpha_results = []
-        for alpha in ALIGNMENT_SWEEP:
-            params = {
-                **gap_base_sg,
-                'ai_alignment_level': alpha,
-                'd_exploit':    d_ex,
-                'delta_exploit': dlt_ex,
-                'd_explor':     d_er,
-                'delta_explor': dlt_er,
-            }
-            g_alpha_results.append(
-                run_replicated(params, N_GAP_RUNS, f'g={g} α={alpha:.1f}')
-            )
-        out = args.out_file or f'filter_bubble_results/bubble_gap_{g}.json'
+        print(f'Single-gap mode: g={g}, α={alpha}, '
+              f'ticks={base_params["ticks"]}, n_runs={N_GAP_RUNS}')
+        params = {
+            **base_params,
+            'ai_alignment_level': alpha,
+            'd_exploit':    d_ex,
+            'delta_exploit': dlt_ex,
+            'd_explor':     d_er,
+            'delta_explor': dlt_er,
+        }
+        result = run_replicated(params, N_GAP_RUNS, f'g={g} α={alpha:.1f}')
+        out = args.out_file or \
+              f'filter_bubble_results/bubble_gap_{g}_alpha_{alpha:.1f}.json'
         os.makedirs(os.path.dirname(out) or '.', exist_ok=True)
         with open(out, 'w') as f:
-            json.dump({'gap': g, 'all_results': g_alpha_results}, f)
+            json.dump({'gap': g, 'alpha': alpha, 'result': result}, f)
         print(f'Saved → {out}')
         import sys; sys.exit(0)
 
@@ -1807,13 +1808,24 @@ if __name__ == '__main__':
     if args.collect_gap_and_plot:
         import glob as _glob
         results_dir = args.results_dir
-        gap_results = {}
-        for path in sorted(_glob.glob(os.path.join(results_dir, 'bubble_gap_*.json'))):
+        # New format: one file per (g, α) pair — bubble_gap_{g}_alpha_{alpha}.json
+        per_cell = {}
+        for path in sorted(_glob.glob(os.path.join(results_dir, 'bubble_gap_*_alpha_*.json'))):
             with open(path) as f:
                 d = json.load(f)
-            gap_results[float(d['gap'])] = {'all_results': d['all_results']}
-        if not gap_results:
-            raise FileNotFoundError(f'No bubble_gap_*.json files found in {results_dir}')
+            per_cell.setdefault(float(d['gap']), {})[float(d['alpha'])] = d['result']
+        if not per_cell:
+            raise FileNotFoundError(
+                f'No bubble_gap_*_alpha_*.json files found in {results_dir}')
+        # Assemble into all_results list in ALIGNMENT_SWEEP order for plot_gap_sweep
+        gap_results = {}
+        for g, alpha_dict in per_cell.items():
+            missing = [a for a in ALIGNMENT_SWEEP if a not in alpha_dict]
+            if missing:
+                print(f'Warning: g={g} missing α levels {missing}')
+            gap_results[g] = {
+                'all_results': [alpha_dict[a] for a in ALIGNMENT_SWEEP if a in alpha_dict]
+            }
         print(f'Loaded gap results for g={sorted(gap_results)}')
         os.makedirs(save_dir, exist_ok=True)
         plot_gap_sweep(gap_results, save_dir)
@@ -1859,12 +1871,16 @@ if __name__ == '__main__':
         print(f'  rumor: {sorted(rumor_results)}, '
               f'disaster: {sorted(disaster_results)}, mix: {sorted(mix_results)}')
 
-        # Load gap results produced by --single-gap parallel jobs
-        gap_results = {}
-        for path in _glob.glob(os.path.join(results_dir, 'bubble_gap_*.json')):
+        # Load gap results produced by --single-gap parallel jobs (per-(g,α) files)
+        per_cell = {}
+        for path in _glob.glob(os.path.join(results_dir, 'bubble_gap_*_alpha_*.json')):
             with open(path) as f:
                 d = json.load(f)
-            gap_results[float(d['gap'])] = {'all_results': d['all_results']}
+            per_cell.setdefault(float(d['gap']), {})[float(d['alpha'])] = d['result']
+        gap_results = {
+            g: {'all_results': [alpha_dict[a] for a in ALIGNMENT_SWEEP if a in alpha_dict]}
+            for g, alpha_dict in per_cell.items()
+        }
         print(f'  gap scalars: {sorted(gap_results)}')
 
         save_results(all_results, rumor_results, disaster_results, mix_results,
