@@ -7,11 +7,6 @@ name: Run Gap Sweep only
 # Trigger: GitHub → Actions → "Run Gap Sweep only" → Run workflow
 on:
   workflow_dispatch:
-    inputs:
-      ticks:
-        description: "Simulation ticks per run (must match your primary sweep)"
-        required: false
-        default: "200"
 
 env:
   MPLBACKEND: Agg
@@ -44,8 +39,7 @@ jobs:
           python3 test_filter_bubbles.py \
             --single-gap ${{ matrix.g }} \
             --gap-alpha  ${{ matrix.alpha }} \
-            --out-file   filter_bubble_results/bubble_gap_${{ matrix.g }}_alpha_${{ matrix.alpha }}.json \
-            --ticks      ${{ inputs.ticks }}
+            --out-file   filter_bubble_results/bubble_gap_${{ matrix.g }}_alpha_${{ matrix.alpha }}.json
 
       - uses: actions/upload-artifact@v4
         with:

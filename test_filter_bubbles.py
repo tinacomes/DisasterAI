@@ -71,9 +71,10 @@ STEADY_STATE_WINDOW = 15
 
 N_RUNS        = 10   # replications for primary alignment sweep
 N_FACTOR_RUNS = 2    # replications for one-at-a-time factor sweeps (rumour, disaster, mix)
-N_GAP_RUNS    = 10   # replications for cognitive gap sweep; full 250-tick runs give stable steady-state, so N=10 suffices
-                     # because α* is selected by argmin of a noisy 11-point composite curve;
-                     # N=2 gives SE ≈ σ/√2 ≈ 70% of std, making argmin essentially random
+N_GAP_RUNS    = N_RUNS  # MUST equal N_RUNS: gap sweep uses the same range-normalised criterion as
+                        # the primary sweep, so equal N keeps noise levels matched and g=1.0
+                        # reproduces the primary α*.  α* is argmin of a noisy 11-point composite;
+                        # N=2 gives SE ≈ σ/√2 ≈ 70% of std, making argmin essentially random.
 
 FACTOR_ALPHA       = 0.5
 RUMOR_SWEEP        = [0.0, 0.5, 1.0]
@@ -1471,7 +1472,7 @@ def plot_gap_sweep(gap_results, save_dir):
         metrics_g = compute_goldilocks_metrics(results_g)
         # α* uses the same range-normalised criteria as the primary alignment sweep
         # (total_bubble_norm / total_score_norm) so g=1.0 reproduces the baseline α*.
-        # N_GAP_RUNS=20 matches N_RUNS, keeping normalisation stable.
+        # N_GAP_RUNS == N_RUNS ensures equal noise levels across both sweeps.
         norm_bubble_vals = [metrics_g[a]['total_bubble_norm'] for a in ALIGNMENT_SWEEP]
         idx    = int(np.argmin(norm_bubble_vals))
         a_star = ALIGNMENT_SWEEP[idx]
