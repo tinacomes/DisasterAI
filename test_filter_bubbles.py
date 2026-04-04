@@ -1779,6 +1779,8 @@ if __name__ == '__main__':
     if args.single_gap is not None:
         g     = args.single_gap
         alpha = args.gap_alpha          # required when used in CI matrix
+        if alpha is None:
+            parser.error('--gap-alpha is required with --single-gap')
         d_ex, dlt_ex, d_er, dlt_er = _gap_d_delta(g)
         print(f'Single-gap mode: g={g}, α={alpha}, '
               f'ticks={base_params["ticks"]}, n_runs={N_GAP_RUNS}')
