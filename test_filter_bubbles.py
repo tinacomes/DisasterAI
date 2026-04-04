@@ -58,7 +58,7 @@ base_params = {
     'disaster_dynamics': 2,
     'width': 30,
     'height': 30,
-    'ticks': 200,
+    'ticks': 250,
     'learning_rate': 0.1,
     'epsilon': 0.3,
     'exploit_trust_lr': 0.015,
@@ -69,7 +69,7 @@ base_params = {
 ALIGNMENT_SWEEP    = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
 STEADY_STATE_WINDOW = 15
 
-N_RUNS        = 10   # replications for primary alignment sweep
+N_RUNS        = 20   # replications for primary alignment sweep
 N_FACTOR_RUNS = 2    # replications for one-at-a-time factor sweeps (rumour, disaster, mix)
 N_GAP_RUNS    = N_RUNS  # MUST equal N_RUNS: gap sweep uses the same range-normalised criterion as
                         # the primary sweep, so equal N keeps noise levels matched and g=1.0
