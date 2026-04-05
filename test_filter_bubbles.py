@@ -39,6 +39,7 @@ For large-N CI runs use simulate.py + plot_results.py instead.
 
 import argparse
 import json
+import random
 import numpy as np
 import matplotlib.pyplot as plt
 from DisasterAI_Model import DisasterModel, HumanAgent
