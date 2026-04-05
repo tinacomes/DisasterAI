@@ -39,6 +39,7 @@ For large-N CI runs use simulate.py + plot_results.py instead.
 
 import argparse
 import json
+import random
 import numpy as np
 import matplotlib.pyplot as plt
 from DisasterAI_Model import DisasterModel, HumanAgent
@@ -58,7 +59,7 @@ base_params = {
     'disaster_dynamics': 2,
     'width': 30,
     'height': 30,
-    'ticks': 200,
+    'ticks': 250,
     'learning_rate': 0.1,
     'epsilon': 0.3,
     'exploit_trust_lr': 0.015,
@@ -69,11 +70,12 @@ base_params = {
 ALIGNMENT_SWEEP    = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
 STEADY_STATE_WINDOW = 15
 
-N_RUNS        = 10   # replications for primary alignment sweep
+N_RUNS        = 20   # replications for primary alignment sweep
 N_FACTOR_RUNS = 2    # replications for one-at-a-time factor sweeps (rumour, disaster, mix)
-N_GAP_RUNS    = 10   # replications for cognitive gap sweep; full 250-tick runs give stable steady-state, so N=10 suffices
-                     # because α* is selected by argmin of a noisy 11-point composite curve;
-                     # N=2 gives SE ≈ σ/√2 ≈ 70% of std, making argmin essentially random
+N_GAP_RUNS    = N_RUNS  # MUST equal N_RUNS: gap sweep uses the same range-normalised criterion as
+                        # the primary sweep, so equal N keeps noise levels matched and g=1.0
+                        # reproduces the primary α*.  α* is argmin of a noisy 11-point composite;
+                        # N=2 gives SE ≈ σ/√2 ≈ 70% of std, making argmin essentially random.
 
 FACTOR_ALPHA       = 0.5
 RUMOR_SWEEP        = [0.0, 0.5, 1.0]
@@ -158,6 +160,17 @@ def _first_sustained_cross(series, threshold, sustain=5, direction='up'):
 
 def run_one_sim(params):
     """Run a single simulation and return per-tick metrics dict."""
+    # Re-seed from OS entropy before every run.  DisasterAI_Model uses Python's
+    # global `random` module (72 call-sites, no self.random) and numpy's global
+    # RNG (4 call-sites).  Without a per-run reset the global state accumulated
+    # from previous runs in the same process changes the random trajectory of
+    # each simulation.  The primary sweep (sequential, one process) therefore
+    # samples from a different region of the random sequence than the gap-sweep
+    # CI jobs (fresh process per cell), causing systematically different α* even
+    # though all model parameters are identical.  seed()/seed(None) re-seeds
+    # from OS entropy, making every call independent regardless of call site.
+    random.seed()
+    np.random.seed()
     model = DisasterModel(**params)
 
     seci_exploit, seci_explor           = [], []
@@ -1471,7 +1484,7 @@ def plot_gap_sweep(gap_results, save_dir):
         metrics_g = compute_goldilocks_metrics(results_g)
         # α* uses the same range-normalised criteria as the primary alignment sweep
         # (total_bubble_norm / total_score_norm) so g=1.0 reproduces the baseline α*.
-        # N_GAP_RUNS=20 matches N_RUNS, keeping normalisation stable.
+        # N_GAP_RUNS == N_RUNS ensures equal noise levels across both sweeps.
         norm_bubble_vals = [metrics_g[a]['total_bubble_norm'] for a in ALIGNMENT_SWEEP]
         idx    = int(np.argmin(norm_bubble_vals))
         a_star = ALIGNMENT_SWEEP[idx]
@@ -1778,6 +1791,8 @@ if __name__ == '__main__':
     if args.single_gap is not None:
         g     = args.single_gap
         alpha = args.gap_alpha          # required when used in CI matrix
+        if alpha is None:
+            parser.error('--gap-alpha is required with --single-gap')
         d_ex, dlt_ex, d_er, dlt_er = _gap_d_delta(g)
         print(f'Single-gap mode: g={g}, α={alpha}, '
               f'ticks={base_params["ticks"]}, n_runs={N_GAP_RUNS}')
