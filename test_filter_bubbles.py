@@ -39,7 +39,6 @@ For large-N CI runs use simulate.py + plot_results.py instead.
 
 import argparse
 import json
-import random
 import numpy as np
 import matplotlib.pyplot as plt
 from DisasterAI_Model import DisasterModel, HumanAgent
@@ -59,7 +58,7 @@ base_params = {
     'disaster_dynamics': 2,
     'width': 30,
     'height': 30,
-    'ticks': 250,
+    'ticks': 200,
     'learning_rate': 0.1,
     'epsilon': 0.3,
     'exploit_trust_lr': 0.015,
@@ -160,17 +159,6 @@ def _first_sustained_cross(series, threshold, sustain=5, direction='up'):
 
 def run_one_sim(params):
     """Run a single simulation and return per-tick metrics dict."""
-    # Re-seed from OS entropy before every run.  DisasterAI_Model uses Python's
-    # global `random` module (72 call-sites, no self.random) and numpy's global
-    # RNG (4 call-sites).  Without a per-run reset the global state accumulated
-    # from previous runs in the same process changes the random trajectory of
-    # each simulation.  The primary sweep (sequential, one process) therefore
-    # samples from a different region of the random sequence than the gap-sweep
-    # CI jobs (fresh process per cell), causing systematically different α* even
-    # though all model parameters are identical.  seed()/seed(None) re-seeds
-    # from OS entropy, making every call independent regardless of call site.
-    random.seed()
-    np.random.seed()
     model = DisasterModel(**params)
 
     seci_exploit, seci_explor           = [], []
