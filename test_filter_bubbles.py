@@ -71,36 +71,46 @@ STEADY_STATE_WINDOW = 15
 
 N_RUNS        = 20   # replications for primary alignment sweep
 N_FACTOR_RUNS = 2    # replications for one-at-a-time factor sweeps (rumour, disaster, mix)
-N_GAP_RUNS    = 10   # replications for cognitive gap sweep — intentionally decoupled from N_RUNS.
-                     # Each CI cell runs N_GAP_RUNS sims sequentially in one process; without
-                     # per-run RNG seeding, runs beyond ~10 sample from a biased carry-over
-                     # region that inflates echo-chamber metrics and widens SECI bands.
-                     # N=10 keeps the sweep within the well-behaved early portion of the sequence.
+N_GAP_RUNS    = 20   # replications for cognitive gap sweep — matches N_RUNS.
+                     # Each replicate is seeded with its index in run_replicated(), so results
+                     # are independent of N and of any prior simulation state in the process.
 
 FACTOR_ALPHA       = 0.5
 RUMOR_SWEEP        = [0.0, 0.5, 1.0]
 DISASTER_SWEEP     = [0, 2, 3]
 EXPLOITATIVE_SWEEP = [0.2, 0.5, 0.8]
 
-# Gap-scalar sweep for D/δ cognitive polarisation experiment.
-# g=0: both agent types identical (cognitive homogeneity null)
-# g=1: baseline (D_exploit=2.0, D_explor=4.0, δ_exploit=3.5, δ_explor=1.2)
-# Invariant maintained for any g>0: D_exploit < D_explor AND δ_exploit > δ_explor
-GAP_SWEEP = [0.0, 0.5, 1.0, 1.5]
+# 2D cognitive polarisation sweep: gap scalar g × acceptance-window midpoint d_mid.
+#
+# g controls the *relative* gap between agent types (how different they are):
+#   g=0: both types identical (homogeneous null); g=1: baseline calibration
+#   Invariant for g>0: D_exploit < D_explor AND δ_exploit > δ_explor
+#
+# d_mid controls the *absolute* level of openness (how open the population is):
+#   d_mid=2.0: uniformly narrow/closed; d_mid=3.0: baseline; d_mid=4.0: uniformly open
+#
+# Baseline condition: d_mid=3.0, g=1.0 → D_exploit=2.0/δ=3.5 vs D_explor=4.0/δ=1.2
+# This exactly reproduces the primary Goldilocks sweep parameters.
+GAP_SWEEP    = [0.0, 0.5, 1.0, 1.5]
+D_MID_SWEEP  = [2.0, 3.0, 4.0]   # absolute acceptance-window midpoint sweep
 
-_D_MID     = 3.0   # (2.0 + 4.0) / 2
-_D_HALF    = 1.0   # (4.0 - 2.0) / 2
-_DELTA_MID = 2.35  # (3.5 + 1.2) / 2
-_DELTA_HALF = 1.15 # (3.5 - 1.2) / 2
+_D_HALF     = 1.0    # absolute half-width of inter-type gap (fixed across d_mid levels)
+_DELTA_MID  = 2.35   # (3.5 + 1.2) / 2
+_DELTA_HALF = 1.15   # (3.5 - 1.2) / 2
 
 
-def _gap_d_delta(g):
-    """Return (d_exploit, delta_exploit, d_explor, delta_explor) for gap scalar g."""
+def _gap_d_delta(g, d_mid=3.0):
+    """Return (d_exploit, delta_exploit, d_explor, delta_explor) for gap scalar g and midpoint d_mid.
+
+    d_mid shifts the entire acceptance-window distribution up/down.
+    g stretches the gap between exploitative (narrow) and exploratory (wide) agents.
+    δ values depend only on g, so steepness is held constant across d_mid levels.
+    """
     return (
-        max(_D_MID - g * _D_HALF, 0.1),           # d_exploit  — floor at 0.1
-        max(_DELTA_MID + g * _DELTA_HALF, 0.1),    # delta_exploit
-        _D_MID + g * _D_HALF,                      # d_explor
-        max(_DELTA_MID - g * _DELTA_HALF, 0.1),    # delta_explor — floor at 0.1
+        max(d_mid - g * _D_HALF,  0.5),           # d_exploit  — floor at 0.5
+        max(_DELTA_MID + g * _DELTA_HALF, 0.1),   # delta_exploit
+        d_mid + g * _D_HALF,                       # d_explor
+        max(_DELTA_MID - g * _DELTA_HALF, 0.1),   # delta_explor — floor at 0.1
     )
 
 
@@ -487,6 +497,11 @@ def run_replicated(params, n_runs, label=''):
     runs = []
     for i in range(n_runs):
         print(f"  Replicate {i+1}/{n_runs}...")
+        # Seed each replicate independently so results are unaffected by N and
+        # by what other simulations ran before this call in the same process.
+        import random as _random
+        _random.seed(i)
+        np.random.seed(i)
         runs.append(run_one_sim(params))
     return _aggregate(runs)
 
@@ -527,7 +542,7 @@ def compute_goldilocks_metrics(all_results):
             key_r = key_r or key_e.replace('exploit', 'explor')
             m = (ss(res[f'{key_e}_mean']) + ss(res[f'{key_r}_mean'])) / 2
             s = (ss(res[f'{key_e}_std'])  + ss(res[f'{key_r}_std']))  / 2
-            return m, s
+            return m, s / np.sqrt(res.get('n_runs', N_GAP_RUNS))
 
         def runs_pair(key_e, key_r=None):
             """Per-run late-run values averaged over exploit+explor, for boxplots."""
@@ -550,7 +565,7 @@ def compute_goldilocks_metrics(all_results):
         #   total_bubble = |SECI_var| + |AECI_var| a symmetric, coherent formula.
         # aeci_var is per-tick → use 75-tick window for consistency with SECI.
         aeci_m = ss(res['aeci_var_mean'], TICK_WINDOW)
-        aeci_s = ss(res['aeci_var_std'],  TICK_WINDOW)
+        aeci_s = ss(res['aeci_var_std'],  TICK_WINDOW) / np.sqrt(res.get('n_runs', N_GAP_RUNS))
         mae_m,  mae_s  = ms('mae_exploit',  'mae_explor')
         prec_m, prec_s = ms('prec_exploit', 'prec_explor')
         # Per-tick series: use 75-tick window to match SECI cadence
@@ -1440,142 +1455,191 @@ def plot_periphery_gap(all_results, metrics, save_dir):
 # ---------------------------------------------------------------------------
 
 def plot_gap_sweep(gap_results, save_dir):
-    """2×2 figure: effect of cognitive polarisation (gap scalar g) at fixed α.
+    """2×2 figure: 2D cognitive polarisation sweep — gap scalar g × midpoint d_mid.
 
-    g linearly scales the cognitive difference between exploitative and exploratory
-    agents from a shared midpoint (D_mid=3.0, δ_mid=2.35):
-        d_exploit(g)     = 3.0 − g       δ_exploit(g) = 2.35 + 1.15·g
-        d_explor(g)      = 3.0 + g       δ_explor(g)  = 2.35 − 1.15·g
-    g=0 → all agents identical at (D=3.0, δ=2.35).
-    g=1 (baseline) → (D_ex=2.0, δ_ex=3.5) vs (D_er=4.0, δ_er=1.2).
+    gap_results structure: {d_mid: {g: {'all_results': [per-alpha result dicts]}}}
 
-    α* uses the same range-normalised criteria (total_bubble_norm / total_score_norm)
-    as the primary alignment sweep, so g=1.0 reproduces the baseline α*.
+    The two axes disentangle:
+      g     — relative inter-type cognitive gap (how *different* agents are)
+      d_mid — absolute acceptance-window midpoint (how *open* the population is)
 
-    Panel layout:
-      (0,0) α* bar chart — directly comparable across g
-      (0,1) Raw |SECI|+|AECI| at α* — directly comparable across g
-      (1,0) SECI at α* line plot (auto-scaled)
-      (1,1) MAE at α* line plot — operational outcome at the Goldilocks point
+    Baseline: d_mid=3.0, g=1.0 → D_exploit=2.0/δ=3.5 vs D_explor=4.0/δ=1.2
+    This exactly matches the primary Goldilocks sweep parameters.
+
+    Panel layout (one coloured line per d_mid, x-axis = gap scalar g):
+      (0,0) α* vs g  — line + ±1 SE error bars; dashed reference at α=0.8
+      (0,1) |SECI|+|AECI| at α* vs g — line; dashed baseline for d_mid=3.0, g=1.0
+      (1,0) SECI at α* — boxplots (IQR across N replications, matching Goldilocks style)
+      (1,1) MAE at α* vs g — line + ±1 SE shading
     """
-    g_values          = sorted(gap_results.keys())
-    best_alphas       = []   # α*(bubble):  argmin total_bubble_norm
-    best_score_alphas = []   # α*(+MAE):    argmin total_score_norm
-    seci_at_star      = []
-    seci_stds         = []
-    aeci_at_star      = []
-    aeci_stds         = []
-    mae_at_star       = []
-    mae_stds          = []
+    # Colour palette: one colour per d_mid level
+    d_mid_colours = {2.0: '#2166ac', 3.0: '#d6604d', 4.0: '#1a9850'}
+    d_mid_labels  = {2.0: 'd_mid=2.0 (closed)', 3.0: 'd_mid=3.0 (baseline★)',
+                     4.0: 'd_mid=4.0 (open)'}
+    d_mid_values  = sorted(gap_results.keys())
 
-    for g in g_values:
-        results_g = gap_results[g]['all_results']
-        metrics_g = compute_goldilocks_metrics(results_g)
-        # α* uses the same range-normalised criteria as the primary alignment sweep
-        # (total_bubble_norm / total_score_norm) so g=1.0 reproduces the baseline α*.
-        # N_GAP_RUNS=10 avoids RNG carry-over bias from longer sequential batches.
-        norm_bubble_vals = [metrics_g[a]['total_bubble_norm'] for a in ALIGNMENT_SWEEP]
-        idx    = int(np.argmin(norm_bubble_vals))
-        a_star = ALIGNMENT_SWEEP[idx]
-        best_alphas.append(a_star)
-        norm_score_vals  = [metrics_g[a]['total_score_norm']  for a in ALIGNMENT_SWEEP]
-        best_score_alphas.append(ALIGNMENT_SWEEP[int(np.argmin(norm_score_vals))])
-        seci_at_star.append(metrics_g[a_star]['seci'])
-        seci_stds.append(metrics_g[a_star]['seci_std'])
-        aeci_at_star.append(metrics_g[a_star]['aeci'])
-        aeci_stds.append(metrics_g[a_star]['aeci_std'])
-        mae_at_star.append(metrics_g[a_star]['mae'])
-        mae_stds.append(metrics_g[a_star]['mae_std'])
+    # Per d_mid, collect series along g axis
+    series = {}   # d_mid → dict of lists indexed by g
+    for d_mid in d_mid_values:
+        g_dict   = gap_results[d_mid]
+        g_values = sorted(g_dict.keys())
+        s = {'g': g_values, 'alpha_star': [],
+             'alpha_score': [], 'raw_bubble': [], 'raw_bubble_se': [],
+             'seci': [], 'seci_se': [], 'seci_runs': [],
+             'mae': [], 'mae_se': []}
+        for g in g_values:
+            results_g = g_dict[g]['all_results']
+            metrics_g = compute_goldilocks_metrics(results_g)
+            norm_bubble_vals = [metrics_g[a]['total_bubble_norm'] for a in ALIGNMENT_SWEEP]
+            norm_score_vals  = [metrics_g[a]['total_score_norm']  for a in ALIGNMENT_SWEEP]
+            idx    = int(np.argmin(norm_bubble_vals))
+            a_star = ALIGNMENT_SWEEP[idx]
+            s['alpha_star'].append(a_star)
+            s['alpha_score'].append(ALIGNMENT_SWEEP[int(np.argmin(norm_score_vals))])
+            rb = abs(metrics_g[a_star]['seci']) + abs(metrics_g[a_star]['aeci'])
+            rb_se = (metrics_g[a_star]['seci_std'] ** 2 +
+                     metrics_g[a_star]['aeci_std'] ** 2) ** 0.5
+            s['raw_bubble'].append(rb)
+            s['raw_bubble_se'].append(rb_se)
+            s['seci'].append(metrics_g[a_star]['seci'])
+            s['seci_se'].append(metrics_g[a_star]['seci_std'])
+            s['seci_runs'].append(metrics_g[a_star]['seci_runs'])
+            s['mae'].append(metrics_g[a_star]['mae'])
+            s['mae_se'].append(metrics_g[a_star]['mae_std'])
+        series[d_mid] = s
 
-    # Raw (un-normalised) bubble at α* — comparable across g
-    raw_bubble = [abs(s) + abs(a) for s, a in zip(seci_at_star, aeci_at_star)]
-
-    def _g_label(g):
-        d_ex, dlt_ex, d_er, dlt_er = _gap_d_delta(g)
+    # Common g labels for x-axis ticks
+    all_g = sorted({g for s in series.values() for g in s['g']})
+    g_tick_labels = []
+    for g in all_g:
         if g == 0.0:
-            return f'g={g:.1f}\n(homogeneous midpoint\nD={d_ex:.1f}, δ={dlt_ex:.2f})'
-        if g == 1.0:
-            return (f'g={g:.1f}\n(baseline ★\nD_ex={d_ex:.1f}/D_er={d_er:.1f})')
-        if g >= 1.4:
-            return f'g={g:.1f}\n(strongly polarised)'
-        return f'g={g:.1f}'
-    g_labels = [_g_label(g) for g in g_values]
-    x = np.arange(len(g_values))
+            g_tick_labels.append('g=0\n(homogeneous)')
+        elif g == 1.0:
+            g_tick_labels.append('g=1.0\n(baseline ★)')
+        else:
+            g_tick_labels.append(f'g={g:.1f}')
 
-    # Suptitle: dynamically show key parameter values
-    d0, dlt0, _, _ = _gap_d_delta(0.0)
-    d1_ex, dlt1_ex, d1_er, dlt1_er = _gap_d_delta(1.0)
-    d15_ex, dlt15_ex, d15_er, dlt15_er = _gap_d_delta(1.5)
-
+    # Suptitle
+    d1_ex, dlt1_ex, d1_er, dlt1_er = _gap_d_delta(1.0, 3.0)
+    ticks_val = (next(iter(next(iter(gap_results.values())).values()))
+                 ['all_results'][0].get('n_ticks', '?'))
     fig, axes = plt.subplots(2, 2, figsize=(14, 11))
     fig.suptitle(
-        'Cognitive Polarisation Sweep (gap scalar g)\n'
-        f'g=0: all agents D={d0:.1f}, δ={dlt0:.2f} (homogeneous midpoint)  |  '
-        f'g=1★: D_ex={d1_ex:.1f}/δ_ex={dlt1_ex:.2f} vs D_er={d1_er:.1f}/δ_er={dlt1_er:.2f}  |  '
-        f'g=1.5: D_ex={d15_ex:.1f}/δ_ex={dlt15_ex:.2f} vs D_er={d15_er:.1f}/δ_er={dlt15_er:.2f}\n'
-        f'(gap jobs: {N_GAP_RUNS} reps × {gap_results[g_values[0]]["all_results"][0].get("n_ticks", "?")} ticks — '
-        f'α* selected by range-normalised composite, matching primary sweep criterion)',
+        '2D Cognitive Polarisation Sweep: gap scalar g × acceptance midpoint d_mid\n'
+        f'Baseline (d_mid=3.0, g=1.0): D_ex={d1_ex:.1f}/δ={dlt1_ex:.2f} vs '
+        f'D_er={d1_er:.1f}/δ={dlt1_er:.2f}  |  '
+        f'd_mid=2.0 → closed population; d_mid=4.0 → open population\n'
+        f'({N_GAP_RUNS} reps × {ticks_val} ticks — seeded; '
+        f'α* by range-normalised composite matching primary sweep)',
         fontsize=10, fontweight='bold',
     )
 
-    # Panel 1: both α* criteria vs g — directly comparable across g
+    # ── Panel (0,0): α* vs g — bubble-only (solid) and bubble+MAE (dashed) ──
     ax = axes[0, 0]
-    w = 0.38
-    ax.bar(x - w/2, best_alphas,       w, label='α*(bubble)',
-           color='steelblue',  alpha=0.85, edgecolor='white')
-    ax.bar(x + w/2, best_score_alphas, w, label='α*(bubble+MAE)',
-           color='darkorange', alpha=0.85, edgecolor='white')
-    ax.set_xticks(x); ax.set_xticklabels(g_labels, fontsize=8)
+    for d_mid in d_mid_values:
+        s = series[d_mid]
+        col = d_mid_colours.get(d_mid, 'gray')
+        lbl = d_mid_labels.get(d_mid, f'd_mid={d_mid}')
+        g_arr  = np.array(s['g'])
+        a_arr  = np.array(s['alpha_star'])
+        as_arr = np.array(s['alpha_score'])
+        ax.plot(g_arr, a_arr,  'o-',  color=col, linewidth=2, markersize=7,
+                label=f'{lbl} — bubble')
+        ax.plot(g_arr, as_arr, 's--', color=col, linewidth=2, markersize=6,
+                label=f'{lbl} — bubble+MAE')
+    ax.axhline(0.8, color='gray', linestyle=':', alpha=0.7, linewidth=1.2,
+               label='α=0.8 (Goldilocks ref)')
+    ax.set_xticks(all_g); ax.set_xticklabels(g_tick_labels, fontsize=8)
     ax.set_ylabel('Goldilocks α*')
-    ax.set_title('Goldilocks α* vs Cognitive Polarisation\n'
-                 '(blue = bubble-only criterion; orange = bubble + MAE criterion)')
+    ax.set_title('Goldilocks α* vs Gap Scalar g\n'
+                 '(solid = bubble-only criterion; dashed = bubble+MAE criterion)')
     ax.set_ylim(0, 1.05)
-    ax.axhline(0.5, color='gray', linestyle=':', alpha=0.6, label='α=0.5')
-    ax.legend(fontsize=8); ax.grid(True, alpha=0.3, axis='y')
+    ax.legend(fontsize=8, ncol=2); ax.grid(True, alpha=0.3)
 
-    # Panel 2: Raw |SECI|+|AECI| at α* (directly comparable across g)
+    # ── Panel (0,1): |SECI|+|AECI| at α* vs g ───────────────────────────────
     ax = axes[0, 1]
-    bars = ax.bar(x, raw_bubble, color='darkorchid', alpha=0.80, edgecolor='white')
-    # Mark g=1 baseline level
-    if 1.0 in g_values:
-        baseline_val = raw_bubble[g_values.index(1.0)]
-        ax.axhline(baseline_val, color='orange', linestyle='--', linewidth=1.5,
-                   label=f'g=1 baseline ({baseline_val:.3f})')
-        ax.legend(fontsize=8)
-    ax.set_xticks(x); ax.set_xticklabels(g_labels, fontsize=8)
-    ax.set_ylabel('|SECI| + |AECI|  at α*  (raw, not normalised)')
+    # Baseline reference: d_mid=3.0, g=1.0
+    baseline_rb = None
+    if 3.0 in series and 1.0 in series[3.0]['g']:
+        idx_b = series[3.0]['g'].index(1.0)
+        baseline_rb = series[3.0]['raw_bubble'][idx_b]
+    for d_mid in d_mid_values:
+        s = series[d_mid]
+        col = d_mid_colours.get(d_mid, 'gray')
+        lbl = d_mid_labels.get(d_mid, f'd_mid={d_mid}')
+        g_arr  = np.array(s['g'])
+        rb_arr = np.array(s['raw_bubble'])
+        se_arr = np.array(s['raw_bubble_se'])
+        ax.plot(g_arr, rb_arr, 'o-', color=col, linewidth=2, markersize=7, label=lbl)
+        ax.fill_between(g_arr, rb_arr - se_arr, rb_arr + se_arr, color=col, alpha=0.12)
+    if baseline_rb is not None:
+        ax.axhline(baseline_rb, color='k', linestyle='--', linewidth=1.2, alpha=0.6,
+                   label=f'baseline d_mid=3, g=1 ({baseline_rb:.3f})')
+    ax.set_xticks(all_g); ax.set_xticklabels(g_tick_labels, fontsize=8)
+    ax.set_ylabel('|SECI| + |AECI|  at α*  (raw)')
     ax.set_title('Echo Chamber Strength at Goldilocks Point\n'
-                 '(lower = better; directly comparable across g)')
-    ax.grid(True, alpha=0.3, axis='y')
+                 '(lower = better; directly comparable across conditions)')
+    ax.legend(fontsize=8); ax.grid(True, alpha=0.3)
 
-    # Panel 3: SECI at α* vs g (auto-scaled to show actual variation)
+    # ── Panel (1,0): SECI at α* — boxplots per (g, d_mid) ──────────────────
     ax = axes[1, 0]
-    seci_arr = np.array(seci_at_star)
-    seci_std_arr = np.array(seci_stds)
-    ax.plot(g_values, seci_arr, 'b-o', linewidth=2, markersize=8)
-    ax.fill_between(g_values, seci_arr - seci_std_arr, seci_arr + seci_std_arr,
-                    color='blue', alpha=0.15, label='±1 SD')
+    n_dmid   = len(d_mid_values)
+    box_width = 0.06
+    # Offset each d_mid group slightly around each g position
+    offsets = np.linspace(-box_width * (n_dmid - 1) / 2,
+                           box_width * (n_dmid - 1) / 2, n_dmid)
+    bp_handles = []
+    for i_dm, d_mid in enumerate(d_mid_values):
+        s   = series[d_mid]
+        col = d_mid_colours.get(d_mid, 'gray')
+        lbl = d_mid_labels.get(d_mid, f'd_mid={d_mid}')
+        positions = [g + offsets[i_dm] for g in s['g']]
+        run_data  = [np.array(runs) for runs in s['seci_runs']]
+        # Filter out NaN-only arrays
+        run_data_clean = [r[~np.isnan(r)] if len(r) > 0 else np.array([0.0])
+                          for r in run_data]
+        bp = ax.boxplot(run_data_clean, positions=positions, widths=box_width * 0.85,
+                        patch_artist=True, manage_ticks=False,
+                        boxprops=dict(facecolor=col, alpha=0.55),
+                        medianprops=dict(color='black', linewidth=1.5),
+                        whiskerprops=dict(color=col, alpha=0.7),
+                        capprops=dict(color=col, alpha=0.7),
+                        flierprops=dict(marker='o', color=col, alpha=0.4,
+                                        markersize=4))
+        # Proxy artist for legend
+        from matplotlib.patches import Patch
+        bp_handles.append(Patch(facecolor=col, alpha=0.7, label=lbl))
+        # Overlay mean
+        for pos, mean_val in zip(positions, s['seci']):
+            ax.plot(pos, mean_val, 'x', color='black', markersize=6,
+                    markeredgewidth=1.5, zorder=5)
     ax.axhline(0, color='k', linestyle=':', alpha=0.5)
+    ax.set_xticks(all_g); ax.set_xticklabels(g_tick_labels, fontsize=8)
     ax.set_xlabel('Gap scalar g')
     ax.set_ylabel('SECI at α*')
-    ax.set_title('Social Echo Chamber Strength at α*\n(negative = stronger bubble; auto-scaled)')
-    ax.legend(fontsize=9)
+    ax.set_title('Social Echo Chamber Strength at α*\n'
+                 '(boxplots = IQR across N replications; × = mean)')
+    ax.legend(handles=bp_handles, fontsize=8)
     ax.grid(True, alpha=0.3)
 
-    # Panel 4: MAE at α* vs g — operational outcome at the Goldilocks point
+    # ── Panel (1,1): MAE at α* vs g ─────────────────────────────────────────
     ax = axes[1, 1]
-    mae_arr = np.array(mae_at_star)
-    mae_std_arr = np.array(mae_stds)
-    ax.plot(g_values, mae_arr, 'g-o', linewidth=2, markersize=8)
-    ax.fill_between(g_values, mae_arr - mae_std_arr, mae_arr + mae_std_arr,
-                    color='green', alpha=0.15, label='±1 SD')
-    ax.axhline(0, color='k', linestyle=':', alpha=0.5)
+    for d_mid in d_mid_values:
+        s = series[d_mid]
+        col = d_mid_colours.get(d_mid, 'gray')
+        lbl = d_mid_labels.get(d_mid, f'd_mid={d_mid}')
+        g_arr   = np.array(s['g'])
+        mae_arr = np.array(s['mae'])
+        se_arr  = np.array(s['mae_se'])
+        ax.plot(g_arr, mae_arr, 'o-', color=col, linewidth=2, markersize=7, label=lbl)
+        ax.fill_between(g_arr, mae_arr - se_arr, mae_arr + se_arr,
+                        color=col, alpha=0.15)
+    ax.set_xticks(all_g); ax.set_xticklabels(g_tick_labels, fontsize=8)
     ax.set_xlabel('Gap scalar g')
     ax.set_ylabel('Belief MAE at α*')
     ax.set_title('Belief Accuracy at Goldilocks Point\n'
-                 '(lower = better; does polarisation hurt accuracy?)')
-    ax.legend(fontsize=9)
-    ax.grid(True, alpha=0.3)
+                 '(lower = better; shading = ±1 SE)')
+    ax.legend(fontsize=8); ax.grid(True, alpha=0.3)
 
     plt.tight_layout()
     os.makedirs(save_dir, exist_ok=True)
@@ -1714,6 +1778,12 @@ if __name__ == '__main__':
         '--gap-alpha', type=float, default=None, metavar='ALPHA',
         help='Alignment level for --single-gap mode (required when used in CI matrix).',
     )
+    parser.add_argument(
+        '--gap-d-mid', type=float, default=3.0, metavar='D_MID',
+        help='Acceptance-window midpoint for --single-gap mode (default: 3.0 = baseline). '
+             'Part of the 2D gap sweep: d_mid controls absolute openness, g controls '
+             'the inter-type gap.',
+    )
     args = parser.parse_args()
 
     # Apply CLI overrides
@@ -1775,16 +1845,19 @@ if __name__ == '__main__':
         import sys; sys.exit(0)
 
     # ------------------------------------------------------------------
-    # Mode: --single-gap  (one parallel CI worker per g × α cell)
+    # Mode: --single-gap  (one parallel CI worker per g × d_mid × α cell)
     # ------------------------------------------------------------------
     if args.single_gap is not None:
         g     = args.single_gap
         alpha = args.gap_alpha          # required when used in CI matrix
+        d_mid = args.gap_d_mid          # acceptance-window midpoint (default 3.0)
         if alpha is None:
             parser.error('--gap-alpha is required with --single-gap')
-        d_ex, dlt_ex, d_er, dlt_er = _gap_d_delta(g)
-        print(f'Single-gap mode: g={g}, α={alpha}, '
+        d_ex, dlt_ex, d_er, dlt_er = _gap_d_delta(g, d_mid)
+        print(f'Single-gap mode: g={g}, d_mid={d_mid}, α={alpha}, '
               f'ticks={base_params["ticks"]}, n_runs={N_GAP_RUNS}')
+        print(f'  D_exploit={d_ex:.2f}, δ_exploit={dlt_ex:.2f}, '
+              f'D_explor={d_er:.2f}, δ_explor={dlt_er:.2f}')
         params = {
             **base_params,
             'ai_alignment_level': alpha,
@@ -1793,12 +1866,12 @@ if __name__ == '__main__':
             'd_explor':     d_er,
             'delta_explor': dlt_er,
         }
-        result = run_replicated(params, N_GAP_RUNS, f'g={g} α={alpha:.1f}')
+        result = run_replicated(params, N_GAP_RUNS, f'g={g} d_mid={d_mid} α={alpha:.1f}')
         out = args.out_file or \
-              f'filter_bubble_results/bubble_gap_{g}_alpha_{alpha:.1f}.json'
+              f'filter_bubble_results/bubble_gap_{g}_dmid_{d_mid}_alpha_{alpha:.1f}.json'
         os.makedirs(os.path.dirname(out) or '.', exist_ok=True)
         with open(out, 'w') as f:
-            json.dump({'gap': g, 'alpha': alpha, 'result': result}, f)
+            json.dump({'gap': g, 'd_mid': d_mid, 'alpha': alpha, 'result': result}, f)
         print(f'Saved → {out}')
         import sys; sys.exit(0)
 
@@ -1808,25 +1881,40 @@ if __name__ == '__main__':
     if args.collect_gap_and_plot:
         import glob as _glob
         results_dir = args.results_dir
-        # New format: one file per (g, α) pair — bubble_gap_{g}_alpha_{alpha}.json
-        per_cell = {}
-        for path in sorted(_glob.glob(os.path.join(results_dir, 'bubble_gap_*_alpha_*.json'))):
+        # 2D format: one file per (g, d_mid, α) — bubble_gap_{g}_dmid_{d_mid}_alpha_{alpha}.json
+        # Also accept legacy format bubble_gap_{g}_alpha_{alpha}.json (treated as d_mid=3.0)
+        per_cell = {}   # (g, d_mid) → {alpha: result}
+        new_files = sorted(_glob.glob(
+            os.path.join(results_dir, 'bubble_gap_*_dmid_*_alpha_*.json')))
+        legacy_files = sorted(_glob.glob(
+            os.path.join(results_dir, 'bubble_gap_*_alpha_*.json')))
+        # Exclude new-format files from legacy list (they contain '_dmid_')
+        legacy_files = [p for p in legacy_files if '_dmid_' not in p]
+        for path in new_files:
             with open(path) as f:
                 d = json.load(f)
-            per_cell.setdefault(float(d['gap']), {})[float(d['alpha'])] = d['result']
+            key = (float(d['gap']), float(d['d_mid']))
+            per_cell.setdefault(key, {})[float(d['alpha'])] = d['result']
+        for path in legacy_files:
+            with open(path) as f:
+                d = json.load(f)
+            key = (float(d['gap']), 3.0)   # legacy files assumed d_mid=3.0
+            per_cell.setdefault(key, {})[float(d['alpha'])] = d['result']
         if not per_cell:
             raise FileNotFoundError(
-                f'No bubble_gap_*_alpha_*.json files found in {results_dir}')
-        # Assemble into all_results list in ALIGNMENT_SWEEP order for plot_gap_sweep
-        gap_results = {}
-        for g, alpha_dict in per_cell.items():
+                f'No bubble_gap_* JSON files found in {results_dir}')
+        # Assemble into {d_mid: {g: {'all_results': [...]}}} for plot_gap_sweep
+        gap_results = {}   # d_mid → g → {'all_results': [...]}
+        for (g, d_mid), alpha_dict in per_cell.items():
             missing = [a for a in ALIGNMENT_SWEEP if a not in alpha_dict]
             if missing:
-                print(f'Warning: g={g} missing α levels {missing}')
-            gap_results[g] = {
+                print(f'Warning: g={g}, d_mid={d_mid} missing α levels {missing}')
+            gap_results.setdefault(d_mid, {})[g] = {
                 'all_results': [alpha_dict[a] for a in ALIGNMENT_SWEEP if a in alpha_dict]
             }
-        print(f'Loaded gap results for g={sorted(gap_results)}')
+        d_mids_loaded = sorted(gap_results)
+        print(f'Loaded gap results: d_mid={d_mids_loaded}, '
+              f'g={sorted(next(iter(gap_results.values())))}')
         os.makedirs(save_dir, exist_ok=True)
         plot_gap_sweep(gap_results, save_dir)
         print('gap_sweep.png saved.')
@@ -1994,29 +2082,32 @@ if __name__ == '__main__':
             gap_results = {}
         else:
             print('\n' + '=' * 70)
-            print('GAP-SCALAR SWEEP  (cognitive polarisation: g ∈ ' + str(GAP_SWEEP) + ')')
+            print('GAP-SCALAR SWEEP  (2D: g ∈ ' + str(GAP_SWEEP) +
+                  ', d_mid ∈ ' + str(D_MID_SWEEP) + ')')
             print('=' * 70)
-            gap_results = {}
+            gap_results = {}   # d_mid → g → {'all_results': [...]}
             gap_base = {**base_params}   # full ticks — gap sweep needs same warm-up as primary
-            for g in GAP_SWEEP:
-                d_ex, dlt_ex, d_er, dlt_er = _gap_d_delta(g)
-                print(f"\n--- g={g}: D_exploit={d_ex:.2f}, δ_exploit={dlt_ex:.2f}, "
-                      f"D_explor={d_er:.2f}, δ_explor={dlt_er:.2f} ---")
-                g_alpha_results = []
-                for alpha in ALIGNMENT_SWEEP:
-                    params = {
-                        **gap_base,
-                        'ai_alignment_level': alpha,
-                        'd_exploit':    d_ex,
-                        'delta_exploit': dlt_ex,
-                        'd_explor':     d_er,
-                        'delta_explor': dlt_er,
-                    }
-                    g_alpha_results.append(
-                        run_replicated(params, N_GAP_RUNS,
-                                       f'g={g} α={alpha:.1f}')
-                    )
-                gap_results[g] = {'all_results': g_alpha_results}
+            for d_mid in D_MID_SWEEP:
+                for g in GAP_SWEEP:
+                    d_ex, dlt_ex, d_er, dlt_er = _gap_d_delta(g, d_mid)
+                    print(f"\n--- d_mid={d_mid}, g={g}: "
+                          f"D_exploit={d_ex:.2f}, δ_exploit={dlt_ex:.2f}, "
+                          f"D_explor={d_er:.2f}, δ_explor={dlt_er:.2f} ---")
+                    g_alpha_results = []
+                    for alpha in ALIGNMENT_SWEEP:
+                        params = {
+                            **gap_base,
+                            'ai_alignment_level': alpha,
+                            'd_exploit':    d_ex,
+                            'delta_exploit': dlt_ex,
+                            'd_explor':     d_er,
+                            'delta_explor': dlt_er,
+                        }
+                        g_alpha_results.append(
+                            run_replicated(params, N_GAP_RUNS,
+                                           f'd_mid={d_mid} g={g} α={alpha:.1f}')
+                        )
+                    gap_results.setdefault(d_mid, {})[g] = {'all_results': g_alpha_results}
 
         save_results(all_results, rumor_results, disaster_results, mix_results,
                      gap_results, args.results_file)

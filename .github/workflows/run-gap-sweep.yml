@@ -1,8 +1,13 @@
 name: Run Gap Sweep only
 
-# Re-runs only the 4g × 11α × N_GAP_RUNS cognitive polarisation sweep.
-# 44 parallel jobs (one per g × α pair) each run N_GAP_RUNS replications.
-# After all 44 jobs complete, the collect step assembles and plots gap_sweep.png.
+# 2D cognitive polarisation sweep: 4g × 3 d_mid × 11α = 132 parallel jobs.
+# Each job runs N_GAP_RUNS (20) seeded replications for one (g, d_mid, α) triple.
+# After all 132 jobs complete, the collect step assembles and plots gap_sweep.png.
+#
+# Design:
+#   g     — inter-type cognitive gap (0=homogeneous, 1.0=baseline, 1.5=strongly polarised)
+#   d_mid — absolute acceptance-window midpoint (2.0=closed, 3.0=baseline, 4.0=open)
+#   Baseline (d_mid=3.0, g=1.0) exactly reproduces the primary Goldilocks parameters.
 #
 # Trigger: GitHub → Actions → "Run Gap Sweep only" → Run workflow
 on:
@@ -19,7 +24,7 @@ env:
 
 jobs:
 
-  # ── One job per (g, α) pair — all 44 run in parallel ────────────────────
+  # ── One job per (g, d_mid, α) triple — all 132 run in parallel ──────────
   gap-cell:
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -27,33 +32,33 @@ jobs:
       fail-fast: false
       matrix:
         g:     ["0.0", "0.5", "1.0", "1.5"]
+        d_mid: ["2.0", "3.0", "4.0"]
         alpha: ["0.0", "0.1", "0.2", "0.3", "0.4", "0.5",
                 "0.6", "0.7", "0.8", "0.9", "1.0"]
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: publication
       - uses: actions/setup-python@v5
         with: {python-version: "3.11", cache: "pip"}
       - run: pip install -r requirements.txt
 
-      - name: Run gap g=${{ matrix.g }} alpha=${{ matrix.alpha }}
+      - name: Run g=${{ matrix.g }} d_mid=${{ matrix.d_mid }} alpha=${{ matrix.alpha }}
         run: |
           mkdir -p filter_bubble_results
           python3 test_filter_bubbles.py \
-            --single-gap ${{ matrix.g }} \
-            --gap-alpha  ${{ matrix.alpha }} \
-            --out-file   filter_bubble_results/bubble_gap_${{ matrix.g }}_alpha_${{ matrix.alpha }}.json \
-            --ticks      ${{ inputs.ticks }}
+            --single-gap  ${{ matrix.g }} \
+            --gap-d-mid   ${{ matrix.d_mid }} \
+            --gap-alpha   ${{ matrix.alpha }} \
+            --out-file    filter_bubble_results/bubble_gap_${{ matrix.g }}_dmid_${{ matrix.d_mid }}_alpha_${{ matrix.alpha }}.json \
+            --ticks       ${{ inputs.ticks }}
 
       - uses: actions/upload-artifact@v4
         with:
-          name: gap-cell-g${{ matrix.g }}-a${{ matrix.alpha }}
-          path: filter_bubble_results/bubble_gap_${{ matrix.g }}_alpha_${{ matrix.alpha }}.json
+          name: gap-cell-g${{ matrix.g }}-dm${{ matrix.d_mid }}-a${{ matrix.alpha }}
+          path: filter_bubble_results/bubble_gap_${{ matrix.g }}_dmid_${{ matrix.d_mid }}_alpha_${{ matrix.alpha }}.json
           retention-days: 30
 
-  # ── Collect all 44 results and plot ─────────────────────────────────────
+  # ── Collect all 132 results and plot ────────────────────────────────────
   plot:
     needs: gap-cell
     runs-on: ubuntu-latest
@@ -61,8 +66,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: publication
       - uses: actions/setup-python@v5
         with: {python-version: "3.11", cache: "pip"}
       - run: pip install -r requirements.txt
