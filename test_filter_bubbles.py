@@ -1463,6 +1463,7 @@ def plot_gap_sweep(gap_results, save_dir):
     best_score_alphas = []   # α*(+MAE):    argmin total_score_norm
     seci_at_star      = []
     seci_stds         = []
+    seci_runs_at_star = []   # per-run steady-state values to reveal bifurcations
     aeci_at_star      = []
     aeci_stds         = []
     mae_at_star       = []
@@ -1482,6 +1483,7 @@ def plot_gap_sweep(gap_results, save_dir):
         best_score_alphas.append(ALIGNMENT_SWEEP[int(np.argmin(norm_score_vals))])
         seci_at_star.append(metrics_g[a_star]['seci'])
         seci_stds.append(metrics_g[a_star]['seci_std'])
+        seci_runs_at_star.append(metrics_g[a_star]['seci_runs'])
         aeci_at_star.append(metrics_g[a_star]['aeci'])
         aeci_stds.append(metrics_g[a_star]['aeci_std'])
         mae_at_star.append(metrics_g[a_star]['mae'])
@@ -1548,17 +1550,21 @@ def plot_gap_sweep(gap_results, save_dir):
                  '(lower = better; directly comparable across g)')
     ax.grid(True, alpha=0.3, axis='y')
 
-    # Panel 3: SECI at α* vs g (auto-scaled to show actual variation)
+    # Panel 3: SECI at α* vs g — individual runs reveal bifurcation at g=0.5
     ax = axes[1, 0]
     seci_arr = np.array(seci_at_star)
-    seci_std_arr = np.array(seci_stds)
-    ax.plot(g_values, seci_arr, 'b-o', linewidth=2, markersize=8)
-    ax.fill_between(g_values, seci_arr - seci_std_arr, seci_arr + seci_std_arr,
-                    color='blue', alpha=0.15, label='±1 SE')
+    rng = np.random.default_rng(42)
+    for g, runs in zip(g_values, seci_runs_at_star):
+        jitter = rng.uniform(-0.03, 0.03, size=len(runs))
+        ax.scatter(np.array(g) + jitter, runs,
+                   color='steelblue', alpha=0.4, s=18, zorder=3)
+    ax.plot(g_values, seci_arr, 'o-', color='navy', linewidth=2,
+            markersize=7, zorder=4, label='mean across runs')
     ax.axhline(0, color='k', linestyle=':', alpha=0.5)
     ax.set_xlabel('Gap scalar g')
     ax.set_ylabel('SECI at α*')
-    ax.set_title('Social Echo Chamber Strength at α*\n(negative = stronger bubble; auto-scaled)')
+    ax.set_title('Social Echo Chamber Strength at α*\n'
+                 '(dots = individual runs; spread reveals bifurcation at g=0.5)')
     ax.legend(fontsize=9)
     ax.grid(True, alpha=0.3)
 
