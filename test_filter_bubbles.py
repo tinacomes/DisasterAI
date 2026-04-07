@@ -1895,10 +1895,16 @@ if __name__ == '__main__':
         # 2D format: one file per (g, d_mid, α) — bubble_gap_{g}_dmid_{d_mid}_alpha_{alpha}.json
         # Also accept legacy format bubble_gap_{g}_alpha_{alpha}.json (treated as d_mid=3.0)
         per_cell = {}   # (g, d_mid) → {alpha: result}
+        # Search recursively: cross-run artifact downloads (download-artifact@v4
+        # with run-id) preserve the upload path and nest files one level deeper,
+        # e.g. results_dir/filter_bubble_results/bubble_gap_*.json instead of
+        # results_dir/bubble_gap_*.json.  The ** glob handles both cases.
         new_files = sorted(_glob.glob(
-            os.path.join(results_dir, 'bubble_gap_*_dmid_*_alpha_*.json')))
+            os.path.join(results_dir, '**', 'bubble_gap_*_dmid_*_alpha_*.json'),
+            recursive=True))
         legacy_files = sorted(_glob.glob(
-            os.path.join(results_dir, 'bubble_gap_*_alpha_*.json')))
+            os.path.join(results_dir, '**', 'bubble_gap_*_alpha_*.json'),
+            recursive=True))
         # Exclude new-format files from legacy list (they contain '_dmid_')
         legacy_files = [p for p in legacy_files if '_dmid_' not in p]
         for path in new_files:

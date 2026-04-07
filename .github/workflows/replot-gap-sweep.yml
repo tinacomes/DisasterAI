@@ -37,7 +37,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           pattern: gap-cell-*
-          path: filter_bubble_results
+          path: .
           merge-multiple: true
           run-id: ${{ inputs.source_run_id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
