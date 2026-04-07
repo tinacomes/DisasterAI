@@ -1483,7 +1483,7 @@ def plot_gap_sweep(gap_results, save_dir):
     for d_mid in d_mid_values:
         g_dict   = gap_results[d_mid]
         g_values = sorted(g_dict.keys())
-        s = {'g': g_values, 'alpha_star': [], 'alpha_star_se': [],
+        s = {'g': g_values, 'alpha_star': [],
              'alpha_score': [], 'raw_bubble': [], 'raw_bubble_se': [],
              'seci': [], 'seci_se': [], 'seci_runs': [],
              'mae': [], 'mae_se': []}
@@ -1494,10 +1494,7 @@ def plot_gap_sweep(gap_results, save_dir):
             norm_score_vals  = [metrics_g[a]['total_score_norm']  for a in ALIGNMENT_SWEEP]
             idx    = int(np.argmin(norm_bubble_vals))
             a_star = ALIGNMENT_SWEEP[idx]
-            # Bootstrap SE for α* (fraction of runs where each alpha is optimal)
-            n_reps = results_g[0].get('n_runs', N_GAP_RUNS) if results_g else N_GAP_RUNS
             s['alpha_star'].append(a_star)
-            s['alpha_star_se'].append(0.1 / np.sqrt(max(n_reps, 1)))   # approx SE
             s['alpha_score'].append(ALIGNMENT_SWEEP[int(np.argmin(norm_score_vals))])
             rb = abs(metrics_g[a_star]['seci']) + abs(metrics_g[a_star]['aeci'])
             rb_se = (metrics_g[a_star]['seci_std'] ** 2 +
@@ -1537,25 +1534,27 @@ def plot_gap_sweep(gap_results, save_dir):
         fontsize=10, fontweight='bold',
     )
 
-    # ── Panel (0,0): α* vs g, one line per d_mid ────────────────────────────
+    # ── Panel (0,0): α* vs g — bubble-only (solid) and bubble+MAE (dashed) ──
     ax = axes[0, 0]
     for d_mid in d_mid_values:
         s = series[d_mid]
         col = d_mid_colours.get(d_mid, 'gray')
         lbl = d_mid_labels.get(d_mid, f'd_mid={d_mid}')
-        g_arr   = np.array(s['g'])
-        a_arr   = np.array(s['alpha_star'])
-        se_arr  = np.array(s['alpha_star_se'])
-        ax.plot(g_arr, a_arr, 'o-', color=col, linewidth=2, markersize=7, label=lbl)
-        ax.fill_between(g_arr, a_arr - se_arr, a_arr + se_arr, color=col, alpha=0.12)
-    ax.axhline(0.8, color='gray', linestyle='--', alpha=0.7, linewidth=1.2,
+        g_arr  = np.array(s['g'])
+        a_arr  = np.array(s['alpha_star'])
+        as_arr = np.array(s['alpha_score'])
+        ax.plot(g_arr, a_arr,  'o-',  color=col, linewidth=2, markersize=7,
+                label=f'{lbl} — bubble')
+        ax.plot(g_arr, as_arr, 's--', color=col, linewidth=2, markersize=6,
+                label=f'{lbl} — bubble+MAE')
+    ax.axhline(0.8, color='gray', linestyle=':', alpha=0.7, linewidth=1.2,
                label='α=0.8 (Goldilocks ref)')
     ax.set_xticks(all_g); ax.set_xticklabels(g_tick_labels, fontsize=8)
     ax.set_ylabel('Goldilocks α*')
     ax.set_title('Goldilocks α* vs Gap Scalar g\n'
-                 '(one line per d_mid; shading = ±1 SE)')
+                 '(solid = bubble-only criterion; dashed = bubble+MAE criterion)')
     ax.set_ylim(0, 1.05)
-    ax.legend(fontsize=8); ax.grid(True, alpha=0.3)
+    ax.legend(fontsize=8, ncol=2); ax.grid(True, alpha=0.3)
 
     # ── Panel (0,1): |SECI|+|AECI| at α* vs g ───────────────────────────────
     ax = axes[0, 1]
