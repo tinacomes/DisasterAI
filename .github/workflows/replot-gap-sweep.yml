@@ -1,0 +1,56 @@
+name: Replot Gap Sweep (no re-simulation)
+
+# Downloads the 132 JSON artifacts from a completed gap-sweep run and
+# regenerates gap_sweep.png using the current plot code — no simulation needed.
+#
+# Use this after fixing plot_gap_sweep() to avoid re-running 132 × N jobs.
+#
+# Trigger: GitHub → Actions → "Replot Gap Sweep" → Run workflow
+# Input:   The run ID of the completed gap-sweep run whose artifacts to reuse.
+#          Find it in the URL of the completed run:
+#          https://github.com/tinacomes/DisasterAI/actions/runs/<run-id>
+on:
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: "Run ID of the completed gap sweep (from the Actions URL)"
+        required: true
+
+env:
+  MPLBACKEND: Agg
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  replot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: read
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11", cache: "pip"}
+      - run: pip install -r requirements.txt
+
+      - name: Download gap result artifacts from source run
+        uses: actions/download-artifact@v4
+        with:
+          pattern: gap-cell-*
+          path: filter_bubble_results
+          merge-multiple: true
+          run-id: ${{ inputs.source_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Regenerate gap_sweep.png
+        run: |
+          python3 test_filter_bubbles.py \
+            --collect-gap-and-plot \
+            --results-dir filter_bubble_results \
+            --save-dir    plots
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gap-sweep-figure-replot
+          path: plots/gap_sweep.png
+          retention-days: 30
