@@ -585,6 +585,8 @@ def compute_goldilocks_metrics(all_results):
     # ── Range-normalise |SECI|, |AECI|, MAE across the sweep ────────────────
     # This ensures each metric contributes equally to the composite regardless
     # of its absolute magnitude (|SECI| is typically 3–5× larger than |AECI|).
+    # Only normalise over alpha levels that are actually present in metrics
+    # (gap-sweep cells with missing CI jobs will have a partial metrics dict).
     def _norm(vals):
         lo, hi = min(vals), max(vals)
         span = hi - lo
@@ -592,15 +594,16 @@ def compute_goldilocks_metrics(all_results):
             return [0.5] * len(vals)   # degenerate: all equal → arbitrary midpoint
         return [(v - lo) / span for v in vals]
 
-    seci_abs = [abs(metrics[a]['seci']) for a in ALIGNMENT_SWEEP]
-    aeci_abs = [abs(metrics[a]['aeci']) for a in ALIGNMENT_SWEEP]
-    mae_vals  = [metrics[a]['mae']       for a in ALIGNMENT_SWEEP]
+    available = [a for a in ALIGNMENT_SWEEP if a in metrics]
+    seci_abs = [abs(metrics[a]['seci']) for a in available]
+    aeci_abs = [abs(metrics[a]['aeci']) for a in available]
+    mae_vals  = [metrics[a]['mae']       for a in available]
 
     seci_n = _norm(seci_abs)
     aeci_n = _norm(aeci_abs)
     mae_n  = _norm(mae_vals)
 
-    for i, alpha in enumerate(ALIGNMENT_SWEEP):
+    for i, alpha in enumerate(available):
         metrics[alpha]['seci_norm']          = seci_n[i]
         metrics[alpha]['aeci_norm']          = aeci_n[i]
         metrics[alpha]['mae_norm']           = mae_n[i]
@@ -1482,20 +1485,28 @@ def plot_gap_sweep(gap_results, save_dir):
     series = {}   # d_mid → dict of lists indexed by g
     for d_mid in d_mid_values:
         g_dict   = gap_results[d_mid]
-        g_values = sorted(g_dict.keys())
-        s = {'g': g_values, 'alpha_star': [],
-             'alpha_score': [], 'raw_bubble': [], 'raw_bubble_se': [],
+        # Build series lists dynamically (only include g levels with enough data)
+        s = {'g': [],
+             'alpha_star': [], 'alpha_score': [],
+             'raw_bubble': [], 'raw_bubble_se': [],
              'seci': [], 'seci_se': [], 'seci_runs': [],
              'mae': [], 'mae_se': []}
-        for g in g_values:
-            results_g = g_dict[g]['all_results']
+        for g in sorted(g_dict.keys()):
+            results_g    = g_dict[g]['all_results']
+            available_g  = g_dict[g].get('alphas', ALIGNMENT_SWEEP[:len(results_g)])
+            if len(available_g) < 5:
+                print(f'  Skipping d_mid={d_mid}, g={g}: '
+                      f'only {len(available_g)} α levels — need ≥5 to find optimum')
+                continue
             metrics_g = compute_goldilocks_metrics(results_g)
-            norm_bubble_vals = [metrics_g[a]['total_bubble_norm'] for a in ALIGNMENT_SWEEP]
-            norm_score_vals  = [metrics_g[a]['total_score_norm']  for a in ALIGNMENT_SWEEP]
+            avail = [a for a in ALIGNMENT_SWEEP if a in metrics_g]
+            norm_bubble_vals = [metrics_g[a]['total_bubble_norm'] for a in avail]
+            norm_score_vals  = [metrics_g[a]['total_score_norm']  for a in avail]
             idx    = int(np.argmin(norm_bubble_vals))
-            a_star = ALIGNMENT_SWEEP[idx]
+            a_star = avail[idx]
+            s['g'].append(g)
             s['alpha_star'].append(a_star)
-            s['alpha_score'].append(ALIGNMENT_SWEEP[int(np.argmin(norm_score_vals))])
+            s['alpha_score'].append(avail[int(np.argmin(norm_score_vals))])
             rb = abs(metrics_g[a_star]['seci']) + abs(metrics_g[a_star]['aeci'])
             rb_se = (metrics_g[a_star]['seci_std'] ** 2 +
                      metrics_g[a_star]['aeci_std'] ** 2) ** 0.5
@@ -1903,14 +1914,16 @@ if __name__ == '__main__':
         if not per_cell:
             raise FileNotFoundError(
                 f'No bubble_gap_* JSON files found in {results_dir}')
-        # Assemble into {d_mid: {g: {'all_results': [...]}}} for plot_gap_sweep
-        gap_results = {}   # d_mid → g → {'all_results': [...]}
+        # Assemble into {d_mid: {g: {'all_results': [...], 'alphas': [...]}}} for plot_gap_sweep
+        gap_results = {}   # d_mid → g → {'all_results': [...], 'alphas': [...]}
         for (g, d_mid), alpha_dict in per_cell.items():
             missing = [a for a in ALIGNMENT_SWEEP if a not in alpha_dict]
             if missing:
                 print(f'Warning: g={g}, d_mid={d_mid} missing α levels {missing}')
+            available_alphas = [a for a in ALIGNMENT_SWEEP if a in alpha_dict]
             gap_results.setdefault(d_mid, {})[g] = {
-                'all_results': [alpha_dict[a] for a in ALIGNMENT_SWEEP if a in alpha_dict]
+                'all_results': [alpha_dict[a] for a in available_alphas],
+                'alphas':       available_alphas,
             }
         d_mids_loaded = sorted(gap_results)
         print(f'Loaded gap results: d_mid={d_mids_loaded}, '
