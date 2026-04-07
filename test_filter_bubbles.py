@@ -527,7 +527,7 @@ def compute_goldilocks_metrics(all_results):
             key_r = key_r or key_e.replace('exploit', 'explor')
             m = (ss(res[f'{key_e}_mean']) + ss(res[f'{key_r}_mean'])) / 2
             s = (ss(res[f'{key_e}_std'])  + ss(res[f'{key_r}_std']))  / 2
-            return m, s
+            return m, s / np.sqrt(res.get('n_runs', N_GAP_RUNS))
 
         def runs_pair(key_e, key_r=None):
             """Per-run late-run values averaged over exploit+explor, for boxplots."""
@@ -550,7 +550,7 @@ def compute_goldilocks_metrics(all_results):
         #   total_bubble = |SECI_var| + |AECI_var| a symmetric, coherent formula.
         # aeci_var is per-tick → use 75-tick window for consistency with SECI.
         aeci_m = ss(res['aeci_var_mean'], TICK_WINDOW)
-        aeci_s = ss(res['aeci_var_std'],  TICK_WINDOW)
+        aeci_s = ss(res['aeci_var_std'],  TICK_WINDOW) / np.sqrt(res.get('n_runs', N_GAP_RUNS))
         mae_m,  mae_s  = ms('mae_exploit',  'mae_explor')
         prec_m, prec_s = ms('prec_exploit', 'prec_explor')
         # Per-tick series: use 75-tick window to match SECI cadence
@@ -1554,7 +1554,7 @@ def plot_gap_sweep(gap_results, save_dir):
     seci_std_arr = np.array(seci_stds)
     ax.plot(g_values, seci_arr, 'b-o', linewidth=2, markersize=8)
     ax.fill_between(g_values, seci_arr - seci_std_arr, seci_arr + seci_std_arr,
-                    color='blue', alpha=0.15, label='±1 SD')
+                    color='blue', alpha=0.15, label='±1 SE')
     ax.axhline(0, color='k', linestyle=':', alpha=0.5)
     ax.set_xlabel('Gap scalar g')
     ax.set_ylabel('SECI at α*')
@@ -1568,7 +1568,7 @@ def plot_gap_sweep(gap_results, save_dir):
     mae_std_arr = np.array(mae_stds)
     ax.plot(g_values, mae_arr, 'g-o', linewidth=2, markersize=8)
     ax.fill_between(g_values, mae_arr - mae_std_arr, mae_arr + mae_std_arr,
-                    color='green', alpha=0.15, label='±1 SD')
+                    color='green', alpha=0.15, label='±1 SE')
     ax.axhline(0, color='k', linestyle=':', alpha=0.5)
     ax.set_xlabel('Gap scalar g')
     ax.set_ylabel('Belief MAE at α*')
