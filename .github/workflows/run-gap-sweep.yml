@@ -38,8 +38,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: claude/fix-gap-sweep-goldilocks-TNcD8
       - uses: actions/setup-python@v5
         with: {python-version: "3.11", cache: "pip"}
       - run: pip install -r requirements.txt
@@ -68,8 +66,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: claude/fix-gap-sweep-goldilocks-TNcD8
       - uses: actions/setup-python@v5
         with: {python-version: "3.11", cache: "pip"}
       - run: pip install -r requirements.txt
