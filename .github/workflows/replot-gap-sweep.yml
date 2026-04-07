@@ -34,13 +34,22 @@ jobs:
       - run: pip install -r requirements.txt
 
       - name: Download gap result artifacts from source run
-        uses: actions/download-artifact@v4
-        with:
-          pattern: gap-cell-*
-          path: .
-          merge-multiple: true
-          run-id: ${{ inputs.source_run_id }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p downloaded_artifacts
+          gh run download ${{ inputs.source_run_id }} \
+            --pattern "gap-cell-*" \
+            --dir downloaded_artifacts
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Locate JSON files and move to flat directory
+        run: |
+          mkdir -p filter_bubble_results
+          find downloaded_artifacts -name 'bubble_gap_*_dmid_*_alpha_*.json' \
+               -exec cp {} filter_bubble_results/ \;
+          echo "=== Files in filter_bubble_results ==="
+          ls filter_bubble_results | head -20
+          echo "Total: $(ls filter_bubble_results | wc -l) files"
 
       - name: Regenerate gap_sweep.png
         run: |
