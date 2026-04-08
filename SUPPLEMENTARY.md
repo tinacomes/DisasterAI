@@ -68,7 +68,7 @@ This linear interpolation is the simplest formulation that spans the truth–con
 
 The gap scalar g parameterises the cognitive divergence between agent types around a shared midpoint:
 
-$$D_\text{exploit}(g) = \max(3.0 - 1.0\,g,\; 0.1), \quad \delta_\text{exploit}(g) = 3.0 + 1.15\,g$$
+$$D_\text{exploit}(g) = \max(3.0 - 1.0\,g,\; 0.5), \quad \delta_\text{exploit}(g) = 2.35 + 1.15\,g$$
 $$D_\text{explor}(g) = 3.0 + 1.0\,g, \quad \delta_\text{explor}(g) = \max(2.35 - 1.15\,g,\; 0.1)$$
 
 **Table S4. Cognitive parameters at each gap scalar value.**
@@ -80,9 +80,9 @@ $$D_\text{explor}(g) = 3.0 + 1.0\,g, \quad \delta_\text{explor}(g) = \max(2.35 -
 | 1.0 | 2.00 | 3.50 | 4.00 | 1.20 |
 | 1.5 | 1.50 | 4.08 | 4.50 | 0.63 |
 
-The midpoint midpoint (D\_mid = 3.0, δ\_mid = 2.35) is the arithmetic mean of the baseline exploit/explor values. At g = 0 both types are cognitively identical, providing a null condition for heterogeneity effects. The invariant D\_exploit < D\_explor and δ\_exploit > δ\_explor is maintained for all g > 0, ensuring that the exploitative type always has a narrower and steeper acceptance curve than the exploratory type.
+The shared midpoint (D\_mid = 3.0, δ\_mid = 2.35) is the arithmetic mean of the baseline exploit/explor values. At g = 0 both types are cognitively identical, providing a null condition for heterogeneity effects. The invariant D\_exploit < D\_explor and δ\_exploit > δ\_explor is maintained for all g > 0, ensuring that the exploitative type always has a narrower and steeper acceptance curve than the exploratory type.
 
-The gap sweep uses N = 2 replications per (g, α) cell and runs for max(50, T/2) = 125 ticks to keep computation tractable. This differs from the primary alignment sweep (N = 20, T = 200); the gap sweep is therefore interpreted as indicative rather than confirmatory.
+The gap sweep extends the design to a second axis: d\_mid ∈ {2.0, 3.0, 4.0} independently varies the absolute level of cognitive openness (closed, baseline, open) orthogonally to the inter-type gap g. The full 2D sweep uses N = 20 independently seeded replications per (g, d\_mid, α) cell and T = 200 ticks, matching the primary alignment sweep.
 
 ---
 
@@ -151,12 +151,13 @@ Each replication uses an independent random seed for epicentre placement, agent 
 
 | Dimension | Values | N per cell |
 |---|---|---|
-| Gap scalar g | 0.0, 0.5, 1.0, 1.5 | 2 |
-| AI alignment α (within each g) | 0.0, 0.1, …, 1.0 (11 levels) | 2 |
-| Simulation length T | 125 ticks (= max(50, 200/2)) | — |
-| **Total simulation runs** | **88** | — |
+| Gap scalar g | 0.0, 0.5, 1.0, 1.5 | 20 |
+| Acceptance-window midpoint d\_mid | 2.0 (closed), 3.0 (baseline), 4.0 (open) | — |
+| AI alignment α (within each g, d\_mid) | 0.0, 0.1, …, 1.0 (11 levels) | 20 |
+| Simulation length T | 200 ticks | — |
+| **Total simulation runs** | **2640** (4 × 3 × 11 × 20) | — |
 
-The shortened run length and reduced replication count are intentional: the gap sweep is a parameter-sensitivity check rather than a primary confirmatory analysis. Both α*(bubble) and α*(+MAE) are computed for each g level and plotted as grouped bars. Absolute (non-normalised) composite scores are shown to allow cross-g comparison; normalised scores within each g sweep would confound changes in magnitude with changes in the optimal α.
+Each replication uses an independent random seed (seed = run index). The d\_mid axis tests whether the Goldilocks finding is robust to the absolute level of cognitive openness, independently of the inter-type gap g. Results confirm α\* = 0.8 across all 132 (g, d\_mid) conditions; the full N = 20 design is treated as confirmatory. Both α\*(bubble) and α\*(+MAE) are computed for each condition and shown in the figure (solid and dashed lines respectively).
 
 ---
 
