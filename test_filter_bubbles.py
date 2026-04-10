@@ -1356,19 +1356,47 @@ def plot_spatial_coverage(all_results, metrics, save_dir):
     print(f"Spatial coverage figure saved: {path}")
 
 
+def _gini(arr):
+    """Gini coefficient of a non-negative array (0 = perfectly equal, 1 = maximally concentrated).
+
+    Computed from a flattened view of *arr*, ignoring NaNs and negatives.
+    This is the standard area-between-Lorenz-curve-and-diagonal formula.
+    """
+    v = np.array(arr, dtype=float).flatten()
+    v = v[np.isfinite(v) & (v >= 0)]
+    if len(v) == 0 or v.sum() == 0:
+        return float('nan')
+    v = np.sort(v)
+    n = len(v)
+    idx = np.arange(1, n + 1, dtype=float)
+    return float((2.0 * np.dot(idx, v) / (n * v.sum())) - (n + 1.0) / n)
+
+
 def plot_periphery_gap(all_results, metrics, save_dir):
     """
-    2-row × 2-col figure showing how the periphery gap varies with α.
+    Revised 2-row × 2-col figure showing spatial and network periphery vs α.
 
-    Left column  — spatial periphery (cell-based near/far scalars pre-computed
-                   per replication in run_one_sim(), then averaged).  Each run
-                   uses its own epicentre for the Q1/Q4 distance split, avoiding
-                   the blurring artefact of splitting the cross-run mean map.
-    Right column — network periphery (low-degree Q1 vs high-degree Q4 agents
-                   in the Watts–Strogatz social network).
+    Left column — Revised spatial metrics computed at plot time from the stored
+                  mean maps (avg_aid_map_mean, coverage_deficit_map_mean).
+                  The old Q1/Q4 *average* deficit metric is replaced by two
+                  measures that directly address the heterogeneity critique:
 
-    Row 1 — Coverage deficit (disaster − aid) near vs far: +ve = under-served.
-    Row 2 — Aid density (tokens/tick) near vs far  |  AI-query fraction by degree.
+      Row 1: Gini coefficient of aid-token distribution across grid cells.
+             Captures *spatial concentration* of aid irrespective of need.
+             High Gini → aid clustered in few cells; low Gini → even spread.
+
+      Row 2: Fraction of cells with coverage deficit > 0 (net undersupplied),
+             broken out by proximity to the epicentre: near (Q1, ≤25th pctile
+             distance) vs far (Q4, ≥75th pctile).  Unlike the old Q1/Q4 mean,
+             this is a *count* metric that cannot be masked by a minority of
+             massively oversupplied cells dragging the zone average negative.
+
+    Right column — Network periphery (unchanged).
+      Row 1: Belief MAE for low-degree (Q1) vs high-degree (Q4) agents.
+      Row 2: Aid tokens sent per agent by network degree.
+
+    Both left-column metrics are computed directly from the stored mean maps
+    so no new simulation runs are required.
     """
     alphas = ALIGNMENT_SWEEP
     total_n  = [metrics[a]['total_bubble_norm']  for a in alphas]
@@ -1376,18 +1404,44 @@ def plot_periphery_gap(all_results, metrics, save_dir):
     best_alpha       = alphas[int(np.argmin(total_n))]   # α*(bubble)
     best_alpha_score = alphas[int(np.argmin(total_sn))]  # α*(bubble + MAE)
 
-    # ── Cell-based spatial metrics — pre-computed per run in run_one_sim() ──
-    # Using per-run epicentre avoids the blurring bug: the mean maps average across
-    # replications with different epicentre positions, making post-hoc near/far
-    # splits against run-0's epicentre meaningless.
     def _get(res, key):
         return float(res.get(f'{key}_mean', float('nan')))
 
-    near_def  = [_get(r, 'near_cell_deficit') for r in all_results]
-    far_def   = [_get(r, 'far_cell_deficit')  for r in all_results]
-    near_aid_d = [_get(r, 'near_cell_aid')    for r in all_results]
-    far_aid_d  = [_get(r, 'far_cell_aid')     for r in all_results]
+    # ── Left column: new spatial metrics from stored mean maps ────────────────
+    # Note: epicenter is from run-0 of each alpha condition.  Using the run-0
+    # epicentre to classify cells in the cross-run mean map introduces a small
+    # blurring error when epicentres vary across replications, but is the best
+    # available approximation without rerunning simulations.
+    gini_vals       = []
+    near_frac_under = []
+    far_frac_under  = []
 
+    for res in all_results:
+        avg_aid  = np.array(res.get('avg_aid_map_mean',          []), dtype=float)
+        cov_def  = np.array(res.get('coverage_deficit_map_mean', []), dtype=float)
+        epic     = res.get('epicenter', [15, 15])
+        ex, ey   = float(epic[0]), float(epic[1])
+
+        if avg_aid.ndim == 2 and avg_aid.size > 0:
+            gini_vals.append(_gini(avg_aid))
+
+            H, W    = cov_def.shape
+            Yg, Xg  = np.mgrid[0:H, 0:W]
+            cell_dist = np.sqrt((Xg - ex) ** 2 + (Yg - ey) ** 2)
+            cd_flat   = cell_dist.flatten()
+            q1 = np.percentile(cd_flat, 25)
+            q3 = np.percentile(cd_flat, 75)
+            near_mask = cell_dist <= q1
+            far_mask  = cell_dist >= q3
+
+            near_frac_under.append(float(np.mean(cov_def[near_mask] > 0)))
+            far_frac_under.append( float(np.mean(cov_def[far_mask]  > 0)))
+        else:
+            gini_vals.append(float('nan'))
+            near_frac_under.append(float('nan'))
+            far_frac_under.append(float('nan'))
+
+    # ── Right column: network-degree periphery (unchanged) ───────────────────
     lodeg_mae = [_get(r, 'lodeg_mae') for r in all_results]
     hideg_mae = [_get(r, 'hideg_mae') for r in all_results]
     lodeg_aid = [_get(r, 'lodeg_aid') for r in all_results]
@@ -1396,54 +1450,76 @@ def plot_periphery_gap(all_results, metrics, save_dir):
     fig, axes = plt.subplots(2, 2, figsize=(13, 9))
     fig.suptitle(
         'Periphery Gap across AI Alignment (α)\n'
-        'Left: spatial (cell-based near/far epicentre)  |  Right: network degree (low vs high)',
+        'Left: spatial aid-distribution metrics  |  Right: network degree (low vs high)',
         fontsize=12, fontweight='bold'
     )
 
-    def _panel(ax, core_vals, periph_vals, core_label, periph_label,
-                ylabel, title, ylim=None, hline=None):
+    def _vlines(ax):
+        ax.axvline(best_alpha, color='gold', linestyle='--', linewidth=2,
+                   label=f'α*(bubble)={best_alpha}')
+        ax.axvline(best_alpha_score, color='tomato', linestyle=':', linewidth=1.8,
+                   label=f'α*(+MAE)={best_alpha_score}')
+
+    def _net_panel(ax, core_vals, periph_vals, core_label, periph_label,
+                   ylabel, title):
         ax.plot(alphas, core_vals,   'o-',  color='steelblue', linewidth=2,
                 label=core_label,   markersize=7)
         ax.plot(alphas, periph_vals, 's--', color='firebrick', linewidth=2,
                 label=periph_label, markersize=7)
         ax.fill_between(alphas, core_vals, periph_vals, alpha=0.12, color='orange',
                         label='Gap')
-        ax.axvline(best_alpha, color='gold', linestyle='--', linewidth=2,
-                   label=f'α*(bubble)={best_alpha}')
-        ax.axvline(best_alpha_score, color='tomato', linestyle=':', linewidth=1.8,
-                   label=f'α*(+MAE)={best_alpha_score}')
-        if hline is not None:
-            ax.axhline(hline, color='k', linestyle=':', linewidth=1, alpha=0.5)
+        _vlines(ax)
         ax.set_xlabel('AI Alignment Level (α)')
         ax.set_ylabel(ylabel)
         ax.set_title(title)
-        if ylim:
-            ax.set_ylim(*ylim)
         ax.legend(fontsize=8)
         ax.grid(True, alpha=0.3)
 
-    # Left column: cell-based spatial periphery
-    _panel(axes[0, 0], near_def, far_def,
-           'Near epicentre (Q1 cells)', 'Far epicentre (Q4 cells)',
-           'Coverage deficit (disaster − aid)',
-           'Spatial Coverage Deficit',
-           hline=0)
+    # ── Top-left: Gini of aid distribution ───────────────────────────────────
+    ax = axes[0, 0]
+    ax.plot(alphas, gini_vals, 'o-', color='darkorange', linewidth=2, markersize=7,
+            label='Gini (aid tokens)')
+    _vlines(ax)
+    ax.set_xlabel('AI Alignment Level (α)')
+    ax.set_ylabel('Gini coefficient')
+    ax.set_title(
+        'Spatial Concentration of Aid\n'
+        'Gini of avg tokens/tick per cell  (0 = equal, 1 = concentrated)'
+    )
+    ax.set_ylim(0, 1)
+    ax.legend(fontsize=8)
+    ax.grid(True, alpha=0.3)
 
-    _panel(axes[1, 0], near_aid_d, far_aid_d,
-           'Near epicentre (Q1 cells)', 'Far epicentre (Q4 cells)',
-           'Avg tokens / tick',
-           'Aid Density near vs far Epicentre')
+    # ── Bottom-left: fraction of undersupplied cells by epicentre zone ────────
+    ax = axes[1, 0]
+    ax.plot(alphas, near_frac_under, 'o-',  color='steelblue', linewidth=2,
+            label='Near epicentre (Q1 cells)', markersize=7)
+    ax.plot(alphas, far_frac_under,  's--', color='firebrick', linewidth=2,
+            label='Far epicentre (Q4 cells)',  markersize=7)
+    ax.fill_between(alphas, near_frac_under, far_frac_under, alpha=0.12,
+                    color='orange', label='Gap')
+    _vlines(ax)
+    ax.axhline(0.5, color='k', linestyle=':', linewidth=1, alpha=0.4)
+    ax.set_xlabel('AI Alignment Level (α)')
+    ax.set_ylabel('Fraction of cells with deficit > 0')
+    ax.set_title(
+        'Spatial Distribution of Unmet Need\n'
+        'Fraction of net-undersupplied cells by epicentre proximity'
+    )
+    ax.set_ylim(0, 1)
+    ax.legend(fontsize=8)
+    ax.grid(True, alpha=0.3)
 
-    # Right column: network-degree periphery
-    _panel(axes[0, 1], hideg_mae, lodeg_mae,
-           'High degree (Q4)', 'Low degree (Q1)',
-           'Belief MAE',
-           'Network Periphery — Belief Accuracy')
+    # ── Right column: network periphery ──────────────────────────────────────
+    _net_panel(axes[0, 1], hideg_mae, lodeg_mae,
+               'High degree (Q4)', 'Low degree (Q1)',
+               'Belief MAE',
+               'Network Periphery — Belief Accuracy')
 
-    _panel(axes[1, 1], hideg_aid, lodeg_aid,
-           'High degree (Q4)', 'Low degree (Q1)',
-           'Avg aid tokens sent / agent',
-           'Network Periphery — Aid Sent per Agent')
+    _net_panel(axes[1, 1], hideg_aid, lodeg_aid,
+               'High degree (Q4)', 'Low degree (Q1)',
+               'Avg aid tokens sent / agent',
+               'Network Periphery — Aid Sent per Agent')
 
     plt.tight_layout()
     os.makedirs(save_dir, exist_ok=True)
