@@ -744,7 +744,10 @@ def _plot_timeseries(all_results, save_dir, best_alpha=None):
     Layout:
       Row 0: SECI (exploitative) | SECI (exploratory)   | Belief MAE
       Row 1: AECI (exploitative) | AECI (exploratory)   | Unmet needs
-      Row 2: Relief precision    | (spare)               | (spare)
+      Row 2: AI query (exploit)  | AI query (explor)    | Relief precision
+
+    The right column groups all outcome indicators together:
+    belief error (MAE), unmet needs, and relief targeting precision.
     """
     colors = plt.cm.viridis(np.linspace(0, 1, len(ALIGNMENT_SWEEP)))
 
@@ -756,7 +759,7 @@ def _plot_timeseries(all_results, save_dir, best_alpha=None):
     )
     ax_seci_ex, ax_seci_er, ax_mae    = axes[0]
     ax_aeci_ex, ax_aeci_er, ax_unmet  = axes[1]
-    ax_prec,    ax_aqr_ex,  ax_aqr_er  = axes[2]
+    ax_aqr_ex,  ax_aqr_er,  ax_prec   = axes[2]
 
     for color, (res, alpha) in zip(colors, zip(all_results, ALIGNMENT_SWEEP)):
         tf    = list(range(res['n_ticks']))
@@ -1100,30 +1103,27 @@ def plot_aeci_evolution(all_results, save_dir):
 # ---------------------------------------------------------------------------
 
 def plot_echo_chamber_lifecycle(all_results, save_dir):
-    """3×2 figure: SECI & AECI-Var timeseries (left) + lifecycle bar charts (right).
+    """1×3 bar-chart figure summarising the echo-chamber lifecycle across α.
 
-    Bar charts use first-crossing / peak-based scalars rather than raw tick counts,
-    avoiding the "final counts" problem where bars merely reflect run length.
-    Duration = fraction of ticks spent below threshold (scale-invariant).
+    The timeseries panels (SECI/AECI-Var evolution) have been removed because
+    they duplicate information already shown in the bubble_timeseries figure.
+    The three lifecycle scalars are placed side-by-side for easy comparison:
+
+      Panel 1 — Peak echo-chamber strength (max |SECI|)
+      Panel 2 — Recovery timing (first tick SECI sustains above −0.1)
+      Panel 3 — Duration (fraction of ticks with SECI < −0.1)
+
+    Bar charts use first-crossing / peak-based scalars rather than raw tick
+    counts, avoiding the "final counts" problem where bars reflect run length.
     """
-    colors = plt.cm.viridis(np.linspace(0, 0.9, len(ALIGNMENT_SWEEP)))
     alphas = ALIGNMENT_SWEEP
 
-    fig = plt.figure(figsize=(18, 14))
+    fig, (ax_peak, ax_when, ax_dur) = plt.subplots(1, 3, figsize=(18, 6))
     fig.suptitle(
         'Echo Chamber Lifecycle: Rise and Fall\n'
-        '(How filter bubbles form, peak, and dissolve)',
+        '(How filter bubbles form, peak, and dissolve across AI alignment levels)',
         fontsize=13, fontweight='bold',
     )
-
-    # Left column: timeseries
-    ax_seci_exp  = fig.add_subplot(3, 2, 1)
-    ax_seci_expl = fig.add_subplot(3, 2, 3)
-    ax_aeci_var  = fig.add_subplot(3, 2, 5)
-    # Right column: bar charts
-    ax_peak      = fig.add_subplot(3, 2, 2)
-    ax_when      = fig.add_subplot(3, 2, 4)
-    ax_dur       = fig.add_subplot(3, 2, 6)
 
     CHAMBER_THRESH = -0.1
 
@@ -1131,103 +1131,51 @@ def plot_echo_chamber_lifecycle(all_results, save_dir):
     when_exp,  when_expl  = [], []
     dur_exp,   dur_expl   = [], []
 
-    for color, (res, alpha) in zip(colors, zip(all_results, ALIGNMENT_SWEEP)):
-        label = f'AI Alignment={alpha}'
-        ticks_arr = np.arange(res['n_ticks'])
-        # SECI is sampled at metric_ticks cadence (every 5 ticks); use the actual
-        # tick numbers as the x-axis so the plot spans the full simulation length.
-        mt = np.array(res['metric_ticks'])
-
-        for ax, key, title in [
-            (ax_seci_exp,  'seci_exploit', 'Exploitative Agents: Echo Chamber Formation & Dissolution'),
-            (ax_seci_expl, 'seci_explor',  'Exploratory Agents: Echo Chamber Formation & Dissolution'),
-        ]:
-            mean = np.array(res[f'{key}_mean'])
-            std  = np.array(res[f'{key}_std'])
-            t    = mt[:len(mean)]          # actual tick numbers [0, 5, 10, ..., 195]
-            ax.plot(t, mean, color=color, linewidth=1.8, label=label)
-            ax.fill_between(t, mean - std, mean + std, color=color, alpha=0.15)
-
-        # AECI-Var is recorded every tick — use the full tick range
-        av_mean = np.array(res['aeci_var_mean'])
-        av_std  = np.array(res['aeci_var_std'])
-        t_av    = ticks_arr[:len(av_mean)]
-        ax_aeci_var.plot(t_av, av_mean, color=color, linewidth=1.8)
-        ax_aeci_var.fill_between(t_av, av_mean - av_std, av_mean + av_std,
-                                 color=color, alpha=0.15)
-
-        # Lifecycle scalars from mean series (robust to N=1 replications)
+    for res, alpha in zip(all_results, ALIGNMENT_SWEEP):
+        mt     = np.array(res['metric_ticks'])
+        n      = res['n_ticks']
         se_mean = np.array(res['seci_exploit_mean'])
         sr_mean = np.array(res['seci_explor_mean'])
-        n = res['n_ticks']
 
         # Peak = max |SECI|
         peak_exp.append(float(np.nanmax(np.abs(se_mean))) if len(se_mean) else 0.0)
         peak_expl.append(float(np.nanmax(np.abs(sr_mean))) if len(sr_mean) else 0.0)
 
-        # Recovery: _first_sustained_break returns an *index* into the series (0..len-1),
-        # or len(series) as the "never" sentinel.  Convert to actual tick number.
+        # Recovery tick: _first_sustained_break returns an index into the series
+        # (0..len-1) or len as the "never" sentinel; -1 means chamber never formed.
         def _idx_to_tick(idx, mt_arr, n_t):
             return int(mt_arr[idx]) if idx < len(mt_arr) else n_t
 
-        # _first_sustained_break returns -1 (never formed), len (formed/never recovered), or idx
         raw_exp  = _first_sustained_break(list(se_mean), sustain=3)
         raw_expl = _first_sustained_break(list(sr_mean), sustain=3)
         when_exp.append( -1 if raw_exp  < 0 else _idx_to_tick(raw_exp,  mt, n))
         when_expl.append(-1 if raw_expl < 0 else _idx_to_tick(raw_expl, mt, n))
 
-        # Duration = fraction of ticks with SECI < CHAMBER_THRESH (scale-invariant)
+        # Duration = fraction of metric samples with SECI < threshold
         dur_exp.append(float(np.mean(se_mean < CHAMBER_THRESH)) if len(se_mean) else 0.0)
         dur_expl.append(float(np.mean(sr_mean < CHAMBER_THRESH)) if len(sr_mean) else 0.0)
 
-    # Timeseries decorations
-    for ax, title in [
-        (ax_seci_exp,  'Exploitative Agents: Echo Chamber Formation & Dissolution'),
-        (ax_seci_expl, 'Exploratory Agents: Echo Chamber Formation & Dissolution'),
-    ]:
-        ax.axhline(0,            color='gray',  linestyle='--', linewidth=1,   label='Neutral (SECI=0)')
-        ax.axhline(CHAMBER_THRESH, color='salmon', linestyle=':',  linewidth=1.2, label='Chamber threshold')
-        ax.set_title(title, fontsize=10)
-        ax.set_xlabel('Simulation Tick')
-        ax.set_ylabel('SECI (Social Echo Chamber Index)')
-        ax.set_ylim(top=0.25)   # let matplotlib choose the lower limit from data
-        ax.grid(True, alpha=0.3)
-    ax_seci_exp.legend(fontsize=7, loc='lower right')
-    ax_seci_expl.legend(fontsize=7, loc='lower right')
+    x     = np.arange(len(alphas))
+    w     = 0.38
+    x_str = [str(a) for a in alphas]
 
-    ax_aeci_var.axhline(0, color='gray', linestyle='--', linewidth=1, label='Neutral')
-    ax_aeci_var.set_title('AI Belief Variance Reduction Over Time', fontsize=10)
-    ax_aeci_var.set_xlabel('Simulation Tick')
-    ax_aeci_var.set_ylabel('AECI-Var (AI Echo Chamber Index)')
-    ax_aeci_var.legend(
-        [plt.Line2D([0], [0], color=c, linewidth=2) for c in colors],
-        [f'AI Alignment={a}' for a in alphas],
-        fontsize=7, loc='lower right',
-    )
-    ax_aeci_var.grid(True, alpha=0.3)
-
-    # Bar charts
-    x      = np.arange(len(alphas))
-    w      = 0.38
-    x_str  = [str(a) for a in alphas]
-
+    # ── Panel 1: peak strength ────────────────────────────────────────────────
     ax_peak.bar(x - w/2, peak_exp,  w, label='Exploitative', color='#8B2020', alpha=0.85)
     ax_peak.bar(x + w/2, peak_expl, w, label='Exploratory',  color='#FA8072', alpha=0.85)
-    ax_peak.set_title('Maximum Chamber Strength', fontsize=10)
-    ax_peak.set_ylabel('Peak Echo Chamber Strength |SECI|')
+    ax_peak.set_title('Maximum Chamber Strength', fontsize=11)
+    ax_peak.set_ylabel('Peak |SECI|')
     ax_peak.set_xticks(x); ax_peak.set_xticklabels(x_str)
-    ax_peak.set_xlabel('AI Alignment')
+    ax_peak.set_xlabel('AI Alignment (α)')
     ax_peak.legend(fontsize=9); ax_peak.grid(True, alpha=0.3, axis='y')
 
-    n_ticks_val = all_results[0]['n_ticks']
-    # -1 = never formed (no bar); n_ticks = formed but never recovered (bar at top + ✗)
-    when_exp_plot  = [max(v, 0) for v in when_exp]   # -1 → 0 so bar has zero height
+    # ── Panel 2: recovery timing ──────────────────────────────────────────────
+    n_ticks_val    = all_results[0]['n_ticks']
+    when_exp_plot  = [max(v, 0) for v in when_exp]
     when_expl_plot = [max(v, 0) for v in when_expl]
     ax_when.bar(x - w/2, [min(v, n_ticks_val) for v in when_exp_plot],
                 w, label='Exploitative', color='#1A3A6B', alpha=0.85)
     ax_when.bar(x + w/2, [min(v, n_ticks_val) for v in when_expl_plot],
                 w, label='Exploratory',  color='#6BAED6', alpha=0.85)
-    # Annotate: ○ = chamber never formed; ✗ = formed but never recovered
     for xi, (ve, vr) in enumerate(zip(when_exp, when_expl)):
         if ve == -1:
             ax_when.text(xi - w/2, 2, '○', ha='center', fontsize=9, color='#1A3A6B')
@@ -1239,20 +1187,21 @@ def plot_echo_chamber_lifecycle(all_results, save_dir):
             ax_when.text(xi + w/2, n_ticks_val + 1, '✗', ha='center', fontsize=9)
     ax_when.set_title(
         'When Does Echo Chamber Recover?\n'
-        '(first tick SECI sustains > −0.1;  ○ = no chamber formed,  ✗ = formed, never recovered)',
-        fontsize=9)
+        '(○ = no chamber formed,  ✗ = formed, never recovered)',
+        fontsize=10)
     ax_when.set_ylabel('Tick of first recovery')
     ax_when.set_ylim(0, n_ticks_val * 1.15)
     ax_when.set_xticks(x); ax_when.set_xticklabels(x_str)
-    ax_when.set_xlabel('AI Alignment')
+    ax_when.set_xlabel('AI Alignment (α)')
     ax_when.legend(fontsize=9); ax_when.grid(True, alpha=0.3, axis='y')
 
+    # ── Panel 3: duration ─────────────────────────────────────────────────────
     ax_dur.bar(x - w/2, dur_exp,  w, label='Exploitative', color='#1B5E20', alpha=0.85)
     ax_dur.bar(x + w/2, dur_expl, w, label='Exploratory',  color='#66BB6A', alpha=0.85)
-    ax_dur.set_title('How Long Do Chambers Persist?\n(fraction of ticks with SECI<−0.1)', fontsize=10)
-    ax_dur.set_ylabel('Fraction of ticks in chamber')
+    ax_dur.set_title('How Long Do Chambers Persist?\n(fraction of samples with SECI < −0.1)', fontsize=10)
+    ax_dur.set_ylabel('Fraction of run in chamber')
     ax_dur.set_xticks(x); ax_dur.set_xticklabels(x_str)
-    ax_dur.set_xlabel('AI Alignment')
+    ax_dur.set_xlabel('AI Alignment (α)')
     ax_dur.set_ylim(0, 1.05)
     ax_dur.legend(fontsize=9); ax_dur.grid(True, alpha=0.3, axis='y')
 
@@ -1270,63 +1219,79 @@ def plot_echo_chamber_lifecycle(all_results, save_dir):
 
 def plot_spatial_coverage(all_results, metrics, save_dir):
     """
-    2-row × 3-col figure comparing spatial coverage across three α levels.
+    3-row × N-col figure comparing spatial coverage across α levels.
 
-    Row 1 — Coverage Deficit (avg_disaster − avg_aid): red = chronically
-             under-served; blue = over-served relative to local severity.
-    Row 2 — Average Aid Density: how many tokens per tick reached each cell.
+    Columns: α=0 (baseline), α*(+MAE), α*(bubble), α=1.0 (full alignment).
+             Columns are de-duplicated if any two optima coincide, or if
+             α=1.0 is already one of the optima.
+
+    Row 1 — Coverage Deficit (avg_disaster − avg_aid):
+             red = chronically under-served; blue = over-served.
+    Row 2 — Average Aid Density: tokens per tick per cell.
+    Row 3 — Deviation from α*(+MAE): deficit[α] − deficit[α*(+MAE)].
+             Red = more undersupplied than the optimum; blue = less.
+             The α*(+MAE) column itself is all-white (zero deviation).
     """
     alphas = ALIGNMENT_SWEEP
     best_bubble = alphas[int(np.argmin([metrics[a]['total_bubble_norm'] for a in alphas]))]
     best_score  = alphas[int(np.argmin([metrics[a]['total_score_norm']  for a in alphas]))]
 
-    # Show baseline + both Goldilocks optima; de-duplicate if they coincide
-    show_alphas = [0.0, best_score, best_bubble]
+    # Columns: baseline, both optima, full-alignment endpoint
+    show_alphas = [0.0, best_score, best_bubble, 1.0]
     seen = set()
     show_alphas = [a for a in show_alphas if not (a in seen or seen.add(a))]
     ncols = len(show_alphas)
 
-    fig, axes = plt.subplots(2, ncols, figsize=(5 * ncols, 9))
+    fig, axes = plt.subplots(3, ncols, figsize=(5 * ncols, 13))
     fig.suptitle(
         'Spatial Coverage Analysis  (avg over full run)\n'
-        'Top: coverage deficit (disaster − aid)  |  Bottom: aid density',
+        'Row 1: coverage deficit  |  Row 2: aid density  |  '
+        'Row 3: deviation from α*(+MAE)',
         fontsize=12, fontweight='bold'
     )
 
-    # Gather colour-scale limits across all shown results for consistency
+    # Build result_map and gather colour-scale limits
+    result_map   = {}
     all_deficits = []
     all_aids     = []
-    result_map   = {}
     for alpha, res in zip(alphas, all_results):
-        if alpha not in show_alphas:
-            continue
-        if 'coverage_deficit_map_mean' in res:
+        result_map[alpha] = res
+        if alpha in show_alphas and 'coverage_deficit_map_mean' in res:
             all_deficits.append(np.array(res['coverage_deficit_map_mean']))
             all_aids.append(    np.array(res['avg_aid_map_mean']))
-        result_map[alpha] = res
 
     vdef = max(abs(np.nanmax(all_deficits)), abs(np.nanmin(all_deficits))) if all_deficits else 1.0
     vaid = np.nanmax(all_aids) if all_aids else 1.0
 
+    # Reference map for the deviation row (α*(+MAE))
+    ref_res  = result_map.get(best_score, {})
+    ref_map  = (np.array(ref_res['coverage_deficit_map_mean'])
+                if 'coverage_deficit_map_mean' in ref_res else None)
+
+    def _col_label(alpha):
+        if alpha == 0.0:
+            return f'α={alpha:.1f}  (no alignment)'
+        parts = []
+        if alpha == best_score:
+            parts.append('α*(+MAE)')
+        if alpha == best_bubble:
+            parts.append('α*(bubble)')
+        if alpha == 1.0 and not parts:
+            parts.append('full alignment')
+        tag = '  ← ' + ' & '.join(parts) if parts else ''
+        return f'α={alpha:.1f}{tag}'
+
     for col, alpha in enumerate(show_alphas):
         res = result_map.get(alpha)
 
-        ax_def = axes[0, col] if ncols > 1 else axes[0]
-        ax_aid = axes[1, col] if ncols > 1 else axes[1]
+        ax_def = axes[0, col]
+        ax_aid = axes[1, col]
+        ax_dev = axes[2, col]
 
-        if alpha == 0.0:
-            label = f'α={alpha:.1f}  (no alignment)'
-        elif alpha == best_score and alpha == best_bubble:
-            label = f'α={alpha:.1f}  ← α* (both criteria)'
-        elif alpha == best_score:
-            label = f'α={alpha:.1f}  ← α*(+MAE)'
-        elif alpha == best_bubble:
-            label = f'α={alpha:.1f}  ← α*(bubble)'
-        else:
-            label = f'α={alpha:.1f}'
+        label = _col_label(alpha)
 
         if res and 'coverage_deficit_map_mean' in res:
-            deficit = np.array(res['coverage_deficit_map_mean']).T  # transpose: x→col, y→row
+            deficit = np.array(res['coverage_deficit_map_mean']).T
             aid_map = np.array(res['avg_aid_map_mean']).T
 
             im1 = ax_def.imshow(deficit, origin='lower', cmap='RdBu_r',
@@ -1338,15 +1303,31 @@ def plot_spatial_coverage(all_results, metrics, save_dir):
                                 vmin=0, vmax=vaid, aspect='auto')
             plt.colorbar(im2, ax=ax_aid, fraction=0.046, pad=0.04,
                          label='Avg tokens / tick')
-        else:
-            ax_def.text(0.5, 0.5, 'No data', ha='center', va='center',
-                        transform=ax_def.transAxes)
-            ax_aid.text(0.5, 0.5, 'No data', ha='center', va='center',
-                        transform=ax_aid.transAxes)
 
-        ax_def.set_title(label, fontsize=11)
-        ax_def.set_xlabel('Grid x'); ax_def.set_ylabel('Grid y')
-        ax_aid.set_xlabel('Grid x'); ax_aid.set_ylabel('Grid y')
+            if ref_map is not None:
+                dev = deficit - ref_map.T
+                vd  = max(abs(float(np.nanmax(dev))), abs(float(np.nanmin(dev))), 1e-6)
+                im3 = ax_dev.imshow(dev, origin='lower', cmap='RdBu_r',
+                                    vmin=-vd, vmax=vd, aspect='auto')
+                plt.colorbar(im3, ax=ax_dev, fraction=0.046, pad=0.04,
+                             label='Δ deficit vs α*(+MAE)')
+            else:
+                ax_dev.text(0.5, 0.5, 'No ref', ha='center', va='center',
+                            transform=ax_dev.transAxes)
+        else:
+            for ax in (ax_def, ax_aid, ax_dev):
+                ax.text(0.5, 0.5, 'No data', ha='center', va='center',
+                        transform=ax.transAxes)
+
+        ax_def.set_title(label, fontsize=10)
+        for ax in (ax_def, ax_aid, ax_dev):
+            ax.set_xlabel('Grid x')
+            ax.set_ylabel('Grid y')
+
+    # Row labels on the leftmost column
+    axes[0, 0].set_ylabel('Coverage deficit\n(Grid y)')
+    axes[1, 0].set_ylabel('Aid density\n(Grid y)')
+    axes[2, 0].set_ylabel('Deviation from α*(+MAE)\n(Grid y)')
 
     plt.tight_layout()
     os.makedirs(save_dir, exist_ok=True)
