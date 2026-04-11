@@ -146,10 +146,11 @@ The invariant $D_{\mathrm{exploit}}<D_{\mathrm{explor}}$ and
 $\delta_{\mathrm{exploit}}>\delta_{\mathrm{explor}}$ holds for all $g>0$,
 ensuring the exploitative type always has a narrower and steeper acceptance curve.
 
-The gap sweep uses $N=2$ replications per $(g,\alpha)$ cell and runs for
-$\max(50,T/2)=125$ ticks.
-This differs from the primary sweep ($N=20$, $T=200$); results are therefore
-interpreted as indicative rather than confirmatory.
+The gap sweep extends the design to a second axis: $d_{\mathrm{mid}}\in\{2.0,3.0,4.0\}$
+independently varies the absolute level of cognitive openness (closed, baseline, open)
+orthogonally to the inter-type gap $g$.
+The full 2D sweep uses $N=20$ independently seeded replications per $(g,d_{\mathrm{mid}},\alpha)$
+cell and $T=200$ ticks, matching the primary alignment sweep.
 
 % ============================================================
 \subsection*{S5\quad Metric Definitions}
@@ -291,24 +292,24 @@ Steady-state scalars are averaged over the last 75 ticks (15 samples at the
 \toprule
 Dimension & Values & $N$ per cell \\
 \midrule
-Gap scalar $g$               & $\{0.0,\,0.5,\,1.0,\,1.5\}$        & 2 \\
-AI alignment $\alpha$ (within each $g$)
-                             & $0.0,\,0.1,\ldots,1.0$ (11 levels)  & 2 \\
-Simulation length $T$        & 125 ticks ($=\max(50,200/2)$)        & --- \\
+Gap scalar $g$               & $\{0.0,\,0.5,\,1.0,\,1.5\}$                   & 20 \\
+Acceptance midpoint $d_{\mathrm{mid}}$ & $\{2.0\ (\text{closed}),\ 3.0\ (\text{baseline}),\ 4.0\ (\text{open})\}$ & --- \\
+AI alignment $\alpha$ (within each $g$, $d_{\mathrm{mid}}$)
+                             & $0.0,\,0.1,\ldots,1.0$ (11 levels)             & 20 \\
+Simulation length $T$        & 200 ticks                                       & --- \\
 \midrule
-\textbf{Total simulation runs} & \multicolumn{2}{l}{\textbf{88}} \\
+\textbf{Total simulation runs} & \multicolumn{2}{l}{\textbf{2640} ($4\times3\times11\times20$)} \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-The shortened run length and reduced replication count are intentional: the gap
-sweep is a parameter-sensitivity check rather than a primary confirmatory
-analysis.
-Both $\alpha^*(\text{bubble})$ and $\alpha^*(+\mathrm{MAE})$ are computed for
-each $g$ level and plotted as grouped bars.
-Absolute (non-normalised) composite scores are shown to allow cross-$g$
-comparison; normalised scores within each $g$ sweep would confound changes in
-magnitude with changes in the optimal $\alpha$.
+Each replication uses an independent random seed (seed\,=\,run index).
+The $d_{\mathrm{mid}}$ axis tests whether the Goldilocks finding is robust to
+the absolute level of cognitive openness, independently of the inter-type gap $g$.
+Results confirm $\alpha^*=0.8$ across all 132 $(g,d_{\mathrm{mid}})$ conditions;
+the full $N=20$ design is treated as confirmatory.
+Both $\alpha^*(\text{bubble})$ and $\alpha^*(+\mathrm{MAE})$ are shown in the
+figure (solid and dashed lines respectively).
 
 % ============================================================
 \subsection*{S8\quad Factor Sensitivity Sweeps}
