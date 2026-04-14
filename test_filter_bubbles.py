@@ -41,6 +41,7 @@ import argparse
 import json
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
 from DisasterAI_Model import DisasterModel, HumanAgent
 import os
 
@@ -1228,9 +1229,10 @@ def plot_spatial_coverage(all_results, metrics, save_dir):
     Row 1 — Coverage Deficit (avg_disaster − avg_aid):
              red = chronically under-served; blue = over-served.
     Row 2 — Average Aid Density: tokens per tick per cell.
-    Row 3 — Deviation from α*(+MAE): deficit[α] − deficit[α*(+MAE)].
-             Red = more undersupplied than the optimum; blue = less.
-             The α*(+MAE) column itself is all-white (zero deviation).
+    Row 3 — Coverage Ratio (avg_aid / avg_disaster per cell):
+             white = aid matches need exactly (ratio = 1);
+             red = under-served (ratio < 1); blue = over-served (ratio > 1).
+             Cells with avg_disaster ≤ 0.01 are masked (no meaningful need).
     """
     alphas = ALIGNMENT_SWEEP
     best_bubble = alphas[int(np.argmin([metrics[a]['total_bubble_norm'] for a in alphas]))]
@@ -1242,11 +1244,13 @@ def plot_spatial_coverage(all_results, metrics, save_dir):
     show_alphas = [a for a in show_alphas if not (a in seen or seen.add(a))]
     ncols = len(show_alphas)
 
+    n_runs_label = all_results[0].get('n_runs', '?') if all_results else '?'
+
     fig, axes = plt.subplots(3, ncols, figsize=(5 * ncols, 13))
     fig.suptitle(
-        'Spatial Coverage Analysis  (avg over full run)\n'
+        f'Spatial Coverage Analysis  ({n_runs_label} seeds, avg over full run)\n'
         'Row 1: coverage deficit  |  Row 2: aid density  |  '
-        'Row 3: deviation from α*(+MAE)',
+        'Row 3: coverage ratio (aid / disaster need)',
         fontsize=12, fontweight='bold'
     )
 
@@ -1263,10 +1267,8 @@ def plot_spatial_coverage(all_results, metrics, save_dir):
     vdef = max(abs(np.nanmax(all_deficits)), abs(np.nanmin(all_deficits))) if all_deficits else 1.0
     vaid = np.nanmax(all_aids) if all_aids else 1.0
 
-    # Reference map for the deviation row (α*(+MAE))
-    ref_res  = result_map.get(best_score, {})
-    ref_map  = (np.array(ref_res['coverage_deficit_map_mean'])
-                if 'coverage_deficit_map_mean' in ref_res else None)
+    # Diverging norm for coverage ratio row: white at ratio=1.0
+    ratio_norm = mcolors.TwoSlopeNorm(vcenter=1.0, vmin=0.0, vmax=2.0)
 
     def _col_label(alpha):
         if alpha == 0.0:
@@ -1291,8 +1293,9 @@ def plot_spatial_coverage(all_results, metrics, save_dir):
         label = _col_label(alpha)
 
         if res and 'coverage_deficit_map_mean' in res:
-            deficit = np.array(res['coverage_deficit_map_mean']).T
-            aid_map = np.array(res['avg_aid_map_mean']).T
+            deficit     = np.array(res['coverage_deficit_map_mean']).T
+            aid_map     = np.array(res['avg_aid_map_mean']).T
+            disaster_map = np.array(res['avg_disaster_map_mean']).T
 
             im1 = ax_def.imshow(deficit, origin='lower', cmap='RdBu_r',
                                 vmin=-vdef, vmax=vdef, aspect='auto')
@@ -1304,16 +1307,20 @@ def plot_spatial_coverage(all_results, metrics, save_dir):
             plt.colorbar(im2, ax=ax_aid, fraction=0.046, pad=0.04,
                          label='Avg tokens / tick')
 
-            if ref_map is not None:
-                dev = deficit - ref_map.T
-                vd  = max(abs(float(np.nanmax(dev))), abs(float(np.nanmin(dev))), 1e-6)
-                im3 = ax_dev.imshow(dev, origin='lower', cmap='RdBu_r',
-                                    vmin=-vd, vmax=vd, aspect='auto')
-                plt.colorbar(im3, ax=ax_dev, fraction=0.046, pad=0.04,
-                             label='Δ deficit vs α*(+MAE)')
-            else:
-                ax_dev.text(0.5, 0.5, 'No ref', ha='center', va='center',
-                            transform=ax_dev.transAxes)
+            # Row 3: coverage ratio — aid / disaster, masked where disaster≈0
+            ratio = np.where(disaster_map > 0.01, aid_map / disaster_map, np.nan)
+            im3 = ax_dev.imshow(ratio, origin='lower', cmap='RdBu_r',
+                                norm=ratio_norm, aspect='auto')
+            plt.colorbar(im3, ax=ax_dev, fraction=0.046, pad=0.04,
+                         label='Aid / disaster (coverage ratio)')
+
+            # Epicenter marker on all three row panels
+            epic = res.get('epicenter', [15, 15])
+            ex_p, ey_p = float(epic[0]), float(epic[1])
+            for _ax in (ax_def, ax_aid, ax_dev):
+                _ax.scatter([ex_p], [ey_p], marker='*', s=120,
+                            color='yellow', edgecolors='black',
+                            linewidths=0.5, zorder=5)
         else:
             for ax in (ax_def, ax_aid, ax_dev):
                 ax.text(0.5, 0.5, 'No data', ha='center', va='center',
@@ -1327,7 +1334,7 @@ def plot_spatial_coverage(all_results, metrics, save_dir):
     # Row labels on the leftmost column
     axes[0, 0].set_ylabel('Coverage deficit\n(Grid y)')
     axes[1, 0].set_ylabel('Aid density\n(Grid y)')
-    axes[2, 0].set_ylabel('Deviation from α*(+MAE)\n(Grid y)')
+    axes[2, 0].set_ylabel('Coverage ratio\n(Grid y)')
 
     plt.tight_layout()
     os.makedirs(save_dir, exist_ok=True)
@@ -1355,29 +1362,27 @@ def _gini(arr):
 
 def plot_periphery_gap(all_results, metrics, save_dir):
     """
-    Revised 2-row × 2-col figure showing spatial and network periphery vs α.
+    2-row × 2-col figure showing spatial deprivation and agent-type outcomes vs α.
 
-    Left column — Revised spatial metrics computed at plot time from the stored
-                  mean maps (avg_aid_map_mean, coverage_deficit_map_mean).
-                  The old Q1/Q4 *average* deficit metric is replaced by two
-                  measures that directly address the heterogeneity critique:
+    Left column — Spatial metrics computed from stored mean maps.
 
-      Row 1: Gini coefficient of aid-token distribution across grid cells.
-             Captures *spatial concentration* of aid irrespective of need.
-             High Gini → aid clustered in few cells; low Gini → even spread.
+      Row 1: Gini coefficient of *unmet need* (max(0, coverage_deficit)) per cell.
+             Measures spatial inequality of deprivation: high Gini → unmet need
+             concentrated in a few zones; low Gini → need unmet more evenly.
+             At low α, aid over-concentrates near the epicentre and far cells
+             accumulate large deficits → high Gini.  Near α*, coverage becomes
+             more spatially balanced → lower Gini.
 
       Row 2: Fraction of cells with coverage deficit > 0 (net undersupplied),
              broken out by proximity to the epicentre: near (Q1, ≤25th pctile
-             distance) vs far (Q4, ≥75th pctile).  Unlike the old Q1/Q4 mean,
-             this is a *count* metric that cannot be masked by a minority of
-             massively oversupplied cells dragging the zone average negative.
+             distance) vs far (Q4, ≥75th pctile).
 
-    Right column — Network periphery (unchanged).
-      Row 1: Belief MAE for low-degree (Q1) vs high-degree (Q4) agents.
-      Row 2: Aid tokens sent per agent by network degree.
+    Right column — Agent type: exploitative vs exploratory.
 
-    Both left-column metrics are computed directly from the stored mean maps
-    so no new simulation runs are required.
+      Row 1: Steady-state Belief MAE by agent type.
+      Row 2: Steady-state AI query fraction by agent type.
+
+    All metrics are computed from stored time-series or maps — no new simulations.
     """
     alphas = ALIGNMENT_SWEEP
     total_n  = [metrics[a]['total_bubble_norm']  for a in alphas]
@@ -1385,10 +1390,7 @@ def plot_periphery_gap(all_results, metrics, save_dir):
     best_alpha       = alphas[int(np.argmin(total_n))]   # α*(bubble)
     best_alpha_score = alphas[int(np.argmin(total_sn))]  # α*(bubble + MAE)
 
-    def _get(res, key):
-        return float(res.get(f'{key}_mean', float('nan')))
-
-    # ── Left column: new spatial metrics from stored mean maps ────────────────
+    # ── Left column: spatial metrics from stored mean maps ───────────────────
     # Note: epicenter is from run-0 of each alpha condition.  Using the run-0
     # epicentre to classify cells in the cross-run mean map introduces a small
     # blurring error when epicentres vary across replications, but is the best
@@ -1398,13 +1400,14 @@ def plot_periphery_gap(all_results, metrics, save_dir):
     far_frac_under  = []
 
     for res in all_results:
-        avg_aid  = np.array(res.get('avg_aid_map_mean',          []), dtype=float)
         cov_def  = np.array(res.get('coverage_deficit_map_mean', []), dtype=float)
         epic     = res.get('epicenter', [15, 15])
         ex, ey   = float(epic[0]), float(epic[1])
 
-        if avg_aid.ndim == 2 and avg_aid.size > 0:
-            gini_vals.append(_gini(avg_aid))
+        if cov_def.ndim == 2 and cov_def.size > 0:
+            # Gini of unmet need: clip negatives (over-served cells → 0)
+            unmet = np.maximum(0.0, cov_def)
+            gini_vals.append(_gini(unmet))
 
             H, W    = cov_def.shape
             Yg, Xg  = np.mgrid[0:H, 0:W]
@@ -1422,16 +1425,17 @@ def plot_periphery_gap(all_results, metrics, save_dir):
             near_frac_under.append(float('nan'))
             far_frac_under.append(float('nan'))
 
-    # ── Right column: network-degree periphery (unchanged) ───────────────────
-    lodeg_mae = [_get(r, 'lodeg_mae') for r in all_results]
-    hideg_mae = [_get(r, 'hideg_mae') for r in all_results]
-    lodeg_aid = [_get(r, 'lodeg_aid') for r in all_results]
-    hideg_aid = [_get(r, 'hideg_aid') for r in all_results]
+    # ── Right column: agent-type outcomes (exploit vs explor) ────────────────
+    # Use steady-state mean of stored time-series via ss() helper.
+    exploit_mae = [ss(r.get('mae_exploit_mean', [])) for r in all_results]
+    explor_mae  = [ss(r.get('mae_explor_mean',  [])) for r in all_results]
+    exploit_aiq = [ss(r.get('ai_query_ratio_exploit_mean', [])) for r in all_results]
+    explor_aiq  = [ss(r.get('ai_query_ratio_explor_mean',  [])) for r in all_results]
 
     fig, axes = plt.subplots(2, 2, figsize=(13, 9))
     fig.suptitle(
         'Periphery Gap across AI Alignment (α)\n'
-        'Left: spatial aid-distribution metrics  |  Right: network degree (low vs high)',
+        'Left: spatial deprivation metrics  |  Right: agent type (exploit vs explor)',
         fontsize=12, fontweight='bold'
     )
 
@@ -1456,16 +1460,16 @@ def plot_periphery_gap(all_results, metrics, save_dir):
         ax.legend(fontsize=8)
         ax.grid(True, alpha=0.3)
 
-    # ── Top-left: Gini of aid distribution ───────────────────────────────────
+    # ── Top-left: Gini of unmet need ─────────────────────────────────────────
     ax = axes[0, 0]
     ax.plot(alphas, gini_vals, 'o-', color='darkorange', linewidth=2, markersize=7,
-            label='Gini (aid tokens)')
+            label='Gini (unmet need)')
     _vlines(ax)
     ax.set_xlabel('AI Alignment Level (α)')
-    ax.set_ylabel('Gini coefficient')
+    ax.set_ylabel('Gini coefficient (unmet need)')
     ax.set_title(
-        'Spatial Concentration of Aid\n'
-        'Gini of avg tokens/tick per cell  (0 = equal, 1 = concentrated)'
+        'Spatial Inequality of Deprivation\n'
+        'Gini of unmet need per cell  (0 = equal, 1 = all need in one zone)'
     )
     ax.set_ylim(0, 1)
     ax.legend(fontsize=8)
@@ -1491,16 +1495,16 @@ def plot_periphery_gap(all_results, metrics, save_dir):
     ax.legend(fontsize=8)
     ax.grid(True, alpha=0.3)
 
-    # ── Right column: network periphery ──────────────────────────────────────
-    _net_panel(axes[0, 1], hideg_mae, lodeg_mae,
-               'High degree (Q4)', 'Low degree (Q1)',
+    # ── Right column: agent type (exploit vs explor) ──────────────────────────
+    _net_panel(axes[0, 1], exploit_mae, explor_mae,
+               'Exploitative (Q-learners)', 'Exploratory (open-minded)',
                'Belief MAE',
-               'Network Periphery — Belief Accuracy')
+               'Belief Accuracy by Agent Type')
 
-    _net_panel(axes[1, 1], hideg_aid, lodeg_aid,
-               'High degree (Q4)', 'Low degree (Q1)',
-               'Avg aid tokens sent / agent',
-               'Network Periphery — Aid Sent per Agent')
+    _net_panel(axes[1, 1], exploit_aiq, explor_aiq,
+               'Exploitative', 'Exploratory',
+               'AI query fraction (per tick)',
+               'AI Reliance by Agent Type')
 
     plt.tight_layout()
     os.makedirs(save_dir, exist_ok=True)
