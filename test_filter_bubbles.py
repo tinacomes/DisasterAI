@@ -41,6 +41,8 @@ import argparse
 import json
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
+import networkx as nx
 from DisasterAI_Model import DisasterModel, HumanAgent
 import os
 
@@ -295,6 +297,12 @@ def run_one_sim(params):
     lo_thresh = deg_vals[max(0, n_agents // 4 - 1)]
     hi_thresh = deg_vals[min(n_agents - 1, 3 * n_agents // 4)]
 
+    betweenness = nx.betweenness_centrality(G)   # within-component betweenness
+    betw_vals   = sorted(betweenness.values())
+    n_b         = len(betw_vals)
+    lo_betw     = betw_vals[max(0, n_b // 4 - 1)]
+    hi_betw     = betw_vals[min(n_b - 1, 3 * n_b // 4)]
+
     ex, ey = model.epicenter           # grid coords of disaster centre
 
     # Cell-based near/far scalars — computed with THIS run's epicentre so they
@@ -312,12 +320,13 @@ def run_one_sim(params):
     near_cell_aid     = float(np.nanmean(avg_aid[_near_mask]))
     far_cell_aid      = float(np.nanmean(avg_aid[_far_mask]))
     all_dists  = []
-    agent_data = []                    # (dist, degree, mae, ai_frac, aid_sent)
+    agent_data = []                    # (dist, degree, betw, mae, ai_frac, aid_sent)
     for agent in model.agent_list:
         if not isinstance(agent, HumanAgent):
             continue
         node_id = int(agent.unique_id.split('_')[1])
         deg     = degrees.get(node_id, 0)
+        betw    = betweenness.get(node_id, 0.0)
         # Use initial spawn position, not final position — agents move every tick so
         # their end position is arbitrary relative to epicenter.  initial_pos reflects
         # structural periphery (whether an agent's home area is far from the disaster).
@@ -332,7 +341,7 @@ def run_one_sim(params):
         ai_frac  = (agent.accum_calls_ai /
                     max(agent.accum_calls_total, 1))
         aid_sent = float(agent.correct_targets + agent.incorrect_targets)
-        agent_data.append((dist, deg, err, ai_frac, aid_sent))
+        agent_data.append((dist, deg, betw, err, ai_frac, aid_sent))
 
     # Split by spatial distance quartile (Q1 = near, Q4 = far)
     if all_dists:
@@ -345,8 +354,10 @@ def run_one_sim(params):
     far_mae,  far_ai,  far_aid  = [], [], []
     lodeg_mae, lodeg_ai, lodeg_aid = [], [], []
     hideg_mae, hideg_ai, hideg_aid = [], [], []
+    lobetw_mae, lobetw_aid = [], []
+    hibetw_mae, hibetw_aid = [], []
 
-    for dist, deg, err, ai_frac, aid_sent in agent_data:
+    for dist, deg, betw, err, ai_frac, aid_sent in agent_data:
         if dist <= dist_q1:
             near_mae.append(err); near_ai.append(ai_frac); near_aid.append(aid_sent)
         elif dist >= dist_q3:
@@ -355,6 +366,10 @@ def run_one_sim(params):
             lodeg_mae.append(err); lodeg_ai.append(ai_frac); lodeg_aid.append(aid_sent)
         elif deg >= hi_thresh:
             hideg_mae.append(err); hideg_ai.append(ai_frac); hideg_aid.append(aid_sent)
+        if betw <= lo_betw:
+            lobetw_mae.append(err); lobetw_aid.append(aid_sent)
+        elif betw >= hi_betw:
+            hibetw_mae.append(err); hibetw_aid.append(aid_sent)
 
     def _m(lst): return float(np.nanmean(lst)) if lst else float('nan')
 
@@ -419,6 +434,9 @@ def run_one_sim(params):
         'lodeg_mae':  _m(lodeg_mae), 'hideg_mae':  _m(hideg_mae),
         'lodeg_ai':   _m(lodeg_ai),  'hideg_ai':   _m(hideg_ai),
         'lodeg_aid':  _m(lodeg_aid), 'hideg_aid':  _m(hideg_aid),
+        # Network-periphery scalars (betweenness centrality: low Q1 vs high Q4)
+        'lobetw_mae': _m(lobetw_mae), 'hibetw_mae': _m(hibetw_mae),
+        'lobetw_aid': _m(lobetw_aid), 'hibetw_aid': _m(hibetw_aid),
     }
 
 
@@ -441,6 +459,7 @@ def _aggregate(runs):
         'near_cell_deficit', 'far_cell_deficit', 'near_cell_aid', 'far_cell_aid',
         'near_mae', 'far_mae', 'near_ai', 'far_ai', 'near_aid', 'far_aid',
         'lodeg_mae', 'hideg_mae', 'lodeg_ai', 'hideg_ai', 'lodeg_aid', 'hideg_aid',
+        'lobetw_mae', 'hibetw_mae', 'lobetw_aid', 'hibetw_aid',
     ]
     result = {
         'metric_ticks': runs[0]['metric_ticks'],
@@ -585,6 +604,8 @@ def compute_goldilocks_metrics(all_results):
     # ── Range-normalise |SECI|, |AECI|, MAE across the sweep ────────────────
     # This ensures each metric contributes equally to the composite regardless
     # of its absolute magnitude (|SECI| is typically 3–5× larger than |AECI|).
+    # Only normalise over alpha levels that are actually present in metrics
+    # (gap-sweep cells with missing CI jobs will have a partial metrics dict).
     def _norm(vals):
         lo, hi = min(vals), max(vals)
         span = hi - lo
@@ -592,15 +613,16 @@ def compute_goldilocks_metrics(all_results):
             return [0.5] * len(vals)   # degenerate: all equal → arbitrary midpoint
         return [(v - lo) / span for v in vals]
 
-    seci_abs = [abs(metrics[a]['seci']) for a in ALIGNMENT_SWEEP]
-    aeci_abs = [abs(metrics[a]['aeci']) for a in ALIGNMENT_SWEEP]
-    mae_vals  = [metrics[a]['mae']       for a in ALIGNMENT_SWEEP]
+    available = [a for a in ALIGNMENT_SWEEP if a in metrics]
+    seci_abs = [abs(metrics[a]['seci']) for a in available]
+    aeci_abs = [abs(metrics[a]['aeci']) for a in available]
+    mae_vals  = [metrics[a]['mae']       for a in available]
 
     seci_n = _norm(seci_abs)
     aeci_n = _norm(aeci_abs)
     mae_n  = _norm(mae_vals)
 
-    for i, alpha in enumerate(ALIGNMENT_SWEEP):
+    for i, alpha in enumerate(available):
         metrics[alpha]['seci_norm']          = seci_n[i]
         metrics[alpha]['aeci_norm']          = aeci_n[i]
         metrics[alpha]['mae_norm']           = mae_n[i]
@@ -741,7 +763,10 @@ def _plot_timeseries(all_results, save_dir, best_alpha=None):
     Layout:
       Row 0: SECI (exploitative) | SECI (exploratory)   | Belief MAE
       Row 1: AECI (exploitative) | AECI (exploratory)   | Unmet needs
-      Row 2: Relief precision    | (spare)               | (spare)
+      Row 2: AI query (exploit)  | AI query (explor)    | Relief precision
+
+    The right column groups all outcome indicators together:
+    belief error (MAE), unmet needs, and relief targeting precision.
     """
     colors = plt.cm.viridis(np.linspace(0, 1, len(ALIGNMENT_SWEEP)))
 
@@ -753,7 +778,7 @@ def _plot_timeseries(all_results, save_dir, best_alpha=None):
     )
     ax_seci_ex, ax_seci_er, ax_mae    = axes[0]
     ax_aeci_ex, ax_aeci_er, ax_unmet  = axes[1]
-    ax_prec,    ax_aqr_ex,  ax_aqr_er  = axes[2]
+    ax_aqr_ex,  ax_aqr_er,  ax_prec   = axes[2]
 
     for color, (res, alpha) in zip(colors, zip(all_results, ALIGNMENT_SWEEP)):
         tf    = list(range(res['n_ticks']))
@@ -1097,30 +1122,27 @@ def plot_aeci_evolution(all_results, save_dir):
 # ---------------------------------------------------------------------------
 
 def plot_echo_chamber_lifecycle(all_results, save_dir):
-    """3×2 figure: SECI & AECI-Var timeseries (left) + lifecycle bar charts (right).
+    """1×3 bar-chart figure summarising the echo-chamber lifecycle across α.
 
-    Bar charts use first-crossing / peak-based scalars rather than raw tick counts,
-    avoiding the "final counts" problem where bars merely reflect run length.
-    Duration = fraction of ticks spent below threshold (scale-invariant).
+    The timeseries panels (SECI/AECI-Var evolution) have been removed because
+    they duplicate information already shown in the bubble_timeseries figure.
+    The three lifecycle scalars are placed side-by-side for easy comparison:
+
+      Panel 1 — Peak echo-chamber strength (max |SECI|)
+      Panel 2 — Recovery timing (first tick SECI sustains above −0.1)
+      Panel 3 — Duration (fraction of ticks with SECI < −0.1)
+
+    Bar charts use first-crossing / peak-based scalars rather than raw tick
+    counts, avoiding the "final counts" problem where bars reflect run length.
     """
-    colors = plt.cm.viridis(np.linspace(0, 0.9, len(ALIGNMENT_SWEEP)))
     alphas = ALIGNMENT_SWEEP
 
-    fig = plt.figure(figsize=(18, 14))
+    fig, (ax_peak, ax_when, ax_dur) = plt.subplots(1, 3, figsize=(18, 6))
     fig.suptitle(
         'Echo Chamber Lifecycle: Rise and Fall\n'
-        '(How filter bubbles form, peak, and dissolve)',
+        '(How filter bubbles form, peak, and dissolve across AI alignment levels)',
         fontsize=13, fontweight='bold',
     )
-
-    # Left column: timeseries
-    ax_seci_exp  = fig.add_subplot(3, 2, 1)
-    ax_seci_expl = fig.add_subplot(3, 2, 3)
-    ax_aeci_var  = fig.add_subplot(3, 2, 5)
-    # Right column: bar charts
-    ax_peak      = fig.add_subplot(3, 2, 2)
-    ax_when      = fig.add_subplot(3, 2, 4)
-    ax_dur       = fig.add_subplot(3, 2, 6)
 
     CHAMBER_THRESH = -0.1
 
@@ -1128,103 +1150,51 @@ def plot_echo_chamber_lifecycle(all_results, save_dir):
     when_exp,  when_expl  = [], []
     dur_exp,   dur_expl   = [], []
 
-    for color, (res, alpha) in zip(colors, zip(all_results, ALIGNMENT_SWEEP)):
-        label = f'AI Alignment={alpha}'
-        ticks_arr = np.arange(res['n_ticks'])
-        # SECI is sampled at metric_ticks cadence (every 5 ticks); use the actual
-        # tick numbers as the x-axis so the plot spans the full simulation length.
-        mt = np.array(res['metric_ticks'])
-
-        for ax, key, title in [
-            (ax_seci_exp,  'seci_exploit', 'Exploitative Agents: Echo Chamber Formation & Dissolution'),
-            (ax_seci_expl, 'seci_explor',  'Exploratory Agents: Echo Chamber Formation & Dissolution'),
-        ]:
-            mean = np.array(res[f'{key}_mean'])
-            std  = np.array(res[f'{key}_std'])
-            t    = mt[:len(mean)]          # actual tick numbers [0, 5, 10, ..., 195]
-            ax.plot(t, mean, color=color, linewidth=1.8, label=label)
-            ax.fill_between(t, mean - std, mean + std, color=color, alpha=0.15)
-
-        # AECI-Var is recorded every tick — use the full tick range
-        av_mean = np.array(res['aeci_var_mean'])
-        av_std  = np.array(res['aeci_var_std'])
-        t_av    = ticks_arr[:len(av_mean)]
-        ax_aeci_var.plot(t_av, av_mean, color=color, linewidth=1.8)
-        ax_aeci_var.fill_between(t_av, av_mean - av_std, av_mean + av_std,
-                                 color=color, alpha=0.15)
-
-        # Lifecycle scalars from mean series (robust to N=1 replications)
+    for res, alpha in zip(all_results, ALIGNMENT_SWEEP):
+        mt     = np.array(res['metric_ticks'])
+        n      = res['n_ticks']
         se_mean = np.array(res['seci_exploit_mean'])
         sr_mean = np.array(res['seci_explor_mean'])
-        n = res['n_ticks']
 
         # Peak = max |SECI|
         peak_exp.append(float(np.nanmax(np.abs(se_mean))) if len(se_mean) else 0.0)
         peak_expl.append(float(np.nanmax(np.abs(sr_mean))) if len(sr_mean) else 0.0)
 
-        # Recovery: _first_sustained_break returns an *index* into the series (0..len-1),
-        # or len(series) as the "never" sentinel.  Convert to actual tick number.
+        # Recovery tick: _first_sustained_break returns an index into the series
+        # (0..len-1) or len as the "never" sentinel; -1 means chamber never formed.
         def _idx_to_tick(idx, mt_arr, n_t):
             return int(mt_arr[idx]) if idx < len(mt_arr) else n_t
 
-        # _first_sustained_break returns -1 (never formed), len (formed/never recovered), or idx
         raw_exp  = _first_sustained_break(list(se_mean), sustain=3)
         raw_expl = _first_sustained_break(list(sr_mean), sustain=3)
         when_exp.append( -1 if raw_exp  < 0 else _idx_to_tick(raw_exp,  mt, n))
         when_expl.append(-1 if raw_expl < 0 else _idx_to_tick(raw_expl, mt, n))
 
-        # Duration = fraction of ticks with SECI < CHAMBER_THRESH (scale-invariant)
+        # Duration = fraction of metric samples with SECI < threshold
         dur_exp.append(float(np.mean(se_mean < CHAMBER_THRESH)) if len(se_mean) else 0.0)
         dur_expl.append(float(np.mean(sr_mean < CHAMBER_THRESH)) if len(sr_mean) else 0.0)
 
-    # Timeseries decorations
-    for ax, title in [
-        (ax_seci_exp,  'Exploitative Agents: Echo Chamber Formation & Dissolution'),
-        (ax_seci_expl, 'Exploratory Agents: Echo Chamber Formation & Dissolution'),
-    ]:
-        ax.axhline(0,            color='gray',  linestyle='--', linewidth=1,   label='Neutral (SECI=0)')
-        ax.axhline(CHAMBER_THRESH, color='salmon', linestyle=':',  linewidth=1.2, label='Chamber threshold')
-        ax.set_title(title, fontsize=10)
-        ax.set_xlabel('Simulation Tick')
-        ax.set_ylabel('SECI (Social Echo Chamber Index)')
-        ax.set_ylim(top=0.25)   # let matplotlib choose the lower limit from data
-        ax.grid(True, alpha=0.3)
-    ax_seci_exp.legend(fontsize=7, loc='lower right')
-    ax_seci_expl.legend(fontsize=7, loc='lower right')
+    x     = np.arange(len(alphas))
+    w     = 0.38
+    x_str = [str(a) for a in alphas]
 
-    ax_aeci_var.axhline(0, color='gray', linestyle='--', linewidth=1, label='Neutral')
-    ax_aeci_var.set_title('AI Belief Variance Reduction Over Time', fontsize=10)
-    ax_aeci_var.set_xlabel('Simulation Tick')
-    ax_aeci_var.set_ylabel('AECI-Var (AI Echo Chamber Index)')
-    ax_aeci_var.legend(
-        [plt.Line2D([0], [0], color=c, linewidth=2) for c in colors],
-        [f'AI Alignment={a}' for a in alphas],
-        fontsize=7, loc='lower right',
-    )
-    ax_aeci_var.grid(True, alpha=0.3)
-
-    # Bar charts
-    x      = np.arange(len(alphas))
-    w      = 0.38
-    x_str  = [str(a) for a in alphas]
-
+    # ── Panel 1: peak strength ────────────────────────────────────────────────
     ax_peak.bar(x - w/2, peak_exp,  w, label='Exploitative', color='#8B2020', alpha=0.85)
     ax_peak.bar(x + w/2, peak_expl, w, label='Exploratory',  color='#FA8072', alpha=0.85)
-    ax_peak.set_title('Maximum Chamber Strength', fontsize=10)
-    ax_peak.set_ylabel('Peak Echo Chamber Strength |SECI|')
+    ax_peak.set_title('Maximum Chamber Strength', fontsize=11)
+    ax_peak.set_ylabel('Peak |SECI|')
     ax_peak.set_xticks(x); ax_peak.set_xticklabels(x_str)
-    ax_peak.set_xlabel('AI Alignment')
+    ax_peak.set_xlabel('AI Alignment (α)')
     ax_peak.legend(fontsize=9); ax_peak.grid(True, alpha=0.3, axis='y')
 
-    n_ticks_val = all_results[0]['n_ticks']
-    # -1 = never formed (no bar); n_ticks = formed but never recovered (bar at top + ✗)
-    when_exp_plot  = [max(v, 0) for v in when_exp]   # -1 → 0 so bar has zero height
+    # ── Panel 2: recovery timing ──────────────────────────────────────────────
+    n_ticks_val    = all_results[0]['n_ticks']
+    when_exp_plot  = [max(v, 0) for v in when_exp]
     when_expl_plot = [max(v, 0) for v in when_expl]
     ax_when.bar(x - w/2, [min(v, n_ticks_val) for v in when_exp_plot],
                 w, label='Exploitative', color='#1A3A6B', alpha=0.85)
     ax_when.bar(x + w/2, [min(v, n_ticks_val) for v in when_expl_plot],
                 w, label='Exploratory',  color='#6BAED6', alpha=0.85)
-    # Annotate: ○ = chamber never formed; ✗ = formed but never recovered
     for xi, (ve, vr) in enumerate(zip(when_exp, when_expl)):
         if ve == -1:
             ax_when.text(xi - w/2, 2, '○', ha='center', fontsize=9, color='#1A3A6B')
@@ -1236,20 +1206,21 @@ def plot_echo_chamber_lifecycle(all_results, save_dir):
             ax_when.text(xi + w/2, n_ticks_val + 1, '✗', ha='center', fontsize=9)
     ax_when.set_title(
         'When Does Echo Chamber Recover?\n'
-        '(first tick SECI sustains > −0.1;  ○ = no chamber formed,  ✗ = formed, never recovered)',
-        fontsize=9)
+        '(○ = no chamber formed,  ✗ = formed, never recovered)',
+        fontsize=10)
     ax_when.set_ylabel('Tick of first recovery')
     ax_when.set_ylim(0, n_ticks_val * 1.15)
     ax_when.set_xticks(x); ax_when.set_xticklabels(x_str)
-    ax_when.set_xlabel('AI Alignment')
+    ax_when.set_xlabel('AI Alignment (α)')
     ax_when.legend(fontsize=9); ax_when.grid(True, alpha=0.3, axis='y')
 
+    # ── Panel 3: duration ─────────────────────────────────────────────────────
     ax_dur.bar(x - w/2, dur_exp,  w, label='Exploitative', color='#1B5E20', alpha=0.85)
     ax_dur.bar(x + w/2, dur_expl, w, label='Exploratory',  color='#66BB6A', alpha=0.85)
-    ax_dur.set_title('How Long Do Chambers Persist?\n(fraction of ticks with SECI<−0.1)', fontsize=10)
-    ax_dur.set_ylabel('Fraction of ticks in chamber')
+    ax_dur.set_title('How Long Do Chambers Persist?\n(fraction of samples with SECI < −0.1)', fontsize=10)
+    ax_dur.set_ylabel('Fraction of run in chamber')
     ax_dur.set_xticks(x); ax_dur.set_xticklabels(x_str)
-    ax_dur.set_xlabel('AI Alignment')
+    ax_dur.set_xlabel('AI Alignment (α)')
     ax_dur.set_ylim(0, 1.05)
     ax_dur.legend(fontsize=9); ax_dur.grid(True, alpha=0.3, axis='y')
 
@@ -1267,63 +1238,73 @@ def plot_echo_chamber_lifecycle(all_results, save_dir):
 
 def plot_spatial_coverage(all_results, metrics, save_dir):
     """
-    2-row × 3-col figure comparing spatial coverage across three α levels.
+    2-row × N-col figure comparing spatial coverage across α levels.
 
-    Row 1 — Coverage Deficit (avg_disaster − avg_aid): red = chronically
-             under-served; blue = over-served relative to local severity.
-    Row 2 — Average Aid Density: how many tokens per tick reached each cell.
+    Columns: α=0 (baseline), α*(+MAE), α*(bubble), α=1.0 (full alignment).
+             Columns are de-duplicated if any two optima coincide, or if
+             α=1.0 is already one of the optima.
+
+    Row 1 — Coverage Deficit (avg_disaster − avg_aid):
+             red = chronically under-served; blue = over-served.
+    Row 2 — Average Aid Density: tokens per tick per cell.
+
+    Yellow star marks the disaster epicenter on each panel.
     """
     alphas = ALIGNMENT_SWEEP
     best_bubble = alphas[int(np.argmin([metrics[a]['total_bubble_norm'] for a in alphas]))]
     best_score  = alphas[int(np.argmin([metrics[a]['total_score_norm']  for a in alphas]))]
 
-    # Show baseline + both Goldilocks optima; de-duplicate if they coincide
-    show_alphas = [0.0, best_score, best_bubble]
+    # Columns: baseline, both optima, full-alignment endpoint
+    show_alphas = [0.0, best_score, best_bubble, 1.0]
     seen = set()
     show_alphas = [a for a in show_alphas if not (a in seen or seen.add(a))]
     ncols = len(show_alphas)
 
+    n_runs_label = all_results[0].get('n_runs', '?') if all_results else '?'
+
     fig, axes = plt.subplots(2, ncols, figsize=(5 * ncols, 9))
     fig.suptitle(
-        'Spatial Coverage Analysis  (avg over full run)\n'
-        'Top: coverage deficit (disaster − aid)  |  Bottom: aid density',
+        f'Spatial Coverage Analysis  ({n_runs_label} seeds, avg over full run)\n'
+        'Row 1: coverage deficit  |  Row 2: aid density',
         fontsize=12, fontweight='bold'
     )
 
-    # Gather colour-scale limits across all shown results for consistency
+    # Build result_map and gather colour-scale limits
+    result_map   = {}
     all_deficits = []
     all_aids     = []
-    result_map   = {}
     for alpha, res in zip(alphas, all_results):
-        if alpha not in show_alphas:
-            continue
-        if 'coverage_deficit_map_mean' in res:
+        result_map[alpha] = res
+        if alpha in show_alphas and 'coverage_deficit_map_mean' in res:
             all_deficits.append(np.array(res['coverage_deficit_map_mean']))
             all_aids.append(    np.array(res['avg_aid_map_mean']))
-        result_map[alpha] = res
 
     vdef = max(abs(np.nanmax(all_deficits)), abs(np.nanmin(all_deficits))) if all_deficits else 1.0
     vaid = np.nanmax(all_aids) if all_aids else 1.0
 
+    def _col_label(alpha):
+        if alpha == 0.0:
+            return f'α={alpha:.1f}  (no alignment)'
+        parts = []
+        if alpha == best_score:
+            parts.append('α*(+MAE)')
+        if alpha == best_bubble:
+            parts.append('α*(bubble)')
+        if alpha == 1.0 and not parts:
+            parts.append('full alignment')
+        tag = '  ← ' + ' & '.join(parts) if parts else ''
+        return f'α={alpha:.1f}{tag}'
+
     for col, alpha in enumerate(show_alphas):
         res = result_map.get(alpha)
 
-        ax_def = axes[0, col] if ncols > 1 else axes[0]
-        ax_aid = axes[1, col] if ncols > 1 else axes[1]
+        ax_def = axes[0, col]
+        ax_aid = axes[1, col]
 
-        if alpha == 0.0:
-            label = f'α={alpha:.1f}  (no alignment)'
-        elif alpha == best_score and alpha == best_bubble:
-            label = f'α={alpha:.1f}  ← α* (both criteria)'
-        elif alpha == best_score:
-            label = f'α={alpha:.1f}  ← α*(+MAE)'
-        elif alpha == best_bubble:
-            label = f'α={alpha:.1f}  ← α*(bubble)'
-        else:
-            label = f'α={alpha:.1f}'
+        label = _col_label(alpha)
 
         if res and 'coverage_deficit_map_mean' in res:
-            deficit = np.array(res['coverage_deficit_map_mean']).T  # transpose: x→col, y→row
+            deficit = np.array(res['coverage_deficit_map_mean']).T
             aid_map = np.array(res['avg_aid_map_mean']).T
 
             im1 = ax_def.imshow(deficit, origin='lower', cmap='RdBu_r',
@@ -1335,15 +1316,27 @@ def plot_spatial_coverage(all_results, metrics, save_dir):
                                 vmin=0, vmax=vaid, aspect='auto')
             plt.colorbar(im2, ax=ax_aid, fraction=0.046, pad=0.04,
                          label='Avg tokens / tick')
-        else:
-            ax_def.text(0.5, 0.5, 'No data', ha='center', va='center',
-                        transform=ax_def.transAxes)
-            ax_aid.text(0.5, 0.5, 'No data', ha='center', va='center',
-                        transform=ax_aid.transAxes)
 
-        ax_def.set_title(label, fontsize=11)
-        ax_def.set_xlabel('Grid x'); ax_def.set_ylabel('Grid y')
-        ax_aid.set_xlabel('Grid x'); ax_aid.set_ylabel('Grid y')
+            # Epicenter marker on both panels
+            epic = res.get('epicenter', [15, 15])
+            ex_p, ey_p = float(epic[0]), float(epic[1])
+            for _ax in (ax_def, ax_aid):
+                _ax.scatter([ex_p], [ey_p], marker='*', s=120,
+                            color='yellow', edgecolors='black',
+                            linewidths=0.5, zorder=5)
+        else:
+            for ax in (ax_def, ax_aid):
+                ax.text(0.5, 0.5, 'No data', ha='center', va='center',
+                        transform=ax.transAxes)
+
+        ax_def.set_title(label, fontsize=10)
+        for ax in (ax_def, ax_aid):
+            ax.set_xlabel('Grid x')
+            ax.set_ylabel('Grid y')
+
+    # Row labels on the leftmost column
+    axes[0, 0].set_ylabel('Coverage deficit\n(Grid y)')
+    axes[1, 0].set_ylabel('Aid density\n(Grid y)')
 
     plt.tight_layout()
     os.makedirs(save_dir, exist_ok=True)
@@ -1353,19 +1346,39 @@ def plot_spatial_coverage(all_results, metrics, save_dir):
     print(f"Spatial coverage figure saved: {path}")
 
 
+def _gini(arr):
+    """Gini coefficient of a non-negative array (0 = perfectly equal, 1 = maximally concentrated).
+
+    Computed from a flattened view of *arr*, ignoring NaNs and negatives.
+    This is the standard area-between-Lorenz-curve-and-diagonal formula.
+    """
+    v = np.array(arr, dtype=float).flatten()
+    v = v[np.isfinite(v) & (v >= 0)]
+    if len(v) == 0 or v.sum() == 0:
+        return float('nan')
+    v = np.sort(v)
+    n = len(v)
+    idx = np.arange(1, n + 1, dtype=float)
+    return float((2.0 * np.dot(idx, v) / (n * v.sum())) - (n + 1.0) / n)
+
+
 def plot_periphery_gap(all_results, metrics, save_dir):
     """
-    2-row × 2-col figure showing how the periphery gap varies with α.
+    2-row × 2-col figure showing spatial and network periphery outcomes vs α.
 
-    Left column  — spatial periphery (cell-based near/far scalars pre-computed
-                   per replication in run_one_sim(), then averaged).  Each run
-                   uses its own epicentre for the Q1/Q4 distance split, avoiding
-                   the blurring artefact of splitting the cross-run mean map.
-    Right column — network periphery (low-degree Q1 vs high-degree Q4 agents
-                   in the Watts–Strogatz social network).
+    Left column — Spatial distance from disaster epicentre (per-run scalars,
+                  computed with the correct per-run epicentre → valid even with
+                  random epicentre across replications).
 
-    Row 1 — Coverage deficit (disaster − aid) near vs far: +ve = under-served.
-    Row 2 — Aid density (tokens/tick) near vs far  |  AI-query fraction by degree.
+      Row 1: Agent belief MAE — near-epicentre agents (Q1) vs far (Q4).
+      Row 2: Agent aid tokens sent — near (Q1) vs far (Q4).
+
+    Right column — Network betweenness centrality within social community.
+
+      Row 1: Belief MAE — high-betweenness brokers (Q4) vs peripheral agents (Q1).
+      Row 2: Aid tokens sent — high-betweenness (Q4) vs low-betweenness (Q1).
+
+    All metrics are per-run scalars aggregated in _aggregate() — no maps used.
     """
     alphas = ALIGNMENT_SWEEP
     total_n  = [metrics[a]['total_bubble_norm']  for a in alphas]
@@ -1373,74 +1386,65 @@ def plot_periphery_gap(all_results, metrics, save_dir):
     best_alpha       = alphas[int(np.argmin(total_n))]   # α*(bubble)
     best_alpha_score = alphas[int(np.argmin(total_sn))]  # α*(bubble + MAE)
 
-    # ── Cell-based spatial metrics — pre-computed per run in run_one_sim() ──
-    # Using per-run epicentre avoids the blurring bug: the mean maps average across
-    # replications with different epicentre positions, making post-hoc near/far
-    # splits against run-0's epicentre meaningless.
     def _get(res, key):
         return float(res.get(f'{key}_mean', float('nan')))
 
-    near_def  = [_get(r, 'near_cell_deficit') for r in all_results]
-    far_def   = [_get(r, 'far_cell_deficit')  for r in all_results]
-    near_aid_d = [_get(r, 'near_cell_aid')    for r in all_results]
-    far_aid_d  = [_get(r, 'far_cell_aid')     for r in all_results]
-
-    lodeg_mae = [_get(r, 'lodeg_mae') for r in all_results]
-    hideg_mae = [_get(r, 'hideg_mae') for r in all_results]
-    lodeg_aid = [_get(r, 'lodeg_aid') for r in all_results]
-    hideg_aid = [_get(r, 'hideg_aid') for r in all_results]
+    near_mae   = [_get(r, 'near_mae')   for r in all_results]
+    far_mae    = [_get(r, 'far_mae')    for r in all_results]
+    near_aid   = [_get(r, 'near_aid')   for r in all_results]
+    far_aid    = [_get(r, 'far_aid')    for r in all_results]
+    lobetw_mae = [_get(r, 'lobetw_mae') for r in all_results]
+    hibetw_mae = [_get(r, 'hibetw_mae') for r in all_results]
+    lobetw_aid = [_get(r, 'lobetw_aid') for r in all_results]
+    hibetw_aid = [_get(r, 'hibetw_aid') for r in all_results]
 
     fig, axes = plt.subplots(2, 2, figsize=(13, 9))
     fig.suptitle(
         'Periphery Gap across AI Alignment (α)\n'
-        'Left: spatial (cell-based near/far epicentre)  |  Right: network degree (low vs high)',
+        'Left: spatial distance from epicentre  |  Right: network betweenness centrality',
         fontsize=12, fontweight='bold'
     )
 
-    def _panel(ax, core_vals, periph_vals, core_label, periph_label,
-                ylabel, title, ylim=None, hline=None):
+    def _vlines(ax):
+        ax.axvline(best_alpha, color='gold', linestyle='--', linewidth=2,
+                   label=f'α*(bubble)={best_alpha}')
+        ax.axvline(best_alpha_score, color='tomato', linestyle=':', linewidth=1.8,
+                   label=f'α*(+MAE)={best_alpha_score}')
+
+    def _net_panel(ax, core_vals, periph_vals, core_label, periph_label,
+                   ylabel, title):
         ax.plot(alphas, core_vals,   'o-',  color='steelblue', linewidth=2,
                 label=core_label,   markersize=7)
         ax.plot(alphas, periph_vals, 's--', color='firebrick', linewidth=2,
                 label=periph_label, markersize=7)
         ax.fill_between(alphas, core_vals, periph_vals, alpha=0.12, color='orange',
                         label='Gap')
-        ax.axvline(best_alpha, color='gold', linestyle='--', linewidth=2,
-                   label=f'α*(bubble)={best_alpha}')
-        ax.axvline(best_alpha_score, color='tomato', linestyle=':', linewidth=1.8,
-                   label=f'α*(+MAE)={best_alpha_score}')
-        if hline is not None:
-            ax.axhline(hline, color='k', linestyle=':', linewidth=1, alpha=0.5)
+        _vlines(ax)
         ax.set_xlabel('AI Alignment Level (α)')
         ax.set_ylabel(ylabel)
         ax.set_title(title)
-        if ylim:
-            ax.set_ylim(*ylim)
         ax.legend(fontsize=8)
         ax.grid(True, alpha=0.3)
 
-    # Left column: cell-based spatial periphery
-    _panel(axes[0, 0], near_def, far_def,
-           'Near epicentre (Q1 cells)', 'Far epicentre (Q4 cells)',
-           'Coverage deficit (disaster − aid)',
-           'Spatial Coverage Deficit',
-           hline=0)
+    _net_panel(axes[0, 0], near_mae, far_mae,
+               'Near epicentre (Q1)', 'Far epicentre (Q4)',
+               'Belief MAE',
+               'Spatial Periphery — Belief Accuracy\nNear vs far spawn from epicentre')
 
-    _panel(axes[1, 0], near_aid_d, far_aid_d,
-           'Near epicentre (Q1 cells)', 'Far epicentre (Q4 cells)',
-           'Avg tokens / tick',
-           'Aid Density near vs far Epicentre')
+    _net_panel(axes[1, 0], near_aid, far_aid,
+               'Near epicentre (Q1)', 'Far epicentre (Q4)',
+               'Avg aid tokens sent / agent',
+               'Spatial Periphery — Aid Contribution\nNear vs far spawn from epicentre')
 
-    # Right column: network-degree periphery
-    _panel(axes[0, 1], hideg_mae, lodeg_mae,
-           'High degree (Q4)', 'Low degree (Q1)',
-           'Belief MAE',
-           'Network Periphery — Belief Accuracy')
+    _net_panel(axes[0, 1], hibetw_mae, lobetw_mae,
+               'High betweenness (Q4)', 'Low betweenness (Q1)',
+               'Belief MAE',
+               'Network Periphery — Belief Accuracy\nBroker vs peripheral agents')
 
-    _panel(axes[1, 1], hideg_aid, lodeg_aid,
-           'High degree (Q4)', 'Low degree (Q1)',
-           'Avg aid tokens sent / agent',
-           'Network Periphery — Aid Sent per Agent')
+    _net_panel(axes[1, 1], hibetw_aid, lobetw_aid,
+               'High betweenness (Q4)', 'Low betweenness (Q1)',
+               'Avg aid tokens sent / agent',
+               'Network Periphery — Aid Contribution\nBroker vs peripheral agents')
 
     plt.tight_layout()
     os.makedirs(save_dir, exist_ok=True)
@@ -1482,20 +1486,28 @@ def plot_gap_sweep(gap_results, save_dir):
     series = {}   # d_mid → dict of lists indexed by g
     for d_mid in d_mid_values:
         g_dict   = gap_results[d_mid]
-        g_values = sorted(g_dict.keys())
-        s = {'g': g_values, 'alpha_star': [],
-             'alpha_score': [], 'raw_bubble': [], 'raw_bubble_se': [],
+        # Build series lists dynamically (only include g levels with enough data)
+        s = {'g': [],
+             'alpha_star': [], 'alpha_score': [],
+             'raw_bubble': [], 'raw_bubble_se': [],
              'seci': [], 'seci_se': [], 'seci_runs': [],
              'mae': [], 'mae_se': []}
-        for g in g_values:
-            results_g = g_dict[g]['all_results']
+        for g in sorted(g_dict.keys()):
+            results_g    = g_dict[g]['all_results']
+            available_g  = g_dict[g].get('alphas', ALIGNMENT_SWEEP[:len(results_g)])
+            if len(available_g) < 5:
+                print(f'  Skipping d_mid={d_mid}, g={g}: '
+                      f'only {len(available_g)} α levels — need ≥5 to find optimum')
+                continue
             metrics_g = compute_goldilocks_metrics(results_g)
-            norm_bubble_vals = [metrics_g[a]['total_bubble_norm'] for a in ALIGNMENT_SWEEP]
-            norm_score_vals  = [metrics_g[a]['total_score_norm']  for a in ALIGNMENT_SWEEP]
+            avail = [a for a in ALIGNMENT_SWEEP if a in metrics_g]
+            norm_bubble_vals = [metrics_g[a]['total_bubble_norm'] for a in avail]
+            norm_score_vals  = [metrics_g[a]['total_score_norm']  for a in avail]
             idx    = int(np.argmin(norm_bubble_vals))
-            a_star = ALIGNMENT_SWEEP[idx]
+            a_star = avail[idx]
+            s['g'].append(g)
             s['alpha_star'].append(a_star)
-            s['alpha_score'].append(ALIGNMENT_SWEEP[int(np.argmin(norm_score_vals))])
+            s['alpha_score'].append(avail[int(np.argmin(norm_score_vals))])
             rb = abs(metrics_g[a_star]['seci']) + abs(metrics_g[a_star]['aeci'])
             rb_se = (metrics_g[a_star]['seci_std'] ** 2 +
                      metrics_g[a_star]['aeci_std'] ** 2) ** 0.5
@@ -1784,6 +1796,12 @@ if __name__ == '__main__':
              'Part of the 2D gap sweep: d_mid controls absolute openness, g controls '
              'the inter-type gap.',
     )
+    parser.add_argument(
+        '--spatial-experiment', action='store_true',
+        help='Run alignment sweep with fixed epicenter [15,15] and generate spatial '
+             'figures only (spatial_coverage.png, periphery_gap.png). Results are '
+             'saved separately and do not affect the main experiment JSON.',
+    )
     args = parser.parse_args()
 
     # Apply CLI overrides
@@ -1795,6 +1813,31 @@ if __name__ == '__main__':
     factor_ticks = max(50, base_params['ticks'] // 2)
 
     save_dir = args.save_dir
+
+    # ------------------------------------------------------------------
+    # Mode: --spatial-experiment  (fixed epicenter, spatial figures only)
+    # ------------------------------------------------------------------
+    if args.spatial_experiment:
+        print('=' * 70)
+        print('SPATIAL EXPERIMENT — fixed epicenter [15, 15]')
+        print(f'Ticks: {base_params["ticks"]}  |  Replications: {n_runs_primary}')
+        print('=' * 70)
+        spatial_params = {**base_params, 'epicenter': [15, 15]}
+        spatial_results = []
+        for alpha in ALIGNMENT_SWEEP:
+            params = {**spatial_params, 'ai_alignment_level': alpha}
+            label  = f'Spatial α={alpha:.1f}'
+            spatial_results.append(run_replicated(params, n_runs_primary, label))
+        spatial_metrics = compute_goldilocks_metrics(spatial_results)
+        os.makedirs(save_dir, exist_ok=True)
+        plot_spatial_coverage(spatial_results, spatial_metrics, save_dir)
+        plot_periphery_gap(spatial_results, spatial_metrics, save_dir)
+        sp_path = os.path.join(save_dir, 'spatial_experiment.json')
+        with open(sp_path, 'w') as f:
+            json.dump({'alignment_sweep': ALIGNMENT_SWEEP,
+                       'all_results': spatial_results}, f)
+        print(f'Spatial experiment results saved → {sp_path}')
+        import sys; sys.exit(0)
 
     # ------------------------------------------------------------------
     # Mode: --single-alpha  (one parallel CI worker per alpha level)
@@ -1884,10 +1927,16 @@ if __name__ == '__main__':
         # 2D format: one file per (g, d_mid, α) — bubble_gap_{g}_dmid_{d_mid}_alpha_{alpha}.json
         # Also accept legacy format bubble_gap_{g}_alpha_{alpha}.json (treated as d_mid=3.0)
         per_cell = {}   # (g, d_mid) → {alpha: result}
+        # Search recursively: cross-run artifact downloads (download-artifact@v4
+        # with run-id) preserve the upload path and nest files one level deeper,
+        # e.g. results_dir/filter_bubble_results/bubble_gap_*.json instead of
+        # results_dir/bubble_gap_*.json.  The ** glob handles both cases.
         new_files = sorted(_glob.glob(
-            os.path.join(results_dir, 'bubble_gap_*_dmid_*_alpha_*.json')))
+            os.path.join(results_dir, '**', 'bubble_gap_*_dmid_*_alpha_*.json'),
+            recursive=True))
         legacy_files = sorted(_glob.glob(
-            os.path.join(results_dir, 'bubble_gap_*_alpha_*.json')))
+            os.path.join(results_dir, '**', 'bubble_gap_*_alpha_*.json'),
+            recursive=True))
         # Exclude new-format files from legacy list (they contain '_dmid_')
         legacy_files = [p for p in legacy_files if '_dmid_' not in p]
         for path in new_files:
@@ -1903,14 +1952,16 @@ if __name__ == '__main__':
         if not per_cell:
             raise FileNotFoundError(
                 f'No bubble_gap_* JSON files found in {results_dir}')
-        # Assemble into {d_mid: {g: {'all_results': [...]}}} for plot_gap_sweep
-        gap_results = {}   # d_mid → g → {'all_results': [...]}
+        # Assemble into {d_mid: {g: {'all_results': [...], 'alphas': [...]}}} for plot_gap_sweep
+        gap_results = {}   # d_mid → g → {'all_results': [...], 'alphas': [...]}
         for (g, d_mid), alpha_dict in per_cell.items():
             missing = [a for a in ALIGNMENT_SWEEP if a not in alpha_dict]
             if missing:
                 print(f'Warning: g={g}, d_mid={d_mid} missing α levels {missing}')
+            available_alphas = [a for a in ALIGNMENT_SWEEP if a in alpha_dict]
             gap_results.setdefault(d_mid, {})[g] = {
-                'all_results': [alpha_dict[a] for a in ALIGNMENT_SWEEP if a in alpha_dict]
+                'all_results': [alpha_dict[a] for a in available_alphas],
+                'alphas':       available_alphas,
             }
         d_mids_loaded = sorted(gap_results)
         print(f'Loaded gap results: d_mid={d_mids_loaded}, '

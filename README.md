@@ -43,12 +43,11 @@ r_AI = (1 − α) × truth + α × agent_belief
 ```
 DisasterAI/
 ├── DisasterAI_Model.py       # Core ABM: agents, network, belief update, AI alignment
-├── DisMod.py                 # Earlier model version (reference)
 ├── test_filter_bubbles.py    # Primary experiment: Goldilocks alignment sweep + all plots
 ├── simulate.py               # Lightweight single-run script
+├── plot_results.py           # Aggregation and plotting for simulate.py outputs
 ├── requirements.txt          # Python dependencies
-├── agent_model_results/      # JSON result cache (one file per α level)
-├── analysis_plots/           # Output figures
+├── test_results/             # Output figures (gitignored; generated locally or via CI)
 ├── METHODS_PAPER.md          # Paper methodology section (main text)
 └── SUPPLEMENTARY.md          # Supplementary tables and experimental design
 ```
@@ -80,9 +79,13 @@ python test_filter_bubbles.py --plot-only
 
 ### Cognitive gap sweep
 
-```bash
-python test_filter_bubbles.py --gap-sweep --plot-only
-```
+The 2D gap sweep (4g × 3 d\_mid × 11α = 132 conditions, N=20 seeded replications each)
+is run via GitHub Actions:
+
+- **GitHub → Actions → "Run Gap Sweep only"** — launches 132 parallel jobs, uploads
+  per-cell JSON artifacts, then assembles `gap_sweep.png`
+- **GitHub → Actions → "Replot Gap Sweep"** — re-generates `gap_sweep.png` from
+  existing artifacts without re-running simulations (requires the source run ID)
 
 ### Single quick run
 
@@ -112,11 +115,12 @@ All figures are saved to `analysis_plots/`.
 - 200 simulation ticks; steady-state window = last 75 ticks
 - Total: 220 simulation runs
 
-### Secondary: Cognitive Gap Sweep
+### Secondary: Cognitive Gap Sweep (2D)
 
-- Gap scalar g ∈ {0.0, 0.5, 1.0, 1.5}; α swept at 11 levels within each g
-- N = 2 replications, 125 ticks per run (indicative, not confirmatory)
-- Tests whether α* is robust to degree of within-population cognitive diversity
+- Gap scalar g ∈ {0.0, 0.5, 1.0, 1.5} × acceptance midpoint d\_mid ∈ {2.0, 3.0, 4.0} × α at 11 levels
+- N = 20 independently seeded replications per cell, T = 200 ticks (2640 total runs)
+- Tests robustness of α\* to both the degree of cognitive polarisation and the absolute level of cognitive openness
+- α\* = 0.8 confirmed across all 132 (g, d\_mid) conditions
 
 ### Factor Sensitivity Sweeps (at fixed α = 0.5)
 

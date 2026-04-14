@@ -1,0 +1,53 @@
+name: Spatial Visualization (manual)
+
+# Separate experiment with a fixed epicenter [15, 15] so spatial maps are
+# not blurred by varying epicenters across replications.
+# Run independently of the main experiment — main experiment keeps random
+# epicenters for valid statistical randomisation.
+on:
+  workflow_dispatch:
+    inputs:
+      n_runs:
+        description: "Replications per alpha condition"
+        required: false
+        default: "10"
+      ticks:
+        description: "Simulation ticks per run"
+        required: false
+        default: "200"
+
+env:
+  MPLBACKEND: Agg
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  spatial-visualization:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run spatial experiment (fixed epicenter [15,15])
+        run: |
+          mkdir -p spatial_results
+          python3 test_filter_bubbles.py \
+            --spatial-experiment \
+            --ticks ${{ inputs.ticks }} \
+            --n-runs ${{ inputs.n_runs }} \
+            --save-dir spatial_results/
+
+      - name: Upload spatial plots
+        uses: actions/upload-artifact@v4
+        with:
+          name: spatial-plots
+          path: spatial_results/*.png
+          retention-days: 30

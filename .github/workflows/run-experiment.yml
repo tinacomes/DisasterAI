@@ -144,38 +144,10 @@ jobs:
           path: filter_bubble_results/bubble_factor_${{ matrix.ftype }}_${{ matrix.fval }}.json
           retention-days: 3
 
-  # ── Gap-scalar sweep (4 g values in parallel) ────────────────────────────
-  # Each g value: 11α × N_GAP_RUNS reps × full ticks.
-  # N_GAP_RUNS=10 uses full ticks (not ticks/2) so the 75-tick steady-state window
-  # has the same 125-tick warm-up as the primary sweep.
-  # At ticks=200, N_GAP_RUNS=10: 11 × 10 × 200 ticks ≈ 40–60 min per worker.
-  filter-bubbles-gap-g:
-    runs-on: ubuntu-latest
-    timeout-minutes: 90
-    strategy:
-      fail-fast: false
-      matrix:
-        g: ["0.0", "0.5", "1.0", "1.5"]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: {python-version: "3.11", cache: "pip"}
-      - run: pip install -r requirements.txt
-      - run: |
-          mkdir -p filter_bubble_results
-          python3 test_filter_bubbles.py \
-            --single-gap ${{ matrix.g }} \
-            --out-file filter_bubble_results/bubble_gap_${{ matrix.g }}.json \
-            --ticks ${{ inputs.ticks }}
-      - uses: actions/upload-artifact@v4
-        with:
-          name: bubble-gap-g-${{ matrix.g }}
-          path: filter_bubble_results/bubble_gap_${{ matrix.g }}.json
-          retention-days: 3
-
   # ── Collect all results and plot (plot-only, no simulation) ──────────────
+  # Note: gap sweep is run separately via run-gap-sweep.yml (2D, 132 parallel jobs).
   filter-bubbles-collect:
-    needs: [filter-bubbles-alpha, filter-bubbles-factor, filter-bubbles-gap-g]
+    needs: [filter-bubbles-alpha, filter-bubbles-factor]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -193,11 +165,6 @@ jobs:
           pattern: bubble-factor-*
           merge-multiple: true
           path: filter_bubble_results/
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: bubble-gap-g-*
-          merge-multiple: true
-          path: filter_bubble_results/
       - run: ls -lh filter_bubble_results/
       - run: |
           python3 test_filter_bubbles.py \
@@ -211,25 +178,6 @@ jobs:
         with:
           name: filter-bubble-plots
           path: filter_bubble_results/*.png
-          retention-days: 30
-
-  other-tests:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: {python-version: "3.11", cache: "pip"}
-      - run: pip install -r requirements.txt
-      - run: |
-          mkdir -p test_results
-          python3 test_dual_feedback.py
-          python3 test_agent_improvements.py
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: diagnostic-plots
-          path: test_results/*.png
           retention-days: 30
 
   plot:
