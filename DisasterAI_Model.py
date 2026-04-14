@@ -2249,7 +2249,8 @@ class DisasterModel(Model):
                  d_exploit=2.0,          # Gap-scalar: acceptance threshold for exploitative agents
                  delta_exploit=3.5,      # Gap-scalar: acceptance sensitivity for exploitative agents
                  d_explor=4.0,           # Gap-scalar: acceptance threshold for exploratory agents
-                 delta_explor=1.2        # Gap-scalar: acceptance sensitivity for exploratory agents
+                 delta_explor=1.2,       # Gap-scalar: acceptance sensitivity for exploratory agents
+                 epicenter=None          # Optional fixed epicenter [x, y]; random if None
                  ):
         super(DisasterModel, self).__init__()
         self.share_exploitative = share_exploitative
@@ -2335,7 +2336,10 @@ class DisasterModel(Model):
         # Initialize disaster grid with Gaussian decay around an epicenter.
         self.disaster_grid = np.zeros((width, height), dtype=int)
         self.baseline_grid = np.zeros((width, height), dtype=int)
-        self.epicenter = (random.randint(0, width - 1), random.randint(0, height - 1))
+        if epicenter is not None:
+            self.epicenter = tuple(epicenter)
+        else:
+            self.epicenter = (random.randint(0, width - 1), random.randint(0, height - 1))
         total_cells = width * height
         self.disaster_radius = math.sqrt(self.share_of_disaster * total_cells / math.pi)
         x, y = np.indices((width, height))
