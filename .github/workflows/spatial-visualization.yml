@@ -1,9 +1,10 @@
 name: Spatial Visualization (manual)
 
-# Separate experiment with a fixed epicenter [15, 15] so spatial maps are
-# not blurred by varying epicenters across replications.
-# Run independently of the main experiment — main experiment keeps random
-# epicenters for valid statistical randomisation.
+# Fixed epicenter [15, 15] so spatial maps are not blurred by varying
+# epicenters across replications.  Parallelised by alpha level — one job
+# per α, then a collect job that aggregates and plots.
+# Run independently of the main experiment (which keeps random epicenters
+# for valid statistical randomisation).
 on:
   workflow_dispatch:
     inputs:
@@ -21,9 +22,15 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
-  spatial-visualization:
+
+  # ── Step 1: one job per alpha level (11 parallel workers) ────────────────
+  spatial-alpha:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        alpha: ["0.0", "0.1", "0.2", "0.3", "0.4", "0.5", "0.6", "0.7", "0.8", "0.9", "1.0"]
 
     steps:
       - uses: actions/checkout@v4
@@ -36,13 +43,52 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Run spatial experiment (fixed epicenter [15,15])
+      - name: Run spatial alpha=${{ matrix.alpha }} (fixed epicenter [15,15])
         run: |
           mkdir -p spatial_results
           python3 test_filter_bubbles.py \
-            --spatial-experiment \
+            --single-alpha ${{ matrix.alpha }} \
+            --epicenter 15 15 \
+            --out-file spatial_results/spatial_alpha_${{ matrix.alpha }}.json \
             --ticks ${{ inputs.ticks }} \
-            --n-runs ${{ inputs.n_runs }} \
+            --n-runs ${{ inputs.n_runs }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: spatial-alpha-${{ matrix.alpha }}
+          path: spatial_results/spatial_alpha_${{ matrix.alpha }}.json
+          retention-days: 3
+
+  # ── Step 2: collect all per-alpha JSONs and generate plots ────────────────
+  spatial-collect:
+    needs: spatial-alpha
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: spatial-alpha-*
+          merge-multiple: true
+          path: spatial_results/
+
+      - run: ls -lh spatial_results/
+
+      - name: Generate spatial plots
+        run: |
+          python3 test_filter_bubbles.py \
+            --collect-spatial-and-plot \
+            --results-dir spatial_results/ \
             --save-dir spatial_results/
 
       - name: Upload spatial plots
