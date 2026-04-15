@@ -1800,13 +1800,29 @@ if __name__ == '__main__':
         '--spatial-experiment', action='store_true',
         help='Run alignment sweep with fixed epicenter [15,15] and generate spatial '
              'figures only (spatial_coverage.png, periphery_gap.png). Results are '
-             'saved separately and do not affect the main experiment JSON.',
+             'saved separately and do not affect the main experiment JSON. '
+             'Serial fallback — for CI use the parallelised --single-alpha '
+             '--epicenter 15 15 + --collect-spatial-and-plot pattern instead.',
+    )
+    parser.add_argument(
+        '--epicenter', nargs=2, type=int, default=None, metavar=('X', 'Y'),
+        help='Fix the disaster epicenter at grid coordinates X Y for all runs '
+             'in this worker. Use with --single-alpha to parallelise the spatial '
+             'experiment: each alpha runs as a separate job with the same epicenter.',
+    )
+    parser.add_argument(
+        '--collect-spatial-and-plot', action='store_true',
+        help='Load per-alpha spatial JSONs (spatial_alpha_*.json) from --results-dir, '
+             'compute metrics, and generate spatial_coverage.png + periphery_gap.png. '
+             'Used after the parallel --single-alpha --epicenter CI jobs.',
     )
     args = parser.parse_args()
 
     # Apply CLI overrides
     if args.ticks is not None:
         base_params['ticks'] = args.ticks
+    if args.epicenter is not None:
+        base_params['epicenter'] = args.epicenter   # fixed epicenter for spatial experiment
     n_runs_primary = args.n_runs if args.n_runs is not None else N_RUNS
     # Factor/gap sweeps use at most half the primary ticks (they measure relative
     # differences, not absolute steady-state values, so shorter runs suffice)
@@ -1969,6 +1985,32 @@ if __name__ == '__main__':
         os.makedirs(save_dir, exist_ok=True)
         plot_gap_sweep(gap_results, save_dir)
         print('gap_sweep.png saved.')
+        import sys; sys.exit(0)
+
+    # ------------------------------------------------------------------
+    # Mode: --collect-spatial-and-plot  (runs after parallel spatial jobs)
+    # ------------------------------------------------------------------
+    if args.collect_spatial_and_plot:
+        import glob as _glob
+        results_dir = args.results_dir
+        per_alpha = {}
+        for path in _glob.glob(os.path.join(results_dir, '**', 'spatial_alpha_*.json'),
+                               recursive=True):
+            with open(path) as f:
+                d = json.load(f)
+            per_alpha[float(d['alpha'])] = d['result']
+        if not per_alpha:
+            raise FileNotFoundError(f'No spatial_alpha_*.json files found in {results_dir}')
+        all_results = [per_alpha[a] for a in ALIGNMENT_SWEEP if a in per_alpha]
+        missing = [a for a in ALIGNMENT_SWEEP if a not in per_alpha]
+        if missing:
+            print(f'Warning: missing alpha levels {missing} — plots may be incomplete')
+        print(f'Loaded {len(all_results)} spatial alpha results from {results_dir}')
+        spatial_metrics = compute_goldilocks_metrics(all_results)
+        os.makedirs(save_dir, exist_ok=True)
+        plot_spatial_coverage(all_results, spatial_metrics, save_dir)
+        plot_periphery_gap(all_results, spatial_metrics, save_dir)
+        print('Spatial plots saved.')
         import sys; sys.exit(0)
 
     # ------------------------------------------------------------------

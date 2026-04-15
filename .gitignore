@@ -4,5 +4,6 @@ analysis_plots/
 agent_model_results/
 test_results/
 results/
+spatial_results/
 *.json
 .DS_Store
