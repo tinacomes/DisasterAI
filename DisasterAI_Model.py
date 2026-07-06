@@ -523,7 +523,7 @@ class HumanAgent(Agent):
 
             # Calculate CONFIRMATION score: how close was reported level to agent's PRIOR belief
             # Use stored prior from tuple if available (uncontaminated by query update)
-            if len(item) == 6:
+            if len(item) >= 6:
                 prior_level = item[4]  # stored_prior_level
             else:
                 prior_belief = self.beliefs.get(cell, {})
@@ -784,41 +784,59 @@ class HumanAgent(Agent):
                     belief_conf = net_conf
                     used_network_consensus = True
 
-            # For cells outside sensing range, we can't verify accuracy against ground truth.
+            # For cells outside sensing range, agents cannot see ground truth directly.
             # CRITICAL: Explorers should NOT penalize sources for disagreeing with their
             # uncertain beliefs about remote cells. This would cause them to distrust
             # truthful sources that report correct info that differs from wrong beliefs.
             #
             # EXPLOITERS: Use network/own-belief confirmation (echo chamber by design)
-            # EXPLORERS: For remote cells, defer until ground truth arrives via process_reward
-            #            (Fix 1) or triangulate_sources convergence (Fix 2)
+            # EXPLORERS: For accepted remote reports, wait for an external verification
+            #            ("situation report") — see block below. Rejected remote reports
+            #            are scored against the stored prior (belief unchanged).
+
+            # --- Situation-report verification (explorers, accepted remote reports) ---
+            # Accuracy-seeking explorers actively verify accepted remote reports against
+            # external information (official assessments, media, situation reports).
+            # Each evaluation attempt, verification arrives with probability
+            # model.verification_probability; when it arrives it carries the same noise
+            # model as direct human sensing (±1 with prob 0.2). Until it arrives the item
+            # stays pending (retried next tick); if it never arrives before the 30-tick
+            # expiry the item lapses unevaluated. Explicitly NO fallback to scoring
+            # against the agent's own prior — that would silently turn the explorers'
+            # accuracy channel into a confirmation channel.
+            # Replaces the previous instant/perfect ground-truth reference: verification
+            # is now delayed (geometric arrival on top of the 3-tick minimum), noisy, and
+            # evaluated against the CURRENT disaster state, so reports about cells that
+            # have since evolved are naturally penalised less consistently.
+            # Truthful AI (α≈0): reported≈truth → small error → positive reward →
+            # explorers learn AI is useful. Confirming AI (α≈1): reported≈prior (often
+            # wrong) → large error → negative reward. This preserves the Q-learning
+            # asymmetry, but through a defensible information channel.
+            verified_reference = False
+            if is_remote_cell and self.agent_type == "exploratory" and was_accepted:
+                if not (0 <= cell[0] < self.model.width and 0 <= cell[1] < self.model.height):
+                    continue  # out-of-bounds cell: skip safely
+                if random.random() < self.model.verification_probability:
+                    verified_level = int(self.model.disaster_grid[cell[0], cell[1]])
+                    if random.random() < 0.2:  # same noise model as human sensing
+                        verified_level = max(0, min(5, verified_level + random.choice([-1, 1])))
+                    reference_level = verified_level
+                    belief_conf = 1.0  # external report: full-strength reference
+                    verified_reference = True
+                else:
+                    continue  # not yet verified — stays pending, retried next tick
 
             if belief_conf < 0.15:
                 continue  # Skip only if we have almost no information
 
             # Scale learning rate by confidence - uncertain references lead to weaker updates
+            # (verified situation reports have belief_conf=1.0 → full strength)
             confidence_scaling = min(1.0, belief_conf / 0.5)  # Full strength at 0.5+ confidence
 
             # --- Accuracy score: reported vs current reference ---
-            # For EXPLORERS querying REMOTE cells that were ACCEPTED, reference_level
-            # (current belief) is contaminated — the belief already moved toward the
-            # report, creating a circular evaluation. Using stored_prior here would
-            # give a "confirmation" score (how much did report differ from prior?),
-            # not an accuracy score.
-            # FIX BUG 1: Override reference_level with model ground truth so explorers
-            # receive genuine accuracy feedback for accepted remote AI queries.
-            # Truthful AI (α≈0): reported≈truth → error≈0 → Q+1.0 → explorers learn AI is good.
-            # Confirming AI (α≈1): reported≈prior (often wrong) → error large → Q−0.6 →
-            # explorers learn confirming AI is unreliable.
-            # This creates the Q-learning asymmetry that drives the sweet-spot effect.
-            if is_remote_cell and self.agent_type == "exploratory" and was_accepted:
-                if 0 <= cell[0] < self.model.width and 0 <= cell[1] < self.model.height:
-                    reference_level = int(self.model.disaster_grid[cell[0], cell[1]])
-                else:
-                    continue  # out-of-bounds cell: skip safely
-                # Fall through — Q/trust update proceeds with ground-truth reference
-            # For rejected remote queries (was_accepted=False) or local cells:
-            # use reference_level (which is stored_prior for rejected items, as belief unchanged)
+            # Verified items use the (noisy) situation-report level; rejected remote
+            # queries (was_accepted=False) and local cells use reference_level
+            # (the stored prior for rejected items, as the belief was not updated).
             level_error = abs(reported_level - reference_level)
             if level_error == 0:
                 accuracy_score = 1.0
@@ -925,7 +943,7 @@ class HumanAgent(Agent):
             evaluated.append(item)
 
             if self.model.debug_mode and hasattr(self, 'id_num') and (self.id_num < 2 or (50 <= self.id_num < 52)):
-                print(f"[DEBUG] Agent {self.unique_id} ({self.agent_type}) PENDING INFO EVAL: source={source_id}, mode={mode}, error={level_error}, acc_rew={accuracy_reward:.3f}, trust={new_trust:.2f}, net_consensus={used_network_consensus}")
+                print(f"[DEBUG] Agent {self.unique_id} ({self.agent_type}) PENDING INFO EVAL: source={source_id}, mode={mode}, error={level_error}, acc_rew={accuracy_reward:.3f}, trust={new_trust:.2f}, net_consensus={used_network_consensus}, verified={verified_reference}")
 
         # Remove evaluated/expired items
         self.pending_info_evaluations = [
@@ -933,58 +951,76 @@ class HumanAgent(Agent):
             if item not in evaluated
         ]
 
-        # Triangulation: multi-source agreement/disagreement on same cell → Q-signal
+        # Triangulation: multi-source agreement/disagreement on same cell → trust signal
         self.triangulate_sources()
 
     def triangulate_sources(self):
         """
         Compare reports from multiple independent sources about the same cell
-        within a 5-tick window. Consensus is a learning signal without needing
-        ground truth — captures the second valid feedback mechanism alongside
-        action-outcome feedback.
+        within a 5-tick window. Consensus is a weak trust signal for explorers
+        when ground truth hasn't arrived yet via process_reward; each report
+        contributes to at most ONE triangulation event (one-shot), because
+        pending items persist for many ticks and re-scoring the same pair every
+        tick compounds into unbounded drift.
+
+        Mode Q-values are deliberately NOT updated here: consensus is highest
+        inside echo chambers, so rewarding the query mode for agreement would
+        structurally favour bubble sources and contaminate the very
+        echo-chamber metrics this model measures. Q-values learn only from
+        information-quality feedback (evaluate_pending_info /
+        evaluate_information_quality) and action-outcome feedback
+        (process_reward). Exploiters are excluded entirely — they already
+        receive a confirmation reward from the same pending items in
+        evaluate_pending_info.
         """
+        if self.agent_type != "exploratory":
+            return
+
         current_tick = self.model.tick
         recent_window = 5
 
-        # Group recent evaluations by cell
-        cell_reports = {}  # cell -> [(source_id, reported_level), ...]
+        if not hasattr(self, '_triangulated_items'):
+            self._triangulated_items = set()
+
+        # Group recent, not-yet-triangulated evaluations by cell
+        cell_reports = {}  # cell -> [(item, source_id, reported_level), ...]
         for item in self.pending_info_evaluations:
             tick_received, source_id, cell = item[0], item[1], item[2]
             reported_level = item[3]
-            if current_tick - tick_received <= recent_window:
-                if cell not in cell_reports:
-                    cell_reports[cell] = []
-                cell_reports[cell].append((source_id, reported_level))
+            if current_tick - tick_received > recent_window:
+                continue
+            if item in self._triangulated_items:
+                continue
+            if cell not in cell_reports:
+                cell_reports[cell] = []
+            cell_reports[cell].append((item, source_id, reported_level))
 
         for cell, reports in cell_reports.items():
             # Need at least 2 distinct sources
-            source_ids = [r[0] for r in reports]
+            source_ids = [r[1] for r in reports]
             if len(set(source_ids)) < 2:
                 continue
 
-            levels = [r[1] for r in reports]
+            levels = [r[2] for r in reports]
             max_disagreement = max(levels) - min(levels)
 
             if max_disagreement <= 1:
-                q_delta = 0.05    # Consensus → small Q-boost
-                trust_delta = 0.03  # Fix 2: weak trust boost; for explorers this is the
-                                    # primary path for remote-cell source validation when
-                                    # ground truth hasn't arrived yet via process_reward
+                trust_delta = 0.03   # Consensus → weak trust boost
             elif max_disagreement >= 3:
-                q_delta = -0.05   # Strong conflict → small Q-penalty
-                trust_delta = -0.03
+                trust_delta = -0.03  # Strong conflict → weak trust penalty
             else:
-                continue  # Ambiguous — no signal
+                continue  # Ambiguous — no signal; items stay eligible for later reports
 
-            for source_id, _ in reports:
-                mode = "ai" if source_id.startswith("A_") else "human"
-                if mode in self.q_table:
-                    self.q_table[mode] = max(-2.0, min(2.0, self.q_table[mode] + q_delta))
-                # Trust update: only applied for explorers (exploiters get trust updates
-                # from the network-consensus path in evaluate_pending_info instead)
-                if self.agent_type == "exploratory" and source_id in self.trust:
+            for item, source_id, _ in reports:
+                if source_id in self.trust:
                     old_t = self.trust[source_id]
                     self.trust[source_id] = max(0.0, min(1.0, old_t + trust_delta))
+                # One-shot: this report can never be triangulated again
+                self._triangulated_items.add(item)
+
+        # Prune the marker set so it doesn't outlive the pending list
+        if self._triangulated_items:
+            self._triangulated_items &= set(self.pending_info_evaluations)
 
     def report_beliefs(self, interest_point, query_radius):
         """Reports human agent's beliefs about cells within query_radius of the interest_point."""
@@ -2250,7 +2286,9 @@ class DisasterModel(Model):
                  delta_exploit=3.5,      # Gap-scalar: acceptance sensitivity for exploitative agents
                  d_explor=4.0,           # Gap-scalar: acceptance threshold for exploratory agents
                  delta_explor=1.2,       # Gap-scalar: acceptance sensitivity for exploratory agents
-                 epicenter=None          # Optional fixed epicenter [x, y]; random if None
+                 epicenter=None,         # Optional fixed epicenter [x, y]; random if None
+                 verification_probability=0.3  # Per-attempt arrival prob of external "situation report"
+                                               # verification for explorers' accepted remote reports
                  ):
         super(DisasterModel, self).__init__()
         self.share_exploitative = share_exploitative
@@ -2273,6 +2311,7 @@ class DisasterModel(Model):
         self.epsilon = epsilon
         self.ticks = ticks
         self.low_trust_amplification_factor = low_trust_amplification_factor
+        self.verification_probability = verification_probability
 
         # Learning rates and biases
         self.exploit_trust_lr = exploit_trust_lr
@@ -2837,13 +2876,28 @@ class DisasterModel(Model):
 
     def update_disaster(self):
         """
-        Update disaster grid based on disaster_dynamics parameter.
+        Update disaster grid: stochastic drift toward baseline + random patch shocks.
 
-        disaster_dynamics:
-        0 = Static (no updates)
-        1 = Slow evolution (5% chance per tick, smaller magnitude)
-        2 = Medium evolution (10% chance per tick, medium magnitude)
-        3 = Rapid evolution (20% chance per tick, larger magnitude)
+        disaster_dynamics scales the PACE of change:
+        0 = Static (no updates — null condition)
+        1 = Slow   (0.5x drift and shock rates)
+        2 = Medium (1.0x — default)
+        3 = Rapid  (2.0x)
+
+        Mechanics:
+        - Drift: each cell independently moves 1 level toward its baseline
+          (initial Gaussian) value with per-tick probability 0.05 * pace.
+          This erodes shock damage over time and anchors the disaster field,
+          so the environment is non-stationary but does not random-walk away.
+        - Shock: with per-tick probability shock_probability * pace, a shock
+          hits a random patch (Moore radius 2): the centre shifts by
+          +/- shock_magnitude, neighbours by a distance-attenuated amount.
+          Positive shocks create new hotspots agents must discover;
+          negative shocks remove need where agents may still expect it.
+
+        At the defaults (shock_probability=0.1, shock_magnitude=2,
+        disaster_dynamics=2) this matches the METHODS description: per-tick
+        drift toward baseline plus random shocks (p=0.10, magnitude +/-2).
         """
         # Store a copy of the current grid before updating
         if self.disaster_grid is not None:
@@ -2851,31 +2905,33 @@ class DisasterModel(Model):
         else:
             self.previous_grid = None
 
-        # Apply disaster dynamics based on parameter
         if self.disaster_dynamics == 0:
             # Static disaster - no updates
-            pass
+            return
 
-        elif self.disaster_dynamics == 1:
-            # Slow evolution: 5% chance, +1-2 magnitude
-            if random.random() < 0.05:
-                x, y = np.random.randint(0, self.disaster_grid.shape[0]), np.random.randint(0, self.disaster_grid.shape[1])
-                magnitude = random.randint(1, 2)
-                self.disaster_grid[x, y] = min(5, self.disaster_grid[x, y] + magnitude)
+        pace = {1: 0.5, 2: 1.0, 3: 2.0}.get(
+            self.disaster_dynamics, self.disaster_dynamics / 2.0)
 
-        elif self.disaster_dynamics == 2:
-            # Medium evolution: 10% chance, +2-3 magnitude
-            if random.random() < 0.1:
-                x, y = np.random.randint(0, self.disaster_grid.shape[0]), np.random.randint(0, self.disaster_grid.shape[1])
-                magnitude = random.randint(2, 3)
-                self.disaster_grid[x, y] = min(5, self.disaster_grid[x, y] + magnitude)
+        # 1. Stochastic drift toward baseline (cell-independent, 1 level per event)
+        drift_mask = np.random.random(self.disaster_grid.shape) < (0.05 * pace)
+        toward_baseline = np.sign(self.baseline_grid - self.disaster_grid)
+        self.disaster_grid = np.clip(
+            self.disaster_grid + drift_mask * toward_baseline, 0, 5).astype(int)
 
-        elif self.disaster_dynamics == 3:
-            # Rapid evolution: 20% chance, +3-4 magnitude
-            if random.random() < 0.2:
-                x, y = np.random.randint(0, self.disaster_grid.shape[0]), np.random.randint(0, self.disaster_grid.shape[1])
-                magnitude = random.randint(3, 4)
-                self.disaster_grid[x, y] = min(5, self.disaster_grid[x, y] + magnitude)
+        # 2. Random patch shock (distance-attenuated, either sign)
+        if random.random() < self.shock_probability * pace:
+            cx = random.randrange(self.width)
+            cy = random.randrange(self.height)
+            sign = random.choice([-1, 1])
+            radius = 2
+            for dx in range(-radius, radius + 1):
+                for dy in range(-radius, radius + 1):
+                    x, y = cx + dx, cy + dy
+                    if 0 <= x < self.width and 0 <= y < self.height:
+                        dist = max(abs(dx), abs(dy))  # Chebyshev rings of the Moore patch
+                        delta = sign * max(0, self.shock_magnitude - dist)
+                        if delta != 0:
+                            self.disaster_grid[x, y] = min(5, max(0, self.disaster_grid[x, y] + delta))
 
         # Detect significant changes
         if self.previous_grid is not None:
