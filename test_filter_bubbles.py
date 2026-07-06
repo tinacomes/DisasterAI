@@ -15,19 +15,23 @@ AI Alignment Interplay:
 - Low alignment (AI reports truth): AI may be rejected (D/delta mechanism rejects divergent info)
 - Goldilocks α*: AI is trusted and used, but divergent enough to disrupt bubble consensus
 
-Metrics:
+Metrics (unified sign convention: NEGATIVE = echo chamber for all indices):
 - SECI (Social Echo Chamber Index): -1 to +1
-  * -1 = Strong echo chamber (friends very similar)
+  * -1 = Strong echo chamber (community beliefs much more homogeneous than global)
   *  0 = No echo chamber effect
-  * +1 = Anti-echo chamber (friends more diverse)
-- AECI (AI Echo Chamber Index): -1 to +1  (same variance formula as SECI)
-  * -1 = AI-reliant agents have much lower belief variance than global (AI bubble)
-  *  0 = No AI echo chamber effect
-  * +1 = AI-reliant agents are more belief-diverse than global
-- total_bubble = |SECI| + |AECI|  (minimise both)
-- Belief MAE: accuracy cost at each alignment level
-- Unmet needs: high-need cells (≥L4) that received zero relief tokens per tick
-- Targeting precision: fraction of relief sent to genuinely high-need cells
+  * +1 = Anti-echo chamber (community more diverse than global)
+- AECI — three named constructs (see METHODS):
+  * AECI-Var (-1..+1): belief variance of AI-reliant agents vs global
+      (same variance formula as SECI; enters the Goldilocks composite)
+  * AECI-Err (-1..+1): confidence-weighted belief-error split, AI-heavy vs
+      AI-light agents (median split by cum_accepted_ai; shown in time series)
+  * AECI-Acc (0..1, unsigned): share of accepted belief updates from AI
+      (= retain_aeci; reliance measure, not an echo measure)
+- total_bubble = |SECI| + |AECI-Var|  (minimise both; α* sensitivity to the
+  AECI construct choice is reported by alpha_star_sensitivity)
+- Belief MAE: accuracy cost at each alignment level (disaster cells L1+ only)
+- Unmet needs: high-need cells (L3+) that received zero relief tokens that tick
+- Targeting precision: fraction of relief tokens on L3+ cells at placement time
 
 Goldilocks detection: argmin of total_bubble across alignment sweep
 
@@ -546,13 +550,22 @@ def compute_goldilocks_metrics(all_results):
     series (SECI, AECI, MAE, prec) — equivalent to the last 75 ticks of a 200-tick run.
     Per-tick series (unmet_needs) use a matching 75-tick window for consistency.
 
-    Returns per-α dicts with three composite scores:
-      total_bubble      = |SECI| + |AECI|                (raw, unweighted)
-      total_bubble_norm = |SECI_norm| + |AECI_norm|      (range-normalised; both metrics
+    Returns per-α dicts with the primary composite scores:
+      total_bubble      = |SECI| + |AECI-Var|            (raw, unweighted)
+      total_bubble_norm = |SECI|n + |AECI-Var|n          (range-normalised; both metrics
                           contribute equally regardless of magnitude difference)
-      total_score_norm  = |SECI_norm| + |AECI_norm| + MAE_norm  (operational composite:
+      total_score_norm  = |SECI|n + |AECI-Var|n + MAEn   (operational composite:
                           also penalises poor belief accuracy)
-    α* from total_bubble_norm is the recommended primary result.
+    α* from total_bubble_norm is the primary result.
+
+    SENSITIVITY composites (C5 robustness check — the raw AECI-Var signal is small,
+    so range normalisation can let it dominate the location of the minimum):
+      bubble_seci_only_norm = |SECI|n                    (AECI dropped entirely)
+      bubble_err_norm       = |SECI|n + |AECI-Err|n      (AECI-Err substituted)
+      score_seci_only_norm  = |SECI|n + MAEn
+      score_err_norm        = |SECI|n + |AECI-Err|n + MAEn
+    Report α* under all variants (alpha_star_sensitivity); if they disagree, the
+    Goldilocks location is composite-dependent and must be flagged in the paper.
     """
     metrics = {}
     # SECI/MAE/prec are sampled every 5 ticks → 15 samples = 75 ticks late-run avg.
@@ -588,6 +601,8 @@ def compute_goldilocks_metrics(all_results):
         # aeci_var is per-tick → use 75-tick window for consistency with SECI.
         aeci_m = ss(res['aeci_var_mean'], TICK_WINDOW)
         aeci_s = ss(res['aeci_var_std'],  TICK_WINDOW) / np.sqrt(res.get('n_runs', N_GAP_RUNS))
+        # AECI-Err (confidence-weighted error split) — used in sensitivity composites
+        aeci_err_m, aeci_err_s = ms('aeci_exploit', 'aeci_explor')
         mae_m,  mae_s  = ms('mae_exploit',  'mae_explor')
         prec_m, prec_s = ms('prec_exploit', 'prec_explor')
         # Per-tick series: use 75-tick window to match SECI cadence
@@ -597,6 +612,8 @@ def compute_goldilocks_metrics(all_results):
         metrics[alpha] = {
             'seci': seci_m, 'seci_std': seci_s, 'seci_runs': runs_pair('seci_exploit', 'seci_explor'),
             'aeci': aeci_m, 'aeci_std': aeci_s, 'aeci_runs': res.get('aeci_var_ss_runs', []),
+            'aeci_err': aeci_err_m, 'aeci_err_std': aeci_err_s,
+            'aeci_err_runs': runs_pair('aeci_exploit', 'aeci_explor'),
             'mae':  mae_m,  'mae_std':  mae_s,  'mae_runs':  runs_pair('mae_exploit',  'mae_explor'),
             'prec': prec_m, 'prec_std': prec_s, 'prec_runs': runs_pair('prec_exploit', 'prec_explor'),
             'unmet': unmet_m, 'unmet_std': unmet_s,
@@ -617,22 +634,103 @@ def compute_goldilocks_metrics(all_results):
         return [(v - lo) / span for v in vals]
 
     available = [a for a in ALIGNMENT_SWEEP if a in metrics]
-    seci_abs = [abs(metrics[a]['seci']) for a in available]
-    aeci_abs = [abs(metrics[a]['aeci']) for a in available]
-    mae_vals  = [metrics[a]['mae']       for a in available]
+    seci_abs     = [abs(metrics[a]['seci'])     for a in available]
+    aeci_abs     = [abs(metrics[a]['aeci'])     for a in available]
+    aeci_err_abs = [abs(metrics[a]['aeci_err']) for a in available]
+    mae_vals     = [metrics[a]['mae']           for a in available]
 
-    seci_n = _norm(seci_abs)
-    aeci_n = _norm(aeci_abs)
-    mae_n  = _norm(mae_vals)
+    seci_n     = _norm(seci_abs)
+    aeci_n     = _norm(aeci_abs)
+    aeci_err_n = _norm(aeci_err_abs)
+    mae_n      = _norm(mae_vals)
 
     for i, alpha in enumerate(available):
         metrics[alpha]['seci_norm']          = seci_n[i]
         metrics[alpha]['aeci_norm']          = aeci_n[i]
+        metrics[alpha]['aeci_err_norm']      = aeci_err_n[i]
         metrics[alpha]['mae_norm']           = mae_n[i]
+        # Primary composites (AECI-Var)
         metrics[alpha]['total_bubble_norm']  = seci_n[i] + aeci_n[i]
         metrics[alpha]['total_score_norm']   = seci_n[i] + aeci_n[i] + mae_n[i]
+        # Sensitivity composites (C5)
+        metrics[alpha]['bubble_seci_only_norm'] = seci_n[i]
+        metrics[alpha]['bubble_err_norm']       = seci_n[i] + aeci_err_n[i]
+        metrics[alpha]['score_seci_only_norm']  = seci_n[i] + mae_n[i]
+        metrics[alpha]['score_err_norm']        = seci_n[i] + aeci_err_n[i] + mae_n[i]
 
     return metrics
+
+
+# Composite variants for the α* sensitivity analysis (C5): label → metrics key.
+ALPHA_STAR_COMPOSITES = {
+    'SECI + AECI-Var (primary)':       'total_bubble_norm',
+    'SECI only':                       'bubble_seci_only_norm',
+    'SECI + AECI-Err':                 'bubble_err_norm',
+    'SECI + AECI-Var + MAE (primary)': 'total_score_norm',
+    'SECI + MAE':                      'score_seci_only_norm',
+    'SECI + AECI-Err + MAE':           'score_err_norm',
+}
+
+
+def alpha_star_sensitivity(metrics):
+    """α* under each composite definition. Returns {label: (alpha_star, min_value)}.
+
+    If the α* values disagree across variants, the Goldilocks location is
+    composite-dependent — report the spread, not just the primary value.
+    """
+    available = [a for a in ALIGNMENT_SWEEP if a in metrics]
+    out = {}
+    for label, key in ALPHA_STAR_COMPOSITES.items():
+        vals = [metrics[a].get(key, float('nan')) for a in available]
+        idx = int(np.nanargmin(vals))
+        out[label] = (available[idx], float(vals[idx]))
+    return out
+
+
+def plot_alpha_star_sensitivity(metrics, save_dir):
+    """Composite-vs-α curves for every α* sensitivity variant, minima marked.
+
+    One panel per composite family (bubble-only, +MAE); each curve is a
+    range-normalised composite, with its argmin (α*) marked. If the stars
+    cluster, the Goldilocks location is robust to the AECI construct choice.
+    """
+    available = [a for a in ALIGNMENT_SWEEP if a in metrics]
+    x = np.arange(len(available))
+    fig, axes = plt.subplots(1, 2, figsize=(14, 5.5))
+    families = [
+        (axes[0], 'Bubble composites (echo-chamber only)',
+         [('SECI + AECI-Var (primary)', '#1A3A6B', '-o'),
+          ('SECI only',                 '#888888', '--s'),
+          ('SECI + AECI-Err',           '#B45F06', '-.^')]),
+        (axes[1], 'Operational composites (+MAE)',
+         [('SECI + AECI-Var + MAE (primary)', '#1A3A6B', '-o'),
+          ('SECI + MAE',                      '#888888', '--s'),
+          ('SECI + AECI-Err + MAE',           '#B45F06', '-.^')]),
+    ]
+    stars = alpha_star_sensitivity(metrics)
+    for ax, title, curves in families:
+        for label, color, fmt in curves:
+            key = ALPHA_STAR_COMPOSITES[label]
+            vals = [metrics[a].get(key, float('nan')) for a in available]
+            ax.plot(x, vals, fmt, color=color, linewidth=2, markersize=6, label=label)
+            a_star, v_star = stars[label]
+            ax.scatter([x[available.index(a_star)]], [v_star], s=180, facecolors='none',
+                       edgecolors=color, linewidths=2.5, zorder=5)
+        ax.set_xlabel('AI Alignment')
+        ax.set_ylabel('Range-normalised composite\n(lower = better)')
+        ax.set_title(title + '\n(circled = α* under that composite)')
+        ax.set_xticks(x)
+        ax.set_xticklabels([str(a) for a in available])
+        ax.legend(fontsize=8)
+        ax.grid(True, alpha=0.3)
+    fig.suptitle('α* Sensitivity to Composite Definition (C5 robustness check)',
+                 fontsize=13, fontweight='bold')
+    plt.tight_layout()
+    os.makedirs(save_dir, exist_ok=True)
+    path = os.path.join(save_dir, 'alpha_star_sensitivity.png')
+    plt.savefig(path, dpi=150, bbox_inches='tight')
+    plt.close()
+    print(f"Alpha-star sensitivity figure saved: {path}")
 
 
 # ---------------------------------------------------------------------------
@@ -853,10 +951,10 @@ def _plot_timeseries(all_results, save_dir, best_alpha=None):
          'SECI (-1 to +1)', (-1.1, 1.1), 0),
         (ax_seci_er, 'SECI Over Time — Exploratory Agents\n(community variance vs global)',
          'SECI (-1 to +1)', (-1.1, 1.1), 0),
-        (ax_aeci_ex, 'AECI Over Time — Exploitative Agents\n(AI-heavy vs AI-light within type)',
-         'AECI (-1 to +1)', (-1.1, 1.1), 0),
-        (ax_aeci_er, 'AECI Over Time — Exploratory Agents\n(AI-heavy vs AI-light within type)',
-         'AECI (-1 to +1)', (-1.1, 1.1), 0),
+        (ax_aeci_ex, 'AECI-Err Over Time — Exploitative Agents\n(AI-heavy vs AI-light; negative = echo chamber)',
+         'AECI-Err (-1 to +1)', (-1.1, 1.1), 0),
+        (ax_aeci_er, 'AECI-Err Over Time — Exploratory Agents\n(AI-heavy vs AI-light; negative = echo chamber)',
+         'AECI-Err (-1 to +1)', (-1.1, 1.1), 0),
         (ax_mae,   'Belief MAE Over Time  (exploit + explor avg, informed beliefs only)',
          'Mean Absolute Error', (0, None), None),
         (ax_prec,  'Relief Targeting Precision\n(solid=exploratory, dashed=exploitative)',
@@ -1090,10 +1188,14 @@ def plot_transition_timing(all_results, save_dir):
 # ---------------------------------------------------------------------------
 
 def plot_aeci_evolution(all_results, save_dir):
-    """1×2 figure: AI query ratio (AECI) timeseries per alignment level.
+    """1×2 figure: per-tick AI query ratio timeseries per alignment level.
 
-    Y-axis is fraction of queries directed to AI (0 = all to friends, 1 = all to AI).
-    A 0.5 dashed threshold marks when AI queries dominate.
+    Y-axis is fraction of queries directed to AI (0 = all to humans/self, 1 = all
+    to AI). A 0.5 dashed threshold marks when AI queries dominate.
+    NOTE: previously this figure plotted the aeci_* series (AECI-Err, [-1,+1])
+    under query-ratio labels with ylim(0,1) that clipped all negative values —
+    it now plots the actual ai_query_ratio_* series its title promises.
+    (AECI-Err evolution is shown in bubble_timeseries.png.)
     """
     colors = plt.cm.plasma(np.linspace(0.1, 0.9, len(ALIGNMENT_SWEEP)))
 
@@ -1101,18 +1203,18 @@ def plot_aeci_evolution(all_results, save_dir):
     fig.suptitle('AI Query Preference Evolution', fontsize=13, fontweight='bold')
 
     for ax, key, title in [
-        (axes[0], 'aeci_exploit', 'Exploitative Agents'),
-        (axes[1], 'aeci_explor',  'Exploratory Agents'),
+        (axes[0], 'ai_query_ratio_exploit', 'Exploitative Agents'),
+        (axes[1], 'ai_query_ratio_explor',  'Exploratory Agents'),
     ]:
         for color, (res, alpha) in zip(colors, zip(all_results, ALIGNMENT_SWEEP)):
             mean  = np.array(res[f'{key}_mean'])
             std   = np.array(res[f'{key}_std'])
-            ticks = np.array(res['metric_ticks'])
+            ticks = np.arange(len(mean))   # per-tick series (not metric_ticks cadence)
             ax.plot(ticks, mean, color=color, linewidth=2, label=f'AI Alignment={alpha}')
             ax.fill_between(ticks, mean - std, mean + std, color=color, alpha=0.18)
         ax.axhline(0.5, color='red', linestyle='--', linewidth=1.5, label='50% threshold')
         ax.set_xlabel('Simulation Tick')
-        ax.set_ylabel('AI Query Ratio (cumulative)')
+        ax.set_ylabel('AI query share (per tick)')
         ax.set_title(title)
         ax.set_ylim(0, 1.02)
         ax.legend(fontsize=8, loc='upper left')
@@ -1686,12 +1788,46 @@ def _factor_key(v):
         return float(v)
 
 
+# Metric conventions stamped into every JSON this pipeline writes.
+# aeci_err_sign = 'negative_echo': the AECI-Err series (aeci_exploit/aeci_explor)
+# uses NEGATIVE = echo chamber, matching SECI and AECI-Var. Files WITHOUT this
+# marker were written before the 2026-07 sign unification (positive = echo) and
+# are auto-converted on load by _normalize_result_conventions.
+CONVENTIONS = {'aeci_err_sign': 'negative_echo'}
+
+
+def _flip_aeci_err_series(res):
+    """Flip AECI-Err series in one aggregated result dict (old → new convention)."""
+    if not isinstance(res, dict):
+        return
+    for key in ('aeci_exploit', 'aeci_explor'):
+        for suffix in ('_mean', '_ss_runs'):
+            arr = res.get(key + suffix)
+            if isinstance(arr, list):
+                res[key + suffix] = [-v if isinstance(v, (int, float)) else v
+                                     for v in arr]
+    # _std series are sign-invariant; leave untouched.
+
+
+def _normalize_result_conventions(d):
+    """Convert a per-condition JSON payload ({'result': ...}) written before the
+    AECI-Err sign unification. Idempotent: files carrying the conventions marker
+    are returned unchanged. |AECI-Err| composites are sign-invariant, so α* is
+    unaffected either way — this matters for the signed time-series panels."""
+    if d.get('conventions', {}).get('aeci_err_sign') == 'negative_echo':
+        return d
+    _flip_aeci_err_series(d.get('result'))
+    d.setdefault('conventions', {})['aeci_err_sign'] = 'negative_echo'
+    return d
+
+
 def save_results(all_results, rumor_results, disaster_results, mix_results,
                  gap_results=None, path=RESULTS_FILE):
     """Persist all aggregated results to JSON for later plot-only reruns."""
     os.makedirs(os.path.dirname(path), exist_ok=True)
     data = {
         'alignment_sweep': ALIGNMENT_SWEEP,
+        'conventions': CONVENTIONS,
         'all_results': all_results,
         'rumor_results':    {str(k): v for k, v in rumor_results.items()},
         'disaster_results': {str(k): v for k, v in disaster_results.items()},
@@ -1704,7 +1840,8 @@ def save_results(all_results, rumor_results, disaster_results, mix_results,
 
 
 def load_results(path=RESULTS_FILE):
-    """Load previously saved aggregated results; returns the five result dicts."""
+    """Load previously saved aggregated results; returns the five result dicts.
+    Files written before the AECI-Err sign unification are auto-converted."""
     with open(path) as f:
         data = json.load(f)
     all_results      = data['all_results']
@@ -1712,6 +1849,20 @@ def load_results(path=RESULTS_FILE):
     disaster_results = {_factor_key(k): v for k, v in data['disaster_results'].items()}
     mix_results      = {_factor_key(k): v for k, v in data['mix_results'].items()}
     gap_results      = {_factor_key(k): v for k, v in data.get('gap_results', {}).items()}
+    if data.get('conventions', {}).get('aeci_err_sign') != 'negative_echo':
+        for res in all_results:
+            _flip_aeci_err_series(res)
+        for fam in (rumor_results, disaster_results, mix_results):
+            for res in fam.values():
+                _flip_aeci_err_series(res)
+        for outer in gap_results.values():
+            # gap_results: d_mid → g → {'all_results': [...]} (or legacy g → {...})
+            targets = outer.values() if isinstance(outer, dict) and 'all_results' not in outer else [outer]
+            for cell in targets:
+                for res in cell.get('all_results', []):
+                    _flip_aeci_err_series(res)
+        print('Note: converted AECI-Err series from pre-unification sign convention '
+              '(positive = echo) to the current one (negative = echo).')
     return all_results, rumor_results, disaster_results, mix_results, gap_results
 
 
@@ -1877,7 +2028,7 @@ if __name__ == '__main__':
         params = {**base_params, 'ai_alignment_level': alpha}
         result = run_replicated(params, n_runs_primary, f'Alignment α={alpha:.1f}')
         with open(out, 'w') as f:
-            json.dump({'alpha': alpha, 'result': result}, f)
+            json.dump({'alpha': alpha, 'result': result, 'conventions': CONVENTIONS}, f)
         print(f'Saved → {out}')
         import sys; sys.exit(0)
 
@@ -1908,7 +2059,8 @@ if __name__ == '__main__':
         out = args.out_file or f'filter_bubble_results/bubble_factor_{ftype}_{fval_str}.json'
         os.makedirs(os.path.dirname(out) or '.', exist_ok=True)
         with open(out, 'w') as f:
-            json.dump({'factor_type': ftype, 'factor_value': fval_f, 'result': result}, f)
+            json.dump({'factor_type': ftype, 'factor_value': fval_f, 'result': result,
+                       'conventions': CONVENTIONS}, f)
         print(f'Saved → {out}')
         import sys; sys.exit(0)
 
@@ -1939,7 +2091,8 @@ if __name__ == '__main__':
               f'filter_bubble_results/bubble_gap_{g}_dmid_{d_mid}_alpha_{alpha:.1f}.json'
         os.makedirs(os.path.dirname(out) or '.', exist_ok=True)
         with open(out, 'w') as f:
-            json.dump({'gap': g, 'd_mid': d_mid, 'alpha': alpha, 'result': result}, f)
+            json.dump({'gap': g, 'd_mid': d_mid, 'alpha': alpha, 'result': result,
+                       'conventions': CONVENTIONS}, f)
         print(f'Saved → {out}')
         import sys; sys.exit(0)
 
@@ -1966,12 +2119,12 @@ if __name__ == '__main__':
         legacy_files = [p for p in legacy_files if '_dmid_' not in p]
         for path in new_files:
             with open(path) as f:
-                d = json.load(f)
+                d = _normalize_result_conventions(json.load(f))
             key = (float(d['gap']), float(d['d_mid']))
             per_cell.setdefault(key, {})[float(d['alpha'])] = d['result']
         for path in legacy_files:
             with open(path) as f:
-                d = json.load(f)
+                d = _normalize_result_conventions(json.load(f))
             key = (float(d['gap']), 3.0)   # legacy files assumed d_mid=3.0
             per_cell.setdefault(key, {})[float(d['alpha'])] = d['result']
         if not per_cell:
@@ -2006,7 +2159,7 @@ if __name__ == '__main__':
         for path in _glob.glob(os.path.join(results_dir, '**', 'spatial_alpha_*.json'),
                                recursive=True):
             with open(path) as f:
-                d = json.load(f)
+                d = _normalize_result_conventions(json.load(f))
             per_alpha[float(d['alpha'])] = d['result']
         if not per_alpha:
             raise FileNotFoundError(f'No spatial_alpha_*.json files found in {results_dir}')
@@ -2036,7 +2189,7 @@ if __name__ == '__main__':
         per_alpha = {}
         for path in _glob.glob(os.path.join(results_dir, 'bubble_alpha_*.json')):
             with open(path) as f:
-                d = json.load(f)
+                d = _normalize_result_conventions(json.load(f))
             per_alpha[float(d['alpha'])] = d['result']
         if not per_alpha:
             raise FileNotFoundError(f'No bubble_alpha_*.json files found in {results_dir}')
@@ -2059,7 +2212,7 @@ if __name__ == '__main__':
         mix_results = {}
         for path in _glob.glob(os.path.join(results_dir, 'bubble_factor_*.json')):
             with open(path) as f:
-                d = json.load(f)
+                d = _normalize_result_conventions(json.load(f))
             ftype = d['factor_type']
             fval  = d['factor_value']
             if ftype == 'rumor':
@@ -2075,7 +2228,7 @@ if __name__ == '__main__':
         per_cell = {}
         for path in _glob.glob(os.path.join(results_dir, 'bubble_gap_*_alpha_*.json')):
             with open(path) as f:
-                d = json.load(f)
+                d = _normalize_result_conventions(json.load(f))
             per_cell.setdefault(float(d['gap']), {})[float(d['alpha'])] = d['result']
         gap_results = {
             g: {'all_results': [alpha_dict[a] for a in ALIGNMENT_SWEEP if a in alpha_dict]}
@@ -2230,9 +2383,9 @@ if __name__ == '__main__':
     print('\n' + '=' * 70)
     print('LATE-RUN METRICS SUMMARY  (last 75 ticks)')
     print('=' * 70)
-    print(f"{'α':>6}  {'SECI':>8}  {'AECI':>8}  {'Bub(norm)':>10}  "
+    print(f"{'α':>6}  {'SECI':>8}  {'AECI-Var':>9}  {'AECI-Err':>9}  {'Bub(norm)':>10}  "
           f"{'Score(norm)':>12}  {'MAE':>7}  {'Unmet':>7}")
-    print('-' * 72)
+    print('-' * 84)
     min_norm  = min(v['total_bubble_norm']  for v in metrics.values())
     min_score = min(v['total_score_norm']   for v in metrics.values())
     for alpha in ALIGNMENT_SWEEP:
@@ -2242,10 +2395,24 @@ if __name__ == '__main__':
             tag += '  ← α*(bubble)'
         if abs(m['total_score_norm']  - min_score) < 1e-9:
             tag += '  ← α*(+MAE)' if '← α*(bubble)' not in tag else '+MAE'
-        print(f"{alpha:>6.1f}  {m['seci']:>8.3f}  {m['aeci']:>8.3f}  "
+        print(f"{alpha:>6.1f}  {m['seci']:>8.3f}  {m['aeci']:>9.3f}  {m['aeci_err']:>9.3f}  "
               f"{m['total_bubble_norm']:>10.3f}  {m['total_score_norm']:>12.3f}  "
               f"{m['mae']:>7.3f}  {m['unmet']:>7.1f}{tag}")
 
+    # ── α* sensitivity to the composite definition (C5 robustness check) ──
+    stars = alpha_star_sensitivity(metrics)
+    print('\nα* SENSITIVITY TO COMPOSITE DEFINITION')
+    print('-' * 60)
+    for label, (a_star, v_star) in stars.items():
+        print(f'  {label:<34} α* = {a_star:<4}  (min = {v_star:.3f})')
+    star_values = {a for a, _ in stars.values()}
+    if len(star_values) == 1:
+        print('  → α* is ROBUST to the composite choice.')
+    else:
+        print(f'  → α* is COMPOSITE-DEPENDENT (spread: {sorted(star_values)}).')
+        print('    Report the spread in the paper, not just the primary value.')
+
+    plot_alpha_star_sensitivity(metrics, save_dir)
     plot_goldilocks(metrics, all_results, save_dir)
     if rumor_results and disaster_results and mix_results:
         plot_factor_comparison(rumor_results, disaster_results, mix_results, save_dir)
@@ -2262,12 +2429,14 @@ if __name__ == '__main__':
     print('\n' + '=' * 70)
     print('EXPERIMENT COMPLETE')
     print('=' * 70)
-    print('\nInterpretation guide:')
-    print('  SECI < 0    : social echo chamber (friends converge more than random)')
-    print('  AECI < 0    : AI-induced bubble (AI users more homogeneous than global)')
-    print('  total_bubble: |SECI| + |AECI| — minimise to find Goldilocks α*')
-    print('  unmet_needs : cells at disaster L4+ with zero relief — measures response failure')
-    print('  precision   : fraction of relief correctly sent to high-need cells')
+    print('\nInterpretation guide (negative = echo chamber for ALL indices):')
+    print('  SECI < 0     : social echo chamber (community beliefs more homogeneous than global)')
+    print('  AECI-Var < 0 : AI-induced bubble (AI-reliant agents more homogeneous than global)')
+    print('  AECI-Err < 0 : AI-heavy agents hold more confident-wrong beliefs than AI-light')
+    print('  AECI-Acc     : share of accepted updates coming from AI (0..1 reliance, unsigned)')
+    print('  total_bubble : |SECI| + |AECI-Var| — minimise to find Goldilocks α*')
+    print('  unmet_needs  : cells at disaster L3+ with zero relief that tick — response failure')
+    print('  precision    : fraction of relief tokens on cells at L3+ at placement time')
     if not args.plots_only:
         print(f'\nResults saved to {args.results_file} — replot anytime with:')
         print(f'  python3 test_filter_bubbles.py --plots-only')

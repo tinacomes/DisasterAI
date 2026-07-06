@@ -158,15 +158,23 @@ cell and $T=200$ ticks, matching the primary alignment sweep.
 \subsubsection*{S5.1\enspace Social Echo Chamber Index (SECI)}
 
 \begin{equation}
-  \mathrm{SECI} = 1 -
-    \frac{\mathrm{Var}\!\bigl(\{b_{f,k}:f\in\mathrm{friends}(i),\,k\in\mathcal{K}\}\bigr)}
-         {\mathrm{Var}\!\bigl(\{b_{j,k}:j\in\mathcal{A},\,k\in\mathcal{K}\}\bigr)},
+  \mathrm{SECI}_c =
+  \begin{cases}
+    \max\!\left(-1,\;\dfrac{V_c - V_g}{V_g}\right)
+      & V_c < V_g, \\[8pt]
+    \min\!\left(+1,\;\dfrac{V_c - V_g}{5 - V_g}\right)
+      & V_c \geq V_g,
   \tag{S5}
+  \end{cases}
 \end{equation}
 %
-where $\mathcal{A}$ is the set of all agents and $\mathcal{K}$ is the set of all
-grid cells.
-Computed separately for exploitative and exploratory agents every five ticks.
+where $V_c$ is the belief variance within connected component $c$ (member beliefs
+with severity level $\geq1$) and $V_g$ the corresponding global variance across
+all agents.
+Component values are averaged within each agent type every five ticks
+(the network is type-homogeneous).
+Negative values indicate an echo chamber; this sign convention is shared by all
+echo-chamber indices.
 A \emph{formation} event is registered when $\mathrm{SECI}<-0.30$ sustained for
 $\geq3$ consecutive samples; a \emph{recovery} event when
 $\mathrm{SECI}\geq0.0$ sustained for $\geq5$ consecutive samples after formation.
@@ -174,18 +182,42 @@ If formation never occurs the lifecycle bar is left blank ($\circ$); if formatio
 occurs but recovery does not before the run ends the bar reaches maximum height
 with annotation $\times$.
 
-\subsubsection*{S5.2\enspace AI Echo Chamber Index (AECI)}
+\subsubsection*{S5.2\enspace AI Echo Chamber Indices (AECI-Var, AECI-Err, AECI-Acc)}
 
+\paragraph{AECI-Var.} Applies the SECI formula (S5) with grouping by AI reliance:
+agents are median-split by cumulative accepted AI belief updates, and the belief
+variance of the AI-reliant half replaces $V_c$.
+Negative = AI-induced bubble; this construct enters the Goldilocks composite.
+
+\paragraph{AECI-Err.} Compares confidence-weighted belief error between the
+AI-heavy and AI-light halves (same median split):
+%
 \begin{equation}
-  \mathrm{AECI} = \frac{\Delta q_{\mathrm{AI}}}
+  \mathrm{AECI\text{-}Err}
+    = -\,\frac{\bar e_{\mathrm{heavy}} - \bar e_{\mathrm{light}}}
+              {\max(\bar e_{\mathrm{heavy}}, \bar e_{\mathrm{light}})},
+  \qquad
+  \bar e = \overline{\text{conf}\times|b-t|}\ \text{over cells believed at } L\geq1.
+  \tag{S6a}
+\end{equation}
+%
+Negative values mean AI-heavy agents are more confidently wrong (algorithmic echo
+chamber).
+\emph{Sign history:} before 2026-07 this index used the opposite sign; result
+files written before the change are automatically converted on load via the
+\texttt{conventions.aeci\_err\_sign} marker.
+
+\paragraph{AECI-Acc.}
+%
+\begin{equation}
+  \mathrm{AECI\text{-}Acc} = \frac{\Delta q_{\mathrm{AI}}}
                        {\Delta q_{\mathrm{AI}} + \Delta q_{\mathrm{human}}},
-  \tag{S6}
+  \tag{S6b}
 \end{equation}
 %
 where $\Delta q$ denotes the increment in \emph{accepted} information-update
-calls over a five-tick window.
-This window-delta formulation distinguishes recent reliance from cumulative
-history, making AECI responsive to within-run behavioural shifts.
+calls over a five-tick window --- an unsigned $[0,1]$ reliance share, not an
+echo-chamber index.
 
 \subsubsection*{S5.3\enspace Belief Accuracy (MAE)}
 
@@ -197,7 +229,7 @@ history, making AECI responsive to within-run behavioural shifts.
 averaged over agents $i$, where $\mathcal{C}=\{k:t_k\geq1\}$ is the set of
 cells with non-zero true severity.
 
-\subsubsection*{S5.4\enspace Composite Goldilocks Scores}
+\subsubsection*{S5.4\enspace Composite Goldilocks Scores and $\alpha^*$ Sensitivity}
 
 Let $\bar{m}(\alpha)$ denote the steady-state mean (last 75 ticks) of metric $m$
 at alignment level $\alpha$.
@@ -215,10 +247,10 @@ Composite scores:
 \begin{align}
   \text{total\_bubble}_{\mathrm{norm}}(\alpha)
     &= |\mathrm{SECI}|_{\mathrm{norm}}(\alpha)
-       +|\mathrm{AECI}|_{\mathrm{norm}}(\alpha), \tag{S9}\\
+       +|\mathrm{AECI\text{-}Var}|_{\mathrm{norm}}(\alpha), \tag{S9}\\
   \text{total\_score}_{\mathrm{norm}}(\alpha)
     &= |\mathrm{SECI}|_{\mathrm{norm}}(\alpha)
-       +|\mathrm{AECI}|_{\mathrm{norm}}(\alpha)
+       +|\mathrm{AECI\text{-}Var}|_{\mathrm{norm}}(\alpha)
        +\mathrm{MAE}_{\mathrm{norm}}(\alpha). \tag{S10}
 \end{align}
 %
@@ -230,9 +262,14 @@ Optima:
 \end{align}
 %
 Range normalisation ensures each component contributes on the same $[0,1]$ scale
-regardless of the absolute magnitude of SECI, AECI, or MAE.
+regardless of the absolute magnitude of SECI, AECI-Var, or MAE.
 The two optima are reported separately so that the trade-off between
 echo-chamber suppression and accuracy improvement is explicit.
+Because the raw AECI-Var signal is small relative to SECI, normalisation can
+amplify its influence on the location of the minimum; $\alpha^*$ is therefore
+also reported under six composite variants ---
+$\{$SECI+AECI-Var, SECI only, SECI+AECI-Err$\}\times\{$without MAE, with MAE$\}$
+--- and treated as robust only if the variants agree.
 
 \subsubsection*{S5.5\enspace Spatial and Network Periphery Metrics}
 

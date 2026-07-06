@@ -48,6 +48,13 @@ def load_and_aggregate(path):
         data = json.load(f)
 
     runs = data['runs']
+    # Files written before the AECI-Err sign unification (no conventions marker)
+    # use positive = echo chamber; flip to the current convention (negative = echo).
+    if data.get('conventions', {}).get('aeci_err_sign') != 'negative_echo':
+        for run in runs:
+            for key in ('aeci_exploit', 'aeci_explor'):
+                if key in run:
+                    run[key] = [None if v is None else -float(v) for v in run[key]]
     keys = ['seci_exploit', 'seci_explor', 'aeci_exploit', 'aeci_explor',
             'mae_exploit',  'mae_explor',  'prec_exploit', 'prec_explor',
             'ai_query_ratio_exploit', 'ai_query_ratio_explor',
@@ -256,7 +263,7 @@ def plot_goldilocks(alpha_r, save_dir):
     ep(axes[0, 0], seci_ms, seci_runs, 'b', 'SECI (-1 to +1)',
        'Social Echo Chamber\n(negative = stronger bubble)', (-1.1, 1.1), hline=0)
 
-    ep(axes[0, 1], aeci_ms, aeci_runs, 'r', 'AECI (-1 to +1)',
+    ep(axes[0, 1], aeci_ms, aeci_runs, 'r', 'AECI-Err (-1 to +1)',
        'AI-Induced Bubble\n(negative = stronger AI bubble)', (-1.1, 1.1), hline=0)
 
     ax = axes[0, 2]
@@ -371,10 +378,10 @@ def plot_timeseries(alpha_r, save_dir):
          'SECI (-1 to +1)', (-1.1, 1.1), 0),
         (ax_mae,     'Belief MAE Over Time  (exploit + explor avg, informed beliefs only)',
          'Mean Absolute Error', (0, None), None),
-        (ax_aeci_ex, 'AECI Over Time — Exploitative Agents\n(AI-heavy vs AI-light within type)',
-         'AECI (-1 to +1)', (-1.1, 1.1), 0),
-        (ax_aeci_er, 'AECI Over Time — Exploratory Agents\n(AI-heavy vs AI-light within type)',
-         'AECI (-1 to +1)', (-1.1, 1.1), 0),
+        (ax_aeci_ex, 'AECI-Err Over Time — Exploitative Agents\n(AI-heavy vs AI-light; negative = echo chamber)',
+         'AECI-Err (-1 to +1)', (-1.1, 1.1), 0),
+        (ax_aeci_er, 'AECI-Err Over Time — Exploratory Agents\n(AI-heavy vs AI-light; negative = echo chamber)',
+         'AECI-Err (-1 to +1)', (-1.1, 1.1), 0),
         (ax_unmet,   'Unmet High-Need Cells per Tick (level ≥3, 0 tokens)',
          'Count', (0, None), None),
         (ax_prec,    'Relief Targeting Precision\n(solid=exploratory, dashed=exploitative)',

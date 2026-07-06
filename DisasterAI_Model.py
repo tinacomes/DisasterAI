@@ -2412,22 +2412,32 @@ class DisasterModel(Model):
         """Log debug messages if debug mode is enabled or forced."""
 
     def calculate_aeci_variance(self):
-        """Calculate AI Echo Chamber Index variance on a [-1, +1] scale."""
-        aeci_variance = 0.0  # Default neutral value
-        
-        # Classify AI-reliant agents by accepted_ai (actual belief influence),
-        # not query ratio. The feedback loop means agents that validated AI info
-        # as accurate will have built trust and accepted more AI updates. Using
-        # accepted_ai captures this: a query counter (accum_calls_ai) inflated by
-        # low-trust probing does not reflect real AI influence on beliefs.
-        min_accepted_ai = 3  # At least 3 accepted AI belief updates to qualify
+        """AECI-Var: AI Echo Chamber Index, variance-based, on a [-1, +1] scale.
 
+        Compares the belief variance of AI-reliant agents against the global
+        belief variance. NEGATIVE = AI-reliant agents more homogeneous than the
+        population (AI echo chamber); positive = more diverse. Same sign
+        convention as SECI and AECI-Err.
+
+        Classification: median split by cum_accepted_ai (cumulative accepted AI
+        belief updates = actual AI influence on beliefs; queries inflated by
+        low-trust probing do not shape beliefs). This is the single
+        classification basis shared with AECI-Err. The previous rule
+        (accepted_ai >= 3 in the current 5-tick window) depended on the
+        per-period reset timing and starved the metric at low alpha, where D/delta
+        rejections made the per-period threshold rarely reachable.
+        """
+        aeci_variance = 0.0  # Default neutral value
+
+        humans = [a for a in self.humans.values() if hasattr(a, 'cum_accepted_ai')]
         ai_reliant_agents = []
-        for agent in self.humans.values():
-            if not hasattr(agent, 'accepted_ai'):
-                continue
-            if agent.accepted_ai >= min_accepted_ai:
-                ai_reliant_agents.append(agent)
+        if len(humans) >= 4:
+            sorted_humans = sorted(humans, key=lambda a: a.cum_accepted_ai)
+            top_half = sorted_humans[len(sorted_humans) // 2:]
+            # Require actual AI influence in the top half — with zero acceptances
+            # everywhere there is no "AI-reliant" group and no signal.
+            if top_half and top_half[-1].cum_accepted_ai > 0:
+                ai_reliant_agents = top_half
 
         # Get global belief variance
         all_beliefs = []
@@ -3169,27 +3179,33 @@ class DisasterModel(Model):
 
             self.belief_variance_data.append((self.tick, var_exploit, var_explor))
 
-            # --- AECI Calculation: Confidence-Weighted Belief Error ---
+            # --- AECI-Err: Confidence-Weighted Belief Error split ---
             #
-            # The previous variance-based formula failed because confirming AI
-            # (α=0.9) changes CONFIDENCE not LEVEL (d=0 → reported level ≈ prior
-            # level), so level variance is unchanged → AECI ≈ 0 regardless of α.
+            # One of the three AECI constructs (unified naming, all with the
+            # SECI sign convention: NEGATIVE = echo chamber):
+            #   AECI-Acc: acceptance share accepted_AI/(accepted_AI+accepted_human)
+            #             → stored as retain_aeci (0..1 reliance measure, unsigned)
+            #   AECI-Err: THIS metric (confidence-weighted error split, [-1,+1])
+            #   AECI-Var: variance ratio of AI-reliant vs global beliefs
+            #             → calculate_aeci_variance() ([-1,+1])
             #
-            # New formula: for each agent compute the mean of
+            # AECI-Err formula: for each agent compute the mean of
             #   confidence × |believed_level − true_level|
             # over all L1+ cells (high enough belief to matter).  This "confident
             # error" is the actual echo-chamber signal: agents locked into
             # confirming AI accumulate high-confidence FALSE beliefs.
             #
-            # Within each type split by cum_accepted_ai (who queried AI most):
+            # Within each type, median-split by cum_accepted_ai (accepted AI belief
+            # updates — actual AI influence; same classification basis as AECI-Var):
             #   heavy_err > light_err → AI-heavy agents have more confident false
-            #   beliefs → algorithmic echo chamber → AECI > 0
-            #   heavy_err < light_err → AI corrects beliefs → AECI < 0
-            #   AECI ≈ 0 → AI usage has no directional effect on belief accuracy
+            #   beliefs → algorithmic echo chamber → AECI-Err < 0
+            #   heavy_err < light_err → AI corrects beliefs → AECI-Err > 0
+            #   AECI-Err ≈ 0 → AI usage has no directional effect on belief accuracy
             #
-            # Normalised to [-1, +1]:
-            #   positive half: (heavy_err − light_err) / max(heavy_err, light_err)
-            #   negative half: (heavy_err − light_err) / max(light_err, 1e-6)
+            # Normalised to [-1, +1] (SIGN CONVENTION CHANGED 2026-07: previously
+            # positive = echo chamber; now negative = echo chamber to match SECI
+            # and AECI-Var. JSONs written before this change carry the old sign —
+            # the test_filter_bubbles collect step auto-converts unmarked files.)
             aeci_exp = []
             aeci_expl = []
 
@@ -3221,13 +3237,13 @@ class DisasterModel(Model):
                 if len(type_agents) < 4:
                     continue  # need at least 2 per half
 
-                # Median split by total AI calls within this type.
-                # Using accum_calls_ai (total queries, not just accepted) gives genuine
-                # variation at high α where acceptance rate ≈ 100% for all agents and
-                # cum_accepted_ai is near-uniform → meaningless split.
-                # Agents who queried AI more (encountered more uncertain cells) get more
-                # belief reinforcements → higher confident error when AI confirms false beliefs.
-                sorted_agents = sorted(type_agents, key=lambda a: a.accum_calls_ai)
+                # Median split by cum_accepted_ai within this type: accepted AI
+                # belief updates measure actual AI INFLUENCE on beliefs (queries
+                # inflated by low-trust probing do not shape beliefs). This is the
+                # single classification basis shared with AECI-Var. At high α,
+                # acceptance rates converge across agents, so acceptances remain
+                # proportional to calls and the split keeps its variation.
+                sorted_agents = sorted(type_agents, key=lambda a: a.cum_accepted_ai)
                 mid = len(sorted_agents) // 2
                 ai_light = sorted_agents[:mid]
                 ai_heavy = sorted_agents[mid:]
@@ -3236,12 +3252,11 @@ class DisasterModel(Model):
                 heavy_err = _weighted_error(ai_heavy)
 
                 err_diff = heavy_err - light_err
-                if err_diff >= 0:   # AI-heavy more confident-wrong → echo chamber
-                    denom = max(heavy_err, 1e-6)
-                    aeci_val = min(1.0, err_diff / denom)
-                else:               # AI-heavy more accurate → AI breaks echo chamber
-                    denom = max(light_err, 1e-6)
-                    aeci_val = max(-1.0, err_diff / denom)
+                # SIGN: negative = echo chamber (matches SECI / AECI-Var convention)
+                if err_diff >= 0:   # AI-heavy more confident-wrong → AI echo chamber
+                    aeci_val = -min(1.0, err_diff / max(heavy_err, 1e-6))
+                else:               # AI-heavy more accurate → AI breaks bubbles
+                    aeci_val = min(1.0, -err_diff / max(light_err, 1e-6))
 
                 aeci_list.append(aeci_val)
 
@@ -5069,7 +5084,7 @@ def plot_summary_echo_indices_vs_alignment(results_b, alignment_values, title_su
     ax.axhline(0, color='black', linestyle='-', linewidth=0.8, alpha=0.5)  # Zero reference line
     ax.set_ylim(-1.05, 1.05)  # AECI-Var ranges from -1 to +1, allow full range
 
-    # Plot AI Call Ratio boxplots
+    # Plot AECI-Err boxplots
     ax = axes[1, 0]
     bplot_call_exploit = ax.boxplot(aeci_call_exploit_data, positions=positions-boxplot_width/2,
                                   widths=boxplot_width, patch_artist=True,
@@ -5081,11 +5096,12 @@ def plot_summary_echo_indices_vs_alignment(results_b, alignment_values, title_su
                                  boxprops=dict(facecolor='skyblue', alpha=0.7),
                                  flierprops=dict(marker='o', markerfacecolor='skyblue', markersize=3, alpha=0.7),
                                  medianprops=dict(color='black'))
-    ax.set_ylabel("AI Call Ratio")
-    ax.set_title("AI Usage (AECI Call Ratio)")
+    ax.set_ylabel("AECI-Err")
+    ax.set_title("AI Echo Chamber (AECI-Err)\n(Negative = Echo Chamber, Positive = AI Corrects)")
     ax.legend([bplot_call_exploit["boxes"][0], bplot_call_explor["boxes"][0]], ['Exploit', 'Explor'], loc='best')
     ax.grid(True, axis='y', linestyle='--', alpha=0.6)
-    ax.set_ylim(0, 1)
+    ax.axhline(0, color='black', linestyle='-', linewidth=0.8, alpha=0.5)
+    ax.set_ylim(-1.05, 1.05)
 
     # Plot Component AI Trust Variance boxplots
     ax = axes[1, 1]
@@ -5367,18 +5383,18 @@ def plot_final_echo_indices_vs_alignment(results_b, alignment_values, title_suff
     axes[0, 1].legend()
     axes[0, 1].grid(True, axis='y', linestyle='--', alpha=0.6)
 
-    # Plot Final AI Call Ratio with percentile error bars
+    # Plot Final AECI-Err with percentile error bars
     axes[1, 0].bar(index - bar_width/2, final_aeci_call_exploit_mean, bar_width,
                    yerr=final_aeci_call_exploit_err, capsize=4, label='Exploit', color='darkblue')
     axes[1, 0].bar(index + bar_width/2, final_aeci_call_explor_mean, bar_width,
                    yerr=final_aeci_call_explor_err, capsize=4, label='Explor', color='skyblue')
-    axes[1, 0].set_ylabel("Final Mean AI Call Ratio")
-    axes[1, 0].set_title("AI Usage (AECI Call Ratio)")
+    axes[1, 0].set_ylabel("Final Mean AECI-Err")
+    axes[1, 0].set_title("AI Echo Chamber (AECI-Err)\n(Negative = Echo Chamber)")
     axes[1, 0].set_xlabel("AI Alignment Level")
     axes[1, 0].legend()
     axes[1, 0].grid(True, axis='y', linestyle='--', alpha=0.6)
-    # Ensure y-limits are appropriate - AI call ratio should be between 0 and 1
-    axes[1, 0].set_ylim(0, 1)
+    axes[1, 0].axhline(0, color='black', linestyle='-', linewidth=0.8, alpha=0.5)
+    axes[1, 0].set_ylim(-1.05, 1.05)
 
 
     # Plot Component AI Trust Variance with percentile error bars
@@ -5980,14 +5996,14 @@ def plot_echo_chamber_indices(results_dict, title_suffix=""):
         except Exception as e:
             print(f"Error plotting {label}: {e}")
 
-    # --- Subplot 1: SECI & AECI (AI Call Ratio) ---
+    # --- Subplot 1: SECI & AECI-Err ---
     ax = axes[0, 0]
     safe_plot(ax, seci, 1, "SECI Exploit", "maroon", ticks=ticks)
     safe_plot(ax, seci, 2, "SECI Explor", "salmon", ticks=ticks)
-    safe_plot(ax, aeci, 1, "AI Call Ratio Exploit", "darkblue", ticks=ticks)
-    safe_plot(ax, aeci, 2, "AI Call Ratio Explor", "skyblue", linestyle='--', ticks=ticks)
+    safe_plot(ax, aeci, 1, "AECI-Err Exploit", "darkblue", ticks=ticks)
+    safe_plot(ax, aeci, 2, "AECI-Err Explor", "skyblue", linestyle='--', ticks=ticks)
     add_event_lines(ax, avg_event_ticks)
-    ax.set_title("Social Homogeneity (SECI) & AI Call Ratio (AECI)")
+    ax.set_title("Social Homogeneity (SECI) & AI Echo Chamber (AECI-Err)\n(negative = echo chamber for both)")
     ax.set_ylabel("Index / Ratio")
     ax.grid(True, linestyle='--', alpha=0.6)
     ax.legend(fontsize='small')
@@ -6761,7 +6777,7 @@ def plot_experiment_c_comprehensive(results_c, dynamics_values, shock_values):
             else:
                 print("  No seci data")
             
-            # 5. Calculate final AECI (AI Call Ratio)
+            # 5. Calculate final AECI-Err
             if "aeci" in res and isinstance(res["aeci"], np.ndarray):
                 try:
                     if res["aeci"].ndim >= 3 and res["aeci"].shape[1] > 0:

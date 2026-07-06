@@ -429,15 +429,40 @@ person familiar with the code.
 7. **Resolve C1**: one name per AECI construct; one sign convention (recommend negative =
    echo chamber for all three); relabel every plot; state in METHODS which construct is in
    the Goldilocks composite.
+   **✅ DONE on this branch.** Names: AECI-Acc (acceptance share, `retain_aeci`),
+   AECI-Err (confidence-weighted error split, `aeci_data`, sign FLIPPED so negative =
+   echo chamber), AECI-Var (variance ratio, composite component). All plot labels
+   updated across DisasterAI_Model.py, test_filter_bubbles.py, plot_results.py.
+   JSONs now carry a `conventions.aeci_err_sign` marker; files written before the
+   flip are auto-converted on load, so run 28808662941's artifacts stay usable.
+   Bonus fix: `plot_aeci_evolution` plotted AECI-Err under query-ratio labels with
+   ylim(0,1) clipping all negative values — it now plots the actual
+   `ai_query_ratio_*` series.
 8. **Resolve C2**: rewrite the SECI formula block in METHODS to match the code
    (component-based, L1+ filter, asymmetric normalization).
+   **✅ DONE on this branch** — METHODS_PAPER.md, SUPPLEMENTARY.md, and
+   SUPPLEMENTARY.tex now carry the code-matching piecewise formula
+   (METHODS_PAPER.tex already had it).
 9. **Resolve C5**: single classification basis for "AI-reliant" (recommend
    `cum_accepted_ai`, which is what the init comment promises); re-run and report the α*
    sensitivity check (composite with/without AECI-Var, and with retain_aeci substituted).
+   **✅ DONE on this branch.** Both AECI-Err and AECI-Var now median-split by
+   `cum_accepted_ai` (AECI-Var previously used the per-period `accepted_ai >= 3` rule,
+   AECI-Err used `accum_calls_ai`). `alpha_star_sensitivity()` reports α* under six
+   composite variants ({SECI+AECI-Var, SECI only, SECI+AECI-Err} × {±MAE}), printed in
+   the collect summary and plotted as alpha_star_sensitivity.png. NOTE: the
+   classification change shifts AECI-Var/AECI-Err values — the paper-scale sweep must
+   be re-run (or replotted via the Replot workflow for α*-sensitivity only, since
+   |AECI| composites are sign-invariant but NOT classification-invariant: full re-run
+   required for final numbers).
 10. **Resolve C3/C4/C6**: pick one MAE and one precision definition for the paper; fix the
     L3/L4 doc string.
     *Acceptance for stage:* a table in SUPPLEMENTARY listing every reported metric, its
     exact formula, its code location, and its sign convention — with no duplicates.
+    **✅ DONE on this branch.** Reported MAE = disaster-cell (L1+) definition; reported
+    precision = placement-time definition (delayed assessment feeds rewards only);
+    unmet needs documented as L3+ everywhere (docstrings fixed). SUPPLEMENTARY.md
+    S5.0 now contains the full metrics reference table (stage acceptance criterion).
 
 ### Stage 3 — Secondary bug fixes (½ day)
 11. Fix B4 (spatial x/y swap) and regenerate all spatial-coverage/periphery figures.

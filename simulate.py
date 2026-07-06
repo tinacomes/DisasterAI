@@ -183,6 +183,9 @@ def main():
     out = {
         'condition': {k: params[k] for k in params},
         'n_runs': args.n_runs,
+        # aeci_* series use NEGATIVE = echo chamber (unified 2026-07 convention);
+        # plot_results.py flips files that lack this marker.
+        'conventions': {'aeci_err_sign': 'negative_echo'},
         'runs': runs,
     }
 
