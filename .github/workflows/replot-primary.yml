@@ -1,0 +1,69 @@
+name: Replot Primary Sweep (no re-simulation)
+
+# Downloads the 11 per-alpha JSON artifacts from a completed primary-sweep run
+# and regenerates the primary figures using the current plot code — no
+# simulation needed.
+#
+# Use this after fixing a plot function to avoid re-running 11 × N_RUNS jobs.
+#
+# Trigger: GitHub → Actions → "Replot Primary Sweep" → Run workflow
+# Input:   The run ID of the completed primary-sweep run whose artifacts to
+#          reuse. Find it in the URL of the completed run:
+#          https://github.com/tinacomes/DisasterAI/actions/runs/<run-id>
+on:
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: "Run ID of the completed primary sweep (from the Actions URL)"
+        required: true
+
+env:
+  MPLBACKEND: Agg
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  replot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      actions: read
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11", cache: "pip"}
+      - run: pip install -r requirements.txt
+
+      - name: Download per-alpha result artifacts from source run
+        run: |
+          mkdir -p downloaded_artifacts
+          gh run download ${{ inputs.source_run_id }} \
+            --pattern "primary-alpha-*" \
+            --dir downloaded_artifacts
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Locate JSON files and move to flat directory
+        run: |
+          mkdir -p filter_bubble_results
+          find downloaded_artifacts -name 'bubble_alpha_*.json' \
+               -exec cp {} filter_bubble_results/ \;
+          echo "=== Files in filter_bubble_results ==="
+          ls filter_bubble_results
+          echo "Total: $(ls filter_bubble_results | wc -l) files"
+
+      - name: Regenerate primary figures
+        run: |
+          python3 test_filter_bubbles.py \
+            --collect-and-plot \
+            --results-dir filter_bubble_results/ \
+            --save-dir    filter_bubble_results/
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: filter-bubble-primary-plots-replot
+          path: |
+            filter_bubble_results/*.png
+            filter_bubble_results/experiment_results.json
+          retention-days: 30

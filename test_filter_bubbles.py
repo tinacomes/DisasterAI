@@ -1052,19 +1052,25 @@ def plot_transition_timing(all_results, save_dir):
          'AI Queries > 50% of Total Queries\n(real call counts, sustained ≥5 ticks)')
 
     # Bottom-right: steady-state AI query ratio by alignment level
+    # NOTE: plot at the categorical bar positions `x` (0..10), NOT at the raw alpha
+    # values (0..1) — the axis ticks are set to `x`, so plotting at alphas crushed
+    # the whole curve into the first tick interval.
+    # ai_query_ratio_* is a per-tick series, so use the 75-tick window
+    # (STEADY_STATE_WINDOW * 5) for consistency with the other steady-state metrics.
     ax = axes[1, 1]
-    ss_ex  = [ss(r.get('ai_query_ratio_exploit_mean', [])) for r in all_results]
-    ss_er  = [ss(r.get('ai_query_ratio_explor_mean',  [])) for r in all_results]
-    std_ex = [ss(r.get('ai_query_ratio_exploit_std',  [])) for r in all_results]
-    std_er = [ss(r.get('ai_query_ratio_explor_std',   [])) for r in all_results]
-    ax.errorbar(alphas, ss_ex, yerr=std_ex, fmt='-o', color='#8B0000',
+    tick_window = STEADY_STATE_WINDOW * 5
+    ss_ex  = [ss(r.get('ai_query_ratio_exploit_mean', []), tick_window) for r in all_results]
+    ss_er  = [ss(r.get('ai_query_ratio_explor_mean',  []), tick_window) for r in all_results]
+    std_ex = [ss(r.get('ai_query_ratio_exploit_std',  []), tick_window) for r in all_results]
+    std_er = [ss(r.get('ai_query_ratio_explor_std',   []), tick_window) for r in all_results]
+    ax.errorbar(x, ss_ex, yerr=std_ex, fmt='-o', color='#8B0000',
                 linewidth=2, capsize=5, label='Exploitative')
-    ax.errorbar(alphas, ss_er, yerr=std_er, fmt='-s', color='#FA8072',
+    ax.errorbar(x, ss_er, yerr=std_er, fmt='-s', color='#FA8072',
                 linewidth=2, capsize=5, label='Exploratory')
     ax.axhline(0.5, color='gray', linestyle='--', alpha=0.6, label='50% threshold')
     ax.set_xlabel('AI Alignment')
-    ax.set_ylabel('AI query share\n(mean ± std, last 15 ticks)')
-    ax.set_title(f'Steady-State AI Query Ratio\n(last {STEADY_STATE_WINDOW} ticks avg)')
+    ax.set_ylabel(f'AI query share\n(mean ± std, last {tick_window} ticks)')
+    ax.set_title(f'Steady-State AI Query Ratio\n(last {tick_window} ticks avg)')
     ax.set_ylim(0, 1.05)
     ax.set_xticks(x)
     ax.set_xticklabels(x_str)
