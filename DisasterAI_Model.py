@@ -523,7 +523,7 @@ class HumanAgent(Agent):
 
             # Calculate CONFIRMATION score: how close was reported level to agent's PRIOR belief
             # Use stored prior from tuple if available (uncontaminated by query update)
-            if len(item) == 6:
+            if len(item) >= 6:
                 prior_level = item[4]  # stored_prior_level
             else:
                 prior_belief = self.beliefs.get(cell, {})
@@ -2855,13 +2855,28 @@ class DisasterModel(Model):
 
     def update_disaster(self):
         """
-        Update disaster grid based on disaster_dynamics parameter.
+        Update disaster grid: stochastic drift toward baseline + random patch shocks.
 
-        disaster_dynamics:
-        0 = Static (no updates)
-        1 = Slow evolution (5% chance per tick, smaller magnitude)
-        2 = Medium evolution (10% chance per tick, medium magnitude)
-        3 = Rapid evolution (20% chance per tick, larger magnitude)
+        disaster_dynamics scales the PACE of change:
+        0 = Static (no updates — null condition)
+        1 = Slow   (0.5x drift and shock rates)
+        2 = Medium (1.0x — default)
+        3 = Rapid  (2.0x)
+
+        Mechanics:
+        - Drift: each cell independently moves 1 level toward its baseline
+          (initial Gaussian) value with per-tick probability 0.05 * pace.
+          This erodes shock damage over time and anchors the disaster field,
+          so the environment is non-stationary but does not random-walk away.
+        - Shock: with per-tick probability shock_probability * pace, a shock
+          hits a random patch (Moore radius 2): the centre shifts by
+          +/- shock_magnitude, neighbours by a distance-attenuated amount.
+          Positive shocks create new hotspots agents must discover;
+          negative shocks remove need where agents may still expect it.
+
+        At the defaults (shock_probability=0.1, shock_magnitude=2,
+        disaster_dynamics=2) this matches the METHODS description: per-tick
+        drift toward baseline plus random shocks (p=0.10, magnitude +/-2).
         """
         # Store a copy of the current grid before updating
         if self.disaster_grid is not None:
@@ -2869,31 +2884,33 @@ class DisasterModel(Model):
         else:
             self.previous_grid = None
 
-        # Apply disaster dynamics based on parameter
         if self.disaster_dynamics == 0:
             # Static disaster - no updates
-            pass
+            return
 
-        elif self.disaster_dynamics == 1:
-            # Slow evolution: 5% chance, +1-2 magnitude
-            if random.random() < 0.05:
-                x, y = np.random.randint(0, self.disaster_grid.shape[0]), np.random.randint(0, self.disaster_grid.shape[1])
-                magnitude = random.randint(1, 2)
-                self.disaster_grid[x, y] = min(5, self.disaster_grid[x, y] + magnitude)
+        pace = {1: 0.5, 2: 1.0, 3: 2.0}.get(
+            self.disaster_dynamics, self.disaster_dynamics / 2.0)
 
-        elif self.disaster_dynamics == 2:
-            # Medium evolution: 10% chance, +2-3 magnitude
-            if random.random() < 0.1:
-                x, y = np.random.randint(0, self.disaster_grid.shape[0]), np.random.randint(0, self.disaster_grid.shape[1])
-                magnitude = random.randint(2, 3)
-                self.disaster_grid[x, y] = min(5, self.disaster_grid[x, y] + magnitude)
+        # 1. Stochastic drift toward baseline (cell-independent, 1 level per event)
+        drift_mask = np.random.random(self.disaster_grid.shape) < (0.05 * pace)
+        toward_baseline = np.sign(self.baseline_grid - self.disaster_grid)
+        self.disaster_grid = np.clip(
+            self.disaster_grid + drift_mask * toward_baseline, 0, 5).astype(int)
 
-        elif self.disaster_dynamics == 3:
-            # Rapid evolution: 20% chance, +3-4 magnitude
-            if random.random() < 0.2:
-                x, y = np.random.randint(0, self.disaster_grid.shape[0]), np.random.randint(0, self.disaster_grid.shape[1])
-                magnitude = random.randint(3, 4)
-                self.disaster_grid[x, y] = min(5, self.disaster_grid[x, y] + magnitude)
+        # 2. Random patch shock (distance-attenuated, either sign)
+        if random.random() < self.shock_probability * pace:
+            cx = random.randrange(self.width)
+            cy = random.randrange(self.height)
+            sign = random.choice([-1, 1])
+            radius = 2
+            for dx in range(-radius, radius + 1):
+                for dy in range(-radius, radius + 1):
+                    x, y = cx + dx, cy + dy
+                    if 0 <= x < self.width and 0 <= y < self.height:
+                        dist = max(abs(dx), abs(dy))  # Chebyshev rings of the Moore patch
+                        delta = sign * max(0, self.shock_magnitude - dist)
+                        if delta != 0:
+                            self.disaster_grid[x, y] = min(5, max(0, self.disaster_grid[x, y] + delta))
 
         # Detect significant changes
         if self.previous_grid is not None:

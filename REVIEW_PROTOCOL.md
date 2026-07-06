@@ -130,6 +130,18 @@ before trusting the hypothesis-level conclusions.
 
 ### B1 (CRITICAL): shock parameters are dead — Experiment C's shock dimension is a no-op, and the disaster is nearly static
 
+> **STATUS: FIXED on this branch.** `update_disaster` now implements the documented
+> mechanics: per-cell stochastic drift toward `baseline_grid` (p = 0.05·pace per tick)
+> plus random patch shocks (Moore radius 2, centre ±`shock_magnitude`, distance-
+> attenuated) firing with p = `shock_probability`·pace, where pace = 0.5/1.0/2.0 for
+> `disaster_dynamics` = 1/2/3 (0 remains static). Defaults (p=0.1, mag=2, dd=2) match
+> METHODS line 7. Validation (10 seeds, 100 ticks, 20×20, environment isolated):
+> cumulative level-changes mean 43/105/182 for dd=1/2/3 (monotonic; was ~5–9 single-cell
+> bumps); `shock_magnitude` 1/2/3 now yields 4/27/174 changes and visibly different MAE —
+> Experiment C's shock dimension is live. Note: end-vs-start cell diffs understate churn
+> because drift *restores* shocked cells toward baseline by design; use cumulative
+> changes or `event_ticks` to assess dynamism.
+
 - `shock_probability` / `shock_magnitude` are stored (`DisasterAI_Model.py:2266-2267`)
   and swept by `experiment_disaster_dynamics` (`:4412-4420`), but `update_disaster`
   (`:2838-2885`) never reads them. All shock-magnitude conditions are statistically
@@ -157,6 +169,12 @@ affected yet — but this is a landmine for anyone who uses them. Fix the sign o
 the block.
 
 ### B3 (HIGH): stored-prior branch is dead in `evaluate_information_quality`
+
+> **STATUS: FIXED on this branch** (`==` → `>=`). Verified with a targeted test: a
+> 7-tuple pending item whose current belief equals the reported level (fully
+> contaminated) but whose stored prior strongly disagrees now yields a *negative*
+> confirmation reward (Q[human] 0.0 → −0.055), i.e. the score is computed against the
+> uncontaminated stored prior as intended.
 
 `DisasterAI_Model.py:526`: `if len(item) == 6:` — but every pending item is a 7-tuple
 (verified empirically: all 2,227 pending items in a smoke run had length 7, since
@@ -355,6 +373,7 @@ person familiar with the code.
 4. **Fix B3** (`==` → `>=` at `:526`).
    *Acceptance:* add a unit test that appends a 7-tuple pending item and asserts the
    confirmation score is computed against the stored prior, not the current belief.
+   **✅ DONE on this branch — targeted test passes (see B3 status note).**
 5. **Decide A2** (explorer ground-truth oracle): document as an explicit assumption in
    METHODS, or replace with noisy verification.
    *Acceptance:* a sentence in METHODS, or a re-run showing the sweet spot survives noisy
@@ -364,6 +383,10 @@ person familiar with the code.
    sweep from Experiment C.
    *Acceptance:* over 100 ticks ≥ 5 % of cells change at dynamics = 2 (or the paper no
    longer claims a dynamic environment); Experiment C conditions differ statistically.
+   **✅ DONE on this branch — drift + patch shocks implemented; churn is monotonic in
+   both `disaster_dynamics` and `shock_magnitude` (see B1 status note; cumulative churn
+   ≈ 26 % of cell-levels per 100 ticks at dd = 2, though end-vs-start diffs are lower
+   because drift restores toward baseline by design).**
 
 ### Stage 2 — Metric unification (1 day)
 7. **Resolve C1**: one name per AECI construct; one sign convention (recommend negative =
