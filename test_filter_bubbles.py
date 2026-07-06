@@ -2004,7 +2004,11 @@ if __name__ == '__main__':
         all_results = [per_alpha[a] for a in ALIGNMENT_SWEEP if a in per_alpha]
         missing = [a for a in ALIGNMENT_SWEEP if a not in per_alpha]
         if missing:
-            print(f'Warning: missing alpha levels {missing} — plots may be incomplete')
+            # HARD FAIL: downstream code zips positionally against ALIGNMENT_SWEEP,
+            # so a partial set would silently mislabel alpha levels.
+            raise FileNotFoundError(
+                f'Missing alpha levels {missing} in {results_dir}. '
+                'Re-run the failed per-alpha CI jobs, then re-run the collect step.')
         print(f'Loaded {len(all_results)} spatial alpha results from {results_dir}')
         spatial_metrics = compute_goldilocks_metrics(all_results)
         os.makedirs(save_dir, exist_ok=True)
@@ -2030,7 +2034,13 @@ if __name__ == '__main__':
         all_results = [per_alpha[a] for a in ALIGNMENT_SWEEP if a in per_alpha]
         missing = [a for a in ALIGNMENT_SWEEP if a not in per_alpha]
         if missing:
-            print(f'Warning: missing alpha levels {missing} — plots may be incomplete')
+            # HARD FAIL: compute_goldilocks_metrics and the plot functions zip
+            # results positionally against ALIGNMENT_SWEEP, so a partial set would
+            # silently MISLABEL alpha levels rather than just leave gaps.
+            raise FileNotFoundError(
+                f'Missing alpha levels {missing} in {results_dir}. '
+                'Re-run the failed per-alpha CI jobs, then re-run the collect step — '
+                'plotting a partial sweep would mislabel results.')
         print(f'Loaded {len(all_results)} alpha results from {results_dir}')
 
         # Load factor results produced by --single-factor parallel jobs
