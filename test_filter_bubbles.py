@@ -307,8 +307,11 @@ def run_one_sim(params):
 
     # Cell-based near/far scalars — computed with THIS run's epicentre so they
     # aggregate correctly across replications (unlike averaging maps first).
-    _H, _W = coverage_deficit.shape
-    _Yg, _Xg = np.mgrid[0:_H, 0:_W]
+    # NOTE: the grids are indexed [x, y] (tokens fill tok[pos[0], pos[1]] and
+    # disaster_grid is [x, y]), so axis 0 is x and axis 1 is y. mgrid's first
+    # output varies along axis 0 → that is the x coordinate.
+    _W, _H = coverage_deficit.shape
+    _Xg, _Yg = np.mgrid[0:_W, 0:_H]
     _cell_dist = np.sqrt((_Xg - ex) ** 2 + (_Yg - ey) ** 2)
     _cd_flat   = _cell_dist.flatten()
     _cq1 = np.percentile(_cd_flat, 25)

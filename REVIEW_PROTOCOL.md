@@ -172,6 +172,10 @@ before trusting the hypothesis-level conclusions.
 parameters), or rewrite the paper's environment description and drop the shock sweep.
 
 ### B2 (HIGH): tipping-point detection uses an inverted sign convention for AECI
+> **STATUS: FIXED on this branch.** The `tp_*` tracking block (init + detection) was
+> deleted: its sign convention was inverted for the current AECI formula and its outputs
+> were never consumed. Transition timing is measured post-hoc in test_filter_bubbles.py
+> (`_first_sustained_break` / `_first_sustained_cross`) instead.
 
 `DisasterAI_Model.py:3355-3371` marks "AI echo chamber formation" when `avg_aeci < −0.3`.
 But the current AECI formula (`:3245-3334`) outputs **positive** values for echo chambers
@@ -200,6 +204,13 @@ added to fix (its sibling `evaluate_pending_info` correctly uses `len(item) >= 6
 an item for the agent's own cell is evaluated during sensing.
 
 ### B4 (HIGH): x/y swapped in near/far spatial-coverage metrics
+> **STATUS: FIXED on this branch.** The mgrid unpacking now matches the [x, y] array
+> layout. Verified with the acceptance test: for epicenter (25, 5) on a 30×30 grid the
+> near mask now centres on the true epicenter (centroid distance 3.4 cells, vs 24.9 to
+> the diagonal reflection); the old code centred it on the reflection. NOTE: spatial
+> near/far scalars are computed at simulation time, so any sweep JSONs produced before
+> this fix carry the buggy values — regenerate spatial-coverage/periphery figures from
+> a post-fix run.
 
 `test_filter_bubbles.py:310-317`: the arrays are indexed `[x, y]` (tokens fill
 `tok[pos[0], pos[1]]`, disaster grid is `[x, y]`), but the distance field is built as
@@ -213,6 +224,8 @@ periphery analyses in the same function disagree. Fix the mgrid ordering (swap `
 `_Yg` or index consistently) and regenerate all spatial-coverage figures.
 
 ### B5 (MEDIUM): `max_aeci_variance` is never populated
+> **STATUS: FIXED on this branch** (`ndim == 3` → `ndim == 2 and shape[1] > 1`).
+> Verified: a 2-run aggregation now returns a populated `max_aeci_variance` list.
 
 `DisasterAI_Model.py:4210-4224`: the guard is `aeci_variance_data.ndim == 3 and
 shape[2] > 1`, but each run's array is 2-D `(ticks, 2)` (built by `np.column_stack` at
@@ -222,6 +235,10 @@ shape", `max_aeci_variance_per_run` stays empty, and
 shape[1] > 1`.
 
 ### B6 (LOW, latent): non-square grids would break silently
+> **STATUS: FIXED on this branch** in the two model locations (`initialize_beliefs`,
+> `AIAgent.sense_environment`); the test_filter_bubbles `_H/_W` instance was fixed as
+> part of B4. Verified: a 25×20 grid run initialises all 500 cell beliefs and completes.
+> Plot-only helpers were not audited for non-square grids.
 
 `disaster_grid = np.zeros((width, height))`, but two places unpack
 `height, width = disaster_grid.shape` (swapped): `HumanAgent.initialize_beliefs`
@@ -230,6 +247,10 @@ shape[1] > 1`.
 fix the unpacking or assert squareness in `DisasterModel.__init__`.
 
 ### B7 (MEDIUM): `simulate.py` (the CI runner) is unseeded
+> **STATUS: FIXED on this branch.** `simulate.py` now seeds each replicate with
+> `--seed_base + i` (default 0), giving reproducible runs and common random numbers
+> across conditions. Verified: two runs with identical seeds produce byte-identical
+> output.
 
 `simulate.run_one`/`main` never set `random.seed`/`np.random.seed` — unlike
 `test_filter_bubbles.run_replicated` (seeds each replicate with its index, `:517-524`)
@@ -421,12 +442,26 @@ person familiar with the code.
 ### Stage 3 — Secondary bug fixes (½ day)
 11. Fix B4 (spatial x/y swap) and regenerate all spatial-coverage/periphery figures.
     *Acceptance:* unit test — place epicenter at (25, 5) on a 30×30 grid, assert the
-    near-mask centroid is within 2 cells of the epicenter.
+    near-mask centres on the epicenter (edge clipping shifts the centroid inward, so
+    test against the diagonal reflection, not a 2-cell radius).
+    **✅ DONE on this branch (see B4 status note); figure regeneration needs a
+    post-fix sweep run.**
 12. Fix B2 (tipping sign) or delete the `tp_*` block.
+    **✅ DONE on this branch — block deleted (see B2 status note).**
 13. Fix B5 (`ndim == 2`), B6 (shape unpacking or squareness assert), B7 (seed
     `simulate.py`).
+    **✅ DONE on this branch (see B5/B6/B7 status notes).**
 14. Delete dead code / vestigial params from §5 (esp. `share_confirming`, which implies a
     mechanism that doesn't exist).
+    **◐ PARTIAL on this branch: dead methods (`decay_trust`, `smooth_friend_trust`,
+    `find_exploration_targets`), the `tp_*` block, and stale "AI Call Ratio" comments
+    are deleted. Vestigial constructor parameters (`share_confirming`,
+    `lambda_parameter`, `low_trust_amplification_factor`,
+    `exploitative_correction_factor`, `trust_update_mode`, `exploit_friend_bias`,
+    `exploit_self_bias`) are still accepted-but-ignored — removing them breaks every
+    caller (simulate.py, test_filter_bubbles.py, notebooks), so batch that with the
+    Stage-2 metric renaming, and decide whether `share_confirming` should be
+    implemented instead of removed.**
 
 ### Stage 4 — Re-validation at paper scale (compute-bound)
 15. Re-run the primary α sweep (200 ticks, N = 100, ≥ 20 seeded reps) via

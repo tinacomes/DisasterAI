@@ -49,8 +49,6 @@ class HumanAgent(Agent):
         self.epsilon = epsilon
         self.pos = None
 
-        self.exploration_targets = []
-
         self.exploit_trust_lr = exploit_trust_lr
 
 
@@ -112,7 +110,8 @@ class HumanAgent(Agent):
         Initializes agent beliefs with default values, applies assigned rumor if provided,
         and senses the local environment. Ensures all cells have valid belief dictionaries.
         """
-        height, width = self.model.disaster_grid.shape
+        # disaster_grid is allocated np.zeros((width, height)) — axis 0 is x/width
+        width, height = self.model.disaster_grid.shape
         rumor_epicenter = None
         rumor_intensity = 0
         rumor_conf = 0.6
@@ -1126,105 +1125,6 @@ class HumanAgent(Agent):
             self.believed_epicenter = None  # No valid epicenter outside sensing range
 
 
-    def find_exploration_targets(self, num_targets=1):
-        """Finds cells scoring high on a weighted sum of believed level and uncertainty."""
-        candidates = []
-        min_level_to_explore = 1  # Consider L1+ cells
-
-        # Check if we have any beliefs to work with
-        if not self.beliefs:
-            # Handle case with no beliefs
-            if self.model.debug_mode:
-                print(f"Agent {self.unique_id}: No beliefs available for exploration targeting")
-            self.exploration_targets = []
-            return
-
-        # Gather all valid candidates with their scores
-        for cell, belief_info in self.beliefs.items():
-            if isinstance(belief_info, dict):
-                level = belief_info.get('level', 0)
-
-                # Skip L0 cells for primary exploration targets
-                if level < min_level_to_explore:
-                    continue
-
-                # Check if cell coordinates are valid
-                if not (0 <= cell[0] < self.model.width and 0 <= cell[1] < self.model.height):
-                    continue
-
-                confidence = belief_info.get('confidence', 0.1)
-                uncertainty = 1.0 - confidence
-
-                # --- Scoring Logic: Weighted Sum ---
-                level_weight = 0.7  # Focus heavily on finding higher levels
-                uncertainty_weight = 0.3  # Uncertainty is secondary, but still relevant
-
-                # Normalize level (0-5 -> 0-1)
-                normalized_level = level / 5.0
-
-                score = (level_weight * normalized_level) + (uncertainty_weight * uncertainty)
-
-                # Add to candidates
-                candidates.append({'cell': cell, 'score': score, 'level': level, 'conf': confidence})
-
-        # --- Fallback if no L1+ candidates found ---
-        if not candidates:
-            # NEW APPROACH: Look for L0 cells with highest uncertainty (lowest confidence)
-            l0_candidates = []
-
-            for cell, belief_info in self.beliefs.items():
-                if isinstance(belief_info, dict):
-                    # Check if cell coordinates are valid
-                    if not (0 <= cell[0] < self.model.width and 0 <= cell[1] < self.model.height):
-                        continue
-
-                    level = belief_info.get('level', 0)
-                    conf = belief_info.get('confidence', 1.0)
-
-                    # Focus on L0 cells now
-                    if level == 0:
-                        uncertainty = 1.0 - conf
-                        # For L0 cells, score is purely based on uncertainty
-                        l0_candidates.append({
-                            'cell': cell,
-                            'score': uncertainty,  # Higher uncertainty = higher score
-                            'level': level,
-                            'conf': conf
-                        })
-
-            # Sort L0 candidates by uncertainty (highest first)
-            if l0_candidates:
-                l0_candidates.sort(key=lambda x: x['score'], reverse=True)
-                # Take the top candidate(s)
-                candidates = l0_candidates[:num_targets]
-            else:
-                # Ultimate fallback: pick some random cells
-                random_cells = []
-                for _ in range(3):  # Try to find 3 valid random cells
-                    x = random.randrange(self.model.width)
-                    y = random.randrange(self.model.height)
-                    cell = (x, y)
-                    if cell in self.beliefs and isinstance(self.beliefs[cell], dict):
-                        random_cells.append(cell)
-
-                if random_cells:
-                    random_cell = random.choice(random_cells)
-                    belief_info = self.beliefs.get(random_cell, {'level': 0, 'confidence': 0.1})
-                    candidates = [{'cell': random_cell, 'score': -2, 'level': belief_info.get('level', 0),
-                                  'conf': belief_info.get('confidence', 0.1)}]
-                elif self.model.debug_mode:
-                    print(f"SEVERE: Agent {self.unique_id} couldn't find any valid exploration targets")
-
-        # Sort by score (highest score first) and select top candidates
-        if candidates:
-            candidates.sort(key=lambda x: x['score'], reverse=True)
-            self.exploration_targets = [c['cell'] for c in candidates[:num_targets]]
-        else:
-            # Final fallback if all else fails
-            if self.model.debug_mode:
-                print(f"Agent {self.unique_id}: No exploration candidates found at all, using position as target")
-            self.exploration_targets = [self.pos]  # Use current position as a last resort
-
     def apply_trust_decay(self):
         """Applies decay to all trust relationships toward neutral points.
         EXPLOITERS: Maintain friend/non-friend distinction - friends decay toward 0.6,
@@ -1968,26 +1868,6 @@ class HumanAgent(Agent):
         self.apply_confidence_decay()
         return reward
 
-    def smooth_friend_trust(self):
-
-        if self.friends:
-          # --- Trust Smoothing (Keep, maybe reduce weight) ---
-            friend_ids = [f for f in self.friends if f in self.trust] # Ensure friend exists
-            if not friend_ids: return
-
-            friend_values = [self.trust.get(f, 0) for f in self.friends]
-            avg_friend = sum(friend_values) / len(friend_values)
-            smoothing_factor = 0.1
-            for friend in self.friends:
-                self.trust[friend] = (1-smoothing_factor) * self.trust[friend] + smoothing_factor * avg_friend
-
-
-    def decay_trust(self, candidate):
-        decay_rate = 0.01 if candidate not in self.friends else 0.002
-        self.trust[candidate] = max(0, self.trust[candidate] - decay_rate)
-        if "ai" not in self.tokens_this_tick:
-            self.trust["ai"] = max(0, self.trust["ai"] - 0.005)
-
     def update_trust_for_accuracy(self):
         """Directly updates trust based on observed accuracy of previous information."""
         # Skip if we don't have both tracking measures
@@ -2048,7 +1928,8 @@ class AIAgent(Agent):
         self.sense_environment()
 
     def sense_environment(self):
-        height, width = self.model.disaster_grid.shape
+        # disaster_grid is allocated np.zeros((width, height)) — axis 0 is x/width
+        width, height = self.model.disaster_grid.shape
         all_cells = [(x, y) for x in range(width) for y in range(height)]
         cells = random.sample(all_cells, self.cells_to_sense)
         self.sensed = {}
@@ -2355,22 +2236,12 @@ class DisasterModel(Model):
         self.component_ai_trust_variance_data = []  # AI Trust Clustering
         self.info_diversity_data = []  # Information Diversity (Shannon Entropy)
 
-        # --- In-simulation tipping point tracking ---
-        # Tick at which each index first crosses its formation threshold (< -0.3)
-        # and recovery threshold (>= 0.0 after having been negative). None = not yet triggered.
-        self.tp_seci_exploit_formation = None   # exploiters' social bubble forms
-        self.tp_seci_explor_formation  = None   # explorers' social bubble forms
-        self.tp_aeci_exploit_formation = None   # exploiters enter AI echo chamber
-        self.tp_aeci_explor_formation  = None   # explorers enter AI echo chamber
-        self.tp_seci_exploit_recovery  = None   # exploiters' social bubble breaks
-        self.tp_seci_explor_recovery   = None   # explorers' social bubble breaks
-        self.tp_aeci_exploit_recovery  = None   # exploiters exit AI echo chamber
-        self.tp_aeci_explor_recovery   = None   # explorers exit AI echo chamber
-        self._seci_exploit_was_negative = False
-        self._seci_explor_was_negative  = False
-        self._aeci_exploit_was_negative = False
-        self._aeci_explor_was_negative  = False
-        self.tipping_point_threshold = -0.3     # index value below which echo chamber is "formed"
+        # NOTE: in-simulation tipping-point tracking (tp_* attributes) was removed.
+        # It used the old variance-based AECI sign convention (negative = echo chamber),
+        # which is inverted relative to the current AECI formula (positive = echo
+        # chamber), and its outputs were never consumed downstream. Transition timing
+        # is measured post-hoc in test_filter_bubbles.py (_first_sustained_break /
+        # _first_sustained_cross) instead.
 
         # Initialize disaster grid with Gaussian decay around an epicenter.
         self.disaster_grid = np.zeros((width, height), dtype=int)
@@ -3408,24 +3279,6 @@ class DisasterModel(Model):
 
             self.running_aeci_data.append((self.tick, self.running_aeci_exp, self.running_aeci_expl))
 
-            # --- In-simulation tipping point detection ---
-            # Record the FIRST tick each index crosses the formation threshold (<-0.3)
-            # and the first recovery tick (>= 0.0 after being negative).
-            _tp = self.tipping_point_threshold
-            for idx_val, formed_attr, was_neg_attr, recover_attr in [
-                (seci_exploit_mean, 'tp_seci_exploit_formation', '_seci_exploit_was_negative', 'tp_seci_exploit_recovery'),
-                (seci_explor_mean,  'tp_seci_explor_formation',  '_seci_explor_was_negative',  'tp_seci_explor_recovery'),
-                (avg_aeci_exp,      'tp_aeci_exploit_formation', '_aeci_exploit_was_negative', 'tp_aeci_exploit_recovery'),
-                (avg_aeci_expl,     'tp_aeci_explor_formation',  '_aeci_explor_was_negative',  'tp_aeci_explor_recovery'),
-            ]:
-                if idx_val < _tp:
-                    if getattr(self, formed_attr) is None:
-                        setattr(self, formed_attr, self.tick)  # echo chamber formed
-                    setattr(self, was_neg_attr, True)
-                elif getattr(self, was_neg_attr) and idx_val >= 0.0:
-                    if getattr(self, recover_attr) is None:
-                        setattr(self, recover_attr, self.tick)  # echo chamber broke
-
             # --- Information Diversity (Shannon Entropy) ---
             info_diversity_result = self.calculate_info_diversity()
             self.info_diversity_data.append(info_diversity_result)
@@ -4264,8 +4117,8 @@ def aggregate_simulation_results(num_runs, base_params):
         
         # Extract max AECI variance if available
         if isinstance(aeci_variance_data, np.ndarray) and aeci_variance_data.size > 0:
-            # Handle different array structures
-            if aeci_variance_data.ndim == 3 and aeci_variance_data.shape[2] > 1:
+            # Per-run data is 2D (ticks × [tick, value]) from np.column_stack
+            if aeci_variance_data.ndim == 2 and aeci_variance_data.shape[1] > 1:
                 # Extract values column
                 variance_values = aeci_variance_data[:, 1]  # Values column
                 if variance_values.size > 0:
@@ -4412,7 +4265,7 @@ def experiment_alignment_tipping_point(base_params, alignment_values=None, num_r
         if align > 0 and align-0.1 in results:
             prev_result = results[align-0.1]
 
-            # Extract AECI values (AI Call Ratio) for each agent type
+            # Extract AECI values (confidence-weighted error split; NOT a call ratio)
             curr_aeci_exploit = result.get("aeci", np.array([]))
             curr_aeci_explor = result.get("aeci", np.array([]))
             prev_aeci_exploit = prev_result.get("aeci", np.array([]))
@@ -6031,7 +5884,7 @@ def plot_echo_chamber_indices(results_dict, title_suffix=""):
 
     # --- Data Extraction ---
     seci = results_dict.get("seci")
-    aeci = results_dict.get("aeci")  # AI Call Ratio
+    aeci = results_dict.get("aeci")  # Confidence-weighted error split (positive = echo chamber)
     retain_seci = results_dict.get("retain_seci")
     retain_aeci = results_dict.get("retain_aeci")
     comp_seci = results_dict.get("component_seci")
