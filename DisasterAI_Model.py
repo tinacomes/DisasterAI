@@ -933,58 +933,76 @@ class HumanAgent(Agent):
             if item not in evaluated
         ]
 
-        # Triangulation: multi-source agreement/disagreement on same cell → Q-signal
+        # Triangulation: multi-source agreement/disagreement on same cell → trust signal
         self.triangulate_sources()
 
     def triangulate_sources(self):
         """
         Compare reports from multiple independent sources about the same cell
-        within a 5-tick window. Consensus is a learning signal without needing
-        ground truth — captures the second valid feedback mechanism alongside
-        action-outcome feedback.
+        within a 5-tick window. Consensus is a weak trust signal for explorers
+        when ground truth hasn't arrived yet via process_reward; each report
+        contributes to at most ONE triangulation event (one-shot), because
+        pending items persist for many ticks and re-scoring the same pair every
+        tick compounds into unbounded drift.
+
+        Mode Q-values are deliberately NOT updated here: consensus is highest
+        inside echo chambers, so rewarding the query mode for agreement would
+        structurally favour bubble sources and contaminate the very
+        echo-chamber metrics this model measures. Q-values learn only from
+        information-quality feedback (evaluate_pending_info /
+        evaluate_information_quality) and action-outcome feedback
+        (process_reward). Exploiters are excluded entirely — they already
+        receive a confirmation reward from the same pending items in
+        evaluate_pending_info.
         """
+        if self.agent_type != "exploratory":
+            return
+
         current_tick = self.model.tick
         recent_window = 5
 
-        # Group recent evaluations by cell
-        cell_reports = {}  # cell -> [(source_id, reported_level), ...]
+        if not hasattr(self, '_triangulated_items'):
+            self._triangulated_items = set()
+
+        # Group recent, not-yet-triangulated evaluations by cell
+        cell_reports = {}  # cell -> [(item, source_id, reported_level), ...]
         for item in self.pending_info_evaluations:
             tick_received, source_id, cell = item[0], item[1], item[2]
             reported_level = item[3]
-            if current_tick - tick_received <= recent_window:
-                if cell not in cell_reports:
-                    cell_reports[cell] = []
-                cell_reports[cell].append((source_id, reported_level))
+            if current_tick - tick_received > recent_window:
+                continue
+            if item in self._triangulated_items:
+                continue
+            if cell not in cell_reports:
+                cell_reports[cell] = []
+            cell_reports[cell].append((item, source_id, reported_level))
 
         for cell, reports in cell_reports.items():
             # Need at least 2 distinct sources
-            source_ids = [r[0] for r in reports]
+            source_ids = [r[1] for r in reports]
             if len(set(source_ids)) < 2:
                 continue
 
-            levels = [r[1] for r in reports]
+            levels = [r[2] for r in reports]
             max_disagreement = max(levels) - min(levels)
 
             if max_disagreement <= 1:
-                q_delta = 0.05    # Consensus → small Q-boost
-                trust_delta = 0.03  # Fix 2: weak trust boost; for explorers this is the
-                                    # primary path for remote-cell source validation when
-                                    # ground truth hasn't arrived yet via process_reward
+                trust_delta = 0.03   # Consensus → weak trust boost
             elif max_disagreement >= 3:
-                q_delta = -0.05   # Strong conflict → small Q-penalty
-                trust_delta = -0.03
+                trust_delta = -0.03  # Strong conflict → weak trust penalty
             else:
-                continue  # Ambiguous — no signal
+                continue  # Ambiguous — no signal; items stay eligible for later reports
 
-            for source_id, _ in reports:
-                mode = "ai" if source_id.startswith("A_") else "human"
-                if mode in self.q_table:
-                    self.q_table[mode] = max(-2.0, min(2.0, self.q_table[mode] + q_delta))
-                # Trust update: only applied for explorers (exploiters get trust updates
-                # from the network-consensus path in evaluate_pending_info instead)
-                if self.agent_type == "exploratory" and source_id in self.trust:
+            for item, source_id, _ in reports:
+                if source_id in self.trust:
                     old_t = self.trust[source_id]
                     self.trust[source_id] = max(0.0, min(1.0, old_t + trust_delta))
+                # One-shot: this report can never be triangulated again
+                self._triangulated_items.add(item)
+
+        # Prune the marker set so it doesn't outlive the pending list
+        if self._triangulated_items:
+            self._triangulated_items &= set(self.pending_info_evaluations)
 
     def report_beliefs(self, interest_point, query_radius):
         """Reports human agent's beliefs about cells within query_radius of the interest_point."""

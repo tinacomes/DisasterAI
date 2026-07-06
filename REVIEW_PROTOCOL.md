@@ -54,6 +54,13 @@ Priority order for remediation: **A1 → B1 → C1/C2 → B3 → B4 → everythi
 
 ### A1 (CRITICAL): `triangulate_sources` injects unbounded additive Q-drift that dominates learning
 
+> **STATUS: FIXED on this branch.** The mode-Q bump was removed; the trust nudge is now
+> one-shot (each report triangulates at most once) and explorer-only. Validation (same
+> seeds as below): all Q-values within [−0.36, 0.69]; toggling triangulation no longer
+> changes the Q(ai)/Q(human) ordering; exploiter Q(ai) still rises with α (0.16 → 0.37)
+> and explorer Q(ai) now *falls* at α = 1 (0.54 → 0.31) — the intended asymmetry, which
+> the drift had been masking. Paper-scale re-validation (Stage 4) still required.
+
 `DisasterAI_Model.py:939-987`. Each tick, every pair of pending reports on the same cell
 within a 5-tick window adds ±0.05 **additively** to the mode Q-value (`Q ← clip(Q + 0.05,
 −2, 2)`), with no contraction toward a reward target. Because pending items persist up to
@@ -344,6 +351,7 @@ person familiar with the code.
    *Acceptance:* with all sources truthful, mode Q-values remain within the reward range
    [−1, 1]; disabling triangulation no longer changes the Q(ai)/Q(human) *ordering* at
    α = 0.5 by more than noise.
+   **✅ DONE on this branch — both acceptance criteria verified (see A1 status note).**
 4. **Fix B3** (`==` → `>=` at `:526`).
    *Acceptance:* add a unit test that appends a 7-tuple pending item and asserts the
    confirmation score is computed against the stored prior, not the current belief.
