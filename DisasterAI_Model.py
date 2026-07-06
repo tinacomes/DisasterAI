@@ -784,41 +784,59 @@ class HumanAgent(Agent):
                     belief_conf = net_conf
                     used_network_consensus = True
 
-            # For cells outside sensing range, we can't verify accuracy against ground truth.
+            # For cells outside sensing range, agents cannot see ground truth directly.
             # CRITICAL: Explorers should NOT penalize sources for disagreeing with their
             # uncertain beliefs about remote cells. This would cause them to distrust
             # truthful sources that report correct info that differs from wrong beliefs.
             #
             # EXPLOITERS: Use network/own-belief confirmation (echo chamber by design)
-            # EXPLORERS: For remote cells, defer until ground truth arrives via process_reward
-            #            (Fix 1) or triangulate_sources convergence (Fix 2)
+            # EXPLORERS: For accepted remote reports, wait for an external verification
+            #            ("situation report") — see block below. Rejected remote reports
+            #            are scored against the stored prior (belief unchanged).
+
+            # --- Situation-report verification (explorers, accepted remote reports) ---
+            # Accuracy-seeking explorers actively verify accepted remote reports against
+            # external information (official assessments, media, situation reports).
+            # Each evaluation attempt, verification arrives with probability
+            # model.verification_probability; when it arrives it carries the same noise
+            # model as direct human sensing (±1 with prob 0.2). Until it arrives the item
+            # stays pending (retried next tick); if it never arrives before the 30-tick
+            # expiry the item lapses unevaluated. Explicitly NO fallback to scoring
+            # against the agent's own prior — that would silently turn the explorers'
+            # accuracy channel into a confirmation channel.
+            # Replaces the previous instant/perfect ground-truth reference: verification
+            # is now delayed (geometric arrival on top of the 3-tick minimum), noisy, and
+            # evaluated against the CURRENT disaster state, so reports about cells that
+            # have since evolved are naturally penalised less consistently.
+            # Truthful AI (α≈0): reported≈truth → small error → positive reward →
+            # explorers learn AI is useful. Confirming AI (α≈1): reported≈prior (often
+            # wrong) → large error → negative reward. This preserves the Q-learning
+            # asymmetry, but through a defensible information channel.
+            verified_reference = False
+            if is_remote_cell and self.agent_type == "exploratory" and was_accepted:
+                if not (0 <= cell[0] < self.model.width and 0 <= cell[1] < self.model.height):
+                    continue  # out-of-bounds cell: skip safely
+                if random.random() < self.model.verification_probability:
+                    verified_level = int(self.model.disaster_grid[cell[0], cell[1]])
+                    if random.random() < 0.2:  # same noise model as human sensing
+                        verified_level = max(0, min(5, verified_level + random.choice([-1, 1])))
+                    reference_level = verified_level
+                    belief_conf = 1.0  # external report: full-strength reference
+                    verified_reference = True
+                else:
+                    continue  # not yet verified — stays pending, retried next tick
 
             if belief_conf < 0.15:
                 continue  # Skip only if we have almost no information
 
             # Scale learning rate by confidence - uncertain references lead to weaker updates
+            # (verified situation reports have belief_conf=1.0 → full strength)
             confidence_scaling = min(1.0, belief_conf / 0.5)  # Full strength at 0.5+ confidence
 
             # --- Accuracy score: reported vs current reference ---
-            # For EXPLORERS querying REMOTE cells that were ACCEPTED, reference_level
-            # (current belief) is contaminated — the belief already moved toward the
-            # report, creating a circular evaluation. Using stored_prior here would
-            # give a "confirmation" score (how much did report differ from prior?),
-            # not an accuracy score.
-            # FIX BUG 1: Override reference_level with model ground truth so explorers
-            # receive genuine accuracy feedback for accepted remote AI queries.
-            # Truthful AI (α≈0): reported≈truth → error≈0 → Q+1.0 → explorers learn AI is good.
-            # Confirming AI (α≈1): reported≈prior (often wrong) → error large → Q−0.6 →
-            # explorers learn confirming AI is unreliable.
-            # This creates the Q-learning asymmetry that drives the sweet-spot effect.
-            if is_remote_cell and self.agent_type == "exploratory" and was_accepted:
-                if 0 <= cell[0] < self.model.width and 0 <= cell[1] < self.model.height:
-                    reference_level = int(self.model.disaster_grid[cell[0], cell[1]])
-                else:
-                    continue  # out-of-bounds cell: skip safely
-                # Fall through — Q/trust update proceeds with ground-truth reference
-            # For rejected remote queries (was_accepted=False) or local cells:
-            # use reference_level (which is stored_prior for rejected items, as belief unchanged)
+            # Verified items use the (noisy) situation-report level; rejected remote
+            # queries (was_accepted=False) and local cells use reference_level
+            # (the stored prior for rejected items, as the belief was not updated).
             level_error = abs(reported_level - reference_level)
             if level_error == 0:
                 accuracy_score = 1.0
@@ -925,7 +943,7 @@ class HumanAgent(Agent):
             evaluated.append(item)
 
             if self.model.debug_mode and hasattr(self, 'id_num') and (self.id_num < 2 or (50 <= self.id_num < 52)):
-                print(f"[DEBUG] Agent {self.unique_id} ({self.agent_type}) PENDING INFO EVAL: source={source_id}, mode={mode}, error={level_error}, acc_rew={accuracy_reward:.3f}, trust={new_trust:.2f}, net_consensus={used_network_consensus}")
+                print(f"[DEBUG] Agent {self.unique_id} ({self.agent_type}) PENDING INFO EVAL: source={source_id}, mode={mode}, error={level_error}, acc_rew={accuracy_reward:.3f}, trust={new_trust:.2f}, net_consensus={used_network_consensus}, verified={verified_reference}")
 
         # Remove evaluated/expired items
         self.pending_info_evaluations = [
@@ -2268,7 +2286,9 @@ class DisasterModel(Model):
                  delta_exploit=3.5,      # Gap-scalar: acceptance sensitivity for exploitative agents
                  d_explor=4.0,           # Gap-scalar: acceptance threshold for exploratory agents
                  delta_explor=1.2,       # Gap-scalar: acceptance sensitivity for exploratory agents
-                 epicenter=None          # Optional fixed epicenter [x, y]; random if None
+                 epicenter=None,         # Optional fixed epicenter [x, y]; random if None
+                 verification_probability=0.3  # Per-attempt arrival prob of external "situation report"
+                                               # verification for explorers' accepted remote reports
                  ):
         super(DisasterModel, self).__init__()
         self.share_exploitative = share_exploitative
@@ -2291,6 +2311,7 @@ class DisasterModel(Model):
         self.epsilon = epsilon
         self.ticks = ticks
         self.low_trust_amplification_factor = low_trust_amplification_factor
+        self.verification_probability = verification_probability
 
         # Learning rates and biases
         self.exploit_trust_lr = exploit_trust_lr

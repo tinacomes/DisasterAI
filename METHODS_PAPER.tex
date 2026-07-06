@@ -185,12 +185,24 @@ This follows empirical evidence of homophily in disaster communication networks
 % ============================================================
 \subsection{Trust Evolution}
 
-Trust dynamics emerge from two parallel processes: direct observation of
-information accuracy and reinforcement learning based on relief outcomes.
-The trust update mechanism combines immediate feedback from ground-truth comparisons
-with delayed rewards from the effectiveness of relief allocation.
+Trust dynamics emerge from two parallel processes: evaluation of received
+information against a type-specific reference and reinforcement learning based on
+relief outcomes.
+Exploitative agents evaluate reports for \emph{confirmation} against their own prior
+or their trusted network's consensus belief; exploratory agents evaluate reports for
+\emph{accuracy} against external verification.
+Because agents sense only their immediate location, exploratory agents verify
+accepted remote reports through an exogenous situation-report channel (official
+assessments, media coverage): after a minimum 3-tick lag, verification arrives with
+per-tick probability $p_{\mathrm{verify}}=0.3$ (geometric arrival), carries the same
+observation noise as direct sensing ($\pm 1$ level with probability $0.2$), and is
+compared against the \emph{current} disaster state.
+Reports never verified before their 30-tick expiry yield no learning signal;
+explorers do not fall back to scoring sources against their own priors.
 This dual-track approach captures both the cognitive updating of source reliability
-assessments and the pragmatic evaluation of information utility for decision support.
+assessments and the pragmatic evaluation of information utility for decision support,
+and reflects the delayed, imperfect verification characteristic of post-disaster
+information environments.
 
 The model uses asymmetric trust learning rates across agent types:
 exploitative agents update trust slowly ($\mathrm{lr}=0.015$), consistent with

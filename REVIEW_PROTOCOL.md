@@ -90,6 +90,19 @@ nudge. Re-run the α sweep afterwards — headline results will likely change.
 
 ### A2 (HIGH, disclose or redesign): explorers score sources against a ground-truth oracle
 
+> **STATUS: REDESIGNED on this branch.** The instant/perfect ground-truth reference was
+> replaced with an exogenous "situation report" verification channel: for explorers'
+> accepted remote reports, verification arrives with per-tick probability
+> `verification_probability` (new model parameter, default 0.3) after the 3-tick minimum
+> lag, carries the same noise model as direct sensing (±1 w.p. 0.2), and is evaluated
+> against the *current* disaster state. Unverified items expire at 30 ticks with no
+> learning signal — explicitly no fallback to prior-comparison. Documented in
+> METHODS_PAPER.md/.tex. Validation (3 seeds × 100 ticks): outcomes comparable to the
+> old oracle at the default (explorer Q(ai) 0.40/0.43 vs 0.38/0.40 at α=0/1; MAE and
+> SECI in the same range); the p_verify sensitivity hook is live (p=0/0.3/1.0 →
+> explorer Q(ai) −0.05/0.51/0.39 at α=1). Run the p_verify ∈ {0.15, 0.3, 0.6}
+> sensitivity sweep at paper scale for the supplement (Stage 4).
+
 `DisasterAI_Model.py:814-816`: for accepted remote reports, explorers' accuracy score is
 computed directly against `model.disaster_grid` — the true state — 3 ticks after receipt.
 The surrounding comments justify a 30-tick window so explorers can "move and sense the
@@ -378,6 +391,9 @@ person familiar with the code.
    METHODS, or replace with noisy verification.
    *Acceptance:* a sentence in METHODS, or a re-run showing the sweet spot survives noisy
    verification.
+   **✅ DONE on this branch — replaced with the situation-report channel and documented
+   in METHODS (see A2 status note); paper-scale sweet-spot confirmation still pending
+   in Stage 4.**
 6. **Fix B1** (disaster dynamics): implement drift-toward-baseline + shocks using
    `shock_probability`/`shock_magnitude`, or rewrite METHODS line 7 and delete the shock
    sweep from Experiment C.
