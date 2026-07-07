@@ -1971,6 +1971,13 @@ if __name__ == '__main__':
              'experiment: each alpha runs as a separate job with the same epicenter.',
     )
     parser.add_argument(
+        '--salience-weight', type=float, default=None, metavar='S',
+        help='Severity-weighted (salience) verification for explorers, S in [0,1]. '
+             '0 = uniform per-cell rewards (default baseline); 1 = full salience — '
+             'errors about high-severity cells carry up to 6x the weight of '
+             'confirmed empty cells. C12 counterfactual: compare runs at 0 vs 1.',
+    )
+    parser.add_argument(
         '--collect-spatial-and-plot', action='store_true',
         help='Load per-alpha spatial JSONs (spatial_alpha_*.json) from --results-dir, '
              'compute metrics, and generate spatial_coverage.png + periphery_gap.png. '
@@ -1983,6 +1990,8 @@ if __name__ == '__main__':
         base_params['ticks'] = args.ticks
     if args.epicenter is not None:
         base_params['epicenter'] = args.epicenter   # fixed epicenter for spatial experiment
+    if args.salience_weight is not None:
+        base_params['salience_weight'] = args.salience_weight
     n_runs_primary = args.n_runs if args.n_runs is not None else N_RUNS
     # Factor/gap sweeps use at most half the primary ticks (they measure relative
     # differences, not absolute steady-state values, so shorter runs suffice)

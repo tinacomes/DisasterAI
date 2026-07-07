@@ -384,6 +384,17 @@ in 80 ticks) — report these per α in the paper. Two residual issues:
 
 ### C12 (mechanism diagnosis): why explorers keep relying on AI even when it is wrong
 
+> **STATUS: counterfactual IMPLEMENTED on this branch.** New `salience_weight`
+> model parameter (default 0.0 = uniform baseline; CLI: `--salience-weight` in
+> test_filter_bubbles.py, `--salience_weight` in simulate.py) scales the verified-
+> evaluation learning rate by (1−s) + s·(max(truth, reported)+1)/6. Validation
+> (3 seeds × 100 ticks): the explorer α-gradient FLIPS SIGN — uniform evaluation
+> (s=0): Q(ai) 0.34 → 0.42 as α goes 0 → 1 (confirming AI mildly preferred);
+> full salience (s=1): Q(ai) 0.33 → 0.27 and AI-trust 0.83 → 0.77 (confirming AI
+> punished). Documented in METHODS_PAPER.md/.tex and SUPPLEMENTARY.md. For the
+> paper: run the α sweep at s ∈ {0, 1} and present trust-persistence-vs-collapse
+> as the C12 figure.
+
 Observed in the paper-scale run (28817810131): explorer AI query share is flat at
 ~0.55–0.60 across ALL α (always above 50 %), explorer AI-trust leads friend-trust from
 t = 0 in 100 % of runs, yet explorer SECI jumps to ≈ 0.29 at α ≥ 0.9.

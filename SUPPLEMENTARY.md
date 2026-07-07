@@ -24,6 +24,8 @@
 | Trust learning rate (exploratory) | — | 0.030 | Faster but still sub-linear trust revision |
 | Rumour probability | — | 1.00 | All social information propagated (worst-case echo scenario) |
 | Relief outcome delay | — | 15–25 ticks | Random; models logistical pipeline in humanitarian response |
+| Verification probability | p_verify | 0.30 | Per-tick arrival of situation-report verification (explorers) |
+| Salience weight | s | 0.00 | Uniform verification rewards (baseline); s = 1 for the severity-weighted counterfactual |
 | Steady-state window | — | 75 ticks | Last 75 of 200 ticks (15 metric samples × 5-tick cadence) |
 
 ---

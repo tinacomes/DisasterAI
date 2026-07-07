@@ -199,6 +199,15 @@ observation noise as direct sensing ($\pm 1$ level with probability $0.2$), and 
 compared against the \emph{current} disaster state.
 Reports never verified before their 30-tick expiry yield no learning signal;
 explorers do not fall back to scoring sources against their own priors.
+Because most queried cells are truly unaffected, per-cell verification is
+base-rate dominated: a fully confirming AI still passes verification on
+$\approx 93\%$ of cells by echoing mostly-correct ``no impact'' priors.
+A salience-weighting parameter $s\in[0,1]$ therefore interpolates the
+verification learning rate between uniform per-cell evaluation ($s=0$, default)
+and severity-weighted evaluation ($s=1$), with weight
+$(\max(t, r)+1)/6$ so that an error about a disaster cell carries up to six
+times the weight of a confirmed empty cell --- operationalising
+negativity/salience bias in source evaluation.
 This dual-track approach captures both the cognitive updating of source reliability
 assessments and the pragmatic evaluation of information utility for decision support,
 and reflects the delayed, imperfect verification characteristic of post-disaster

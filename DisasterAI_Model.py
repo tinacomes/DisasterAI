@@ -832,6 +832,24 @@ class HumanAgent(Agent):
             # (verified situation reports have belief_conf=1.0 → full strength)
             confidence_scaling = min(1.0, belief_conf / 0.5)  # Full strength at 0.5+ confidence
 
+            # --- Salience weighting (C12 counterfactual, model.salience_weight) ---
+            # The uniform per-cell verification reward is base-rate dominated: ~90% of
+            # explorer-queried cells are truly empty, so a fully confirming AI passes
+            # verification on ~93% of cells and keeps explorer trust regardless of α,
+            # failing only on the rare high-severity cells (finding C12).
+            # With salience_weight s ∈ [0,1], the learning-rate scaling of verified
+            # evaluations is multiplied by (1−s) + s·(max(truth, reported)+1)/6:
+            #   s=0 (default): uniform evaluation — current baseline behaviour.
+            #   s=1: full salience — an error about a disaster cell (miss OR false
+            #        alarm) carries up to 6× the weight of a confirmed empty cell,
+            #        modelling negativity/salience bias ("being wrong about a disaster
+            #        is more memorable than being right about nothing").
+            if verified_reference:
+                s = getattr(self.model, 'salience_weight', 0.0)
+                if s > 0.0:
+                    salience = (max(reference_level, reported_level) + 1) / 6.0
+                    confidence_scaling *= (1.0 - s) + s * salience
+
             # --- Accuracy score: reported vs current reference ---
             # Verified items use the (noisy) situation-report level; rejected remote
             # queries (was_accepted=False) and local cells use reference_level
@@ -2168,8 +2186,10 @@ class DisasterModel(Model):
                  d_explor=4.0,           # Gap-scalar: acceptance threshold for exploratory agents
                  delta_explor=1.2,       # Gap-scalar: acceptance sensitivity for exploratory agents
                  epicenter=None,         # Optional fixed epicenter [x, y]; random if None
-                 verification_probability=0.3  # Per-attempt arrival prob of external "situation report"
-                                               # verification for explorers' accepted remote reports
+                 verification_probability=0.3,  # Per-attempt arrival prob of external "situation report"
+                                                # verification for explorers' accepted remote reports
+                 salience_weight=0.0     # 0 = uniform verification rewards (baseline);
+                                         # 1 = full severity-weighted (salience) evaluation — see C12
                  ):
         super(DisasterModel, self).__init__()
         self.share_exploitative = share_exploitative
@@ -2193,6 +2213,7 @@ class DisasterModel(Model):
         self.ticks = ticks
         self.low_trust_amplification_factor = low_trust_amplification_factor
         self.verification_probability = verification_probability
+        self.salience_weight = salience_weight
 
         # Learning rates and biases
         self.exploit_trust_lr = exploit_trust_lr

@@ -156,6 +156,9 @@ def main():
                         help='Disaster evolution speed: 0=static 1=slow 2=medium 3=rapid')
     parser.add_argument('--share_exploitative', type=float, default=0.5,
                         help='Fraction of agents that are exploitative')
+    parser.add_argument('--salience_weight',    type=float, default=0.0,
+                        help='Severity-weighted (salience) verification, 0=uniform '
+                             '(baseline) to 1=full salience (C12 counterfactual)')
     parser.add_argument('--seed_base',          type=int,   default=0,
                         help='Replicate i is seeded with seed_base + i, so runs are '
                              'reproducible and conditions share common random numbers')
@@ -166,6 +169,7 @@ def main():
     params['rumor_probability']   = args.rumor_probability
     params['disaster_dynamics']   = args.disaster_dynamics
     params['share_exploitative']  = args.share_exploitative
+    params['salience_weight']     = args.salience_weight
 
     print(f'Condition: α={args.alpha}, rumor={args.rumor_probability}, '
           f'disaster={args.disaster_dynamics}, exploit={args.share_exploitative}')
