@@ -339,6 +339,49 @@ moves materially, the composite is not robust.
 token that same tick — with 100 agents × up to 5 tokens each per tick, this is generous;
 fine, but say so in the paper.
 
+### C11 (construct validity — added post-Stage-2 sanity check)
+
+Empirical check (9 toy runs: α ∈ {0, 0.5, 1} × 3 seeds, 80 ticks, 40 agents, all
+Stage-1–2 fixes active), correlations of per-run steady-state values:
+
+| pair | r |
+|---|---|
+| SECI vs AECI-Var | +0.37 |
+| SECI vs AECI-Err | −0.57 |
+| **AECI-Var vs AECI-Err** | **−0.72** |
+
+**The indices do not measure one phenomenon.** SECI measures *social fragmentation*
+(within-community homogeneity ⟺ between-community disagreement). AECI-Var measures
+*population-level homogenization among AI users* (monoculture risk). AECI-Err measures
+*epistemic harm* (confidently-wrong beliefs among AI-influenced agents). AECI-Acc is an
+exposure measure. The two AI indices are strongly ANTI-correlated: where AI reliance
+homogenizes beliefs (AECI-Var < 0), AI-heavy agents tend to be relatively MORE accurate
+(AECI-Err > 0). Treating them as interchangeable "AECI" readings — or summing either
+with SECI without stating which construct is meant — invites misinterpretation. The
+composite |SECI| + |AECI-Var| is defensible only when framed as the sum of two distinct
+harms (fragmentation + monoculture), not as "total echo chamber".
+
+**Truth-convergence blind spot.** Variance-based indices (SECI, AECI-Var) register
+convergence on the TRUE state as an echo chamber: a perfectly truthful AI that teaches
+the whole population the truth maximizes |AECI-Var|. The echo-chamber literature requires
+*insulation from correction*, not mere homogeneity. AECI-Err is the construct that
+operationalizes this (homogeneous AND wrong); headline echo-chamber claims should be
+conditioned on error (the total_score composite partially does this via MAE).
+
+**"AI-reliant" definition audit.** Current: median split by `cum_accepted_ai`
+(cumulative D/δ-accepted AI belief updates). In the toy runs the label is meaningful in
+absolute terms (top half ≈ 57–68 % of queries to AI; median ≈ 550–700 accepted updates
+in 80 ticks) — report these per α in the paper. Two residual issues:
+
+1. **Type-composition confound in AECI-Var**: the split pools both agent types, and the
+   top half's exploiter share swings from ~25 % (α = 0) to 45–75 % (α = 1). Across the α
+   sweep, AECI-Var therefore partly measures *which type self-selects into AI use*, not
+   what AI does to beliefs. Recommended fix: split within type (as AECI-Err does) and
+   average — requires a re-run to take effect.
+2. **Endogeneity**: acceptance counts are outcomes of the trust/Q dynamics, so
+   "AI-reliant" is self-selected. Fine for descriptive indices; causal phrasing
+   ("AI causes homogenization") should be avoided or hedged.
+
 ### C7–C10 (paper/code rationale gaps to document)
 
 - **C7.** METHODS line 13 says only exploratory agents get fast information-quality
