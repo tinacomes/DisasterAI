@@ -172,6 +172,10 @@ before trusting the hypothesis-level conclusions.
 parameters), or rewrite the paper's environment description and drop the shock sweep.
 
 ### B2 (HIGH): tipping-point detection uses an inverted sign convention for AECI
+> **STATUS: FIXED on this branch.** The `tp_*` tracking block (init + detection) was
+> deleted: its sign convention was inverted for the current AECI formula and its outputs
+> were never consumed. Transition timing is measured post-hoc in test_filter_bubbles.py
+> (`_first_sustained_break` / `_first_sustained_cross`) instead.
 
 `DisasterAI_Model.py:3355-3371` marks "AI echo chamber formation" when `avg_aeci < −0.3`.
 But the current AECI formula (`:3245-3334`) outputs **positive** values for echo chambers
@@ -200,6 +204,13 @@ added to fix (its sibling `evaluate_pending_info` correctly uses `len(item) >= 6
 an item for the agent's own cell is evaluated during sensing.
 
 ### B4 (HIGH): x/y swapped in near/far spatial-coverage metrics
+> **STATUS: FIXED on this branch.** The mgrid unpacking now matches the [x, y] array
+> layout. Verified with the acceptance test: for epicenter (25, 5) on a 30×30 grid the
+> near mask now centres on the true epicenter (centroid distance 3.4 cells, vs 24.9 to
+> the diagonal reflection); the old code centred it on the reflection. NOTE: spatial
+> near/far scalars are computed at simulation time, so any sweep JSONs produced before
+> this fix carry the buggy values — regenerate spatial-coverage/periphery figures from
+> a post-fix run.
 
 `test_filter_bubbles.py:310-317`: the arrays are indexed `[x, y]` (tokens fill
 `tok[pos[0], pos[1]]`, disaster grid is `[x, y]`), but the distance field is built as
@@ -213,6 +224,8 @@ periphery analyses in the same function disagree. Fix the mgrid ordering (swap `
 `_Yg` or index consistently) and regenerate all spatial-coverage figures.
 
 ### B5 (MEDIUM): `max_aeci_variance` is never populated
+> **STATUS: FIXED on this branch** (`ndim == 3` → `ndim == 2 and shape[1] > 1`).
+> Verified: a 2-run aggregation now returns a populated `max_aeci_variance` list.
 
 `DisasterAI_Model.py:4210-4224`: the guard is `aeci_variance_data.ndim == 3 and
 shape[2] > 1`, but each run's array is 2-D `(ticks, 2)` (built by `np.column_stack` at
@@ -222,6 +235,10 @@ shape", `max_aeci_variance_per_run` stays empty, and
 shape[1] > 1`.
 
 ### B6 (LOW, latent): non-square grids would break silently
+> **STATUS: FIXED on this branch** in the two model locations (`initialize_beliefs`,
+> `AIAgent.sense_environment`); the test_filter_bubbles `_H/_W` instance was fixed as
+> part of B4. Verified: a 25×20 grid run initialises all 500 cell beliefs and completes.
+> Plot-only helpers were not audited for non-square grids.
 
 `disaster_grid = np.zeros((width, height))`, but two places unpack
 `height, width = disaster_grid.shape` (swapped): `HumanAgent.initialize_beliefs`
@@ -230,6 +247,10 @@ shape[1] > 1`.
 fix the unpacking or assert squareness in `DisasterModel.__init__`.
 
 ### B7 (MEDIUM): `simulate.py` (the CI runner) is unseeded
+> **STATUS: FIXED on this branch.** `simulate.py` now seeds each replicate with
+> `--seed_base + i` (default 0), giving reproducible runs and common random numbers
+> across conditions. Verified: two runs with identical seeds produce byte-identical
+> output.
 
 `simulate.run_one`/`main` never set `random.seed`/`np.random.seed` — unlike
 `test_filter_bubbles.run_replicated` (seeds each replicate with its index, `:517-524`)
@@ -317,6 +338,98 @@ moves materially, the composite is not robust.
 `>= 3`. Also note the definition counts a cell as unmet **per tick** unless it receives a
 token that same tick — with 100 agents × up to 5 tokens each per tick, this is generous;
 fine, but say so in the paper.
+
+### C11 (construct validity — added post-Stage-2 sanity check)
+
+Empirical check (9 toy runs: α ∈ {0, 0.5, 1} × 3 seeds, 80 ticks, 40 agents, all
+Stage-1–2 fixes active), correlations of per-run steady-state values:
+
+| pair | r |
+|---|---|
+| SECI vs AECI-Var | +0.37 |
+| SECI vs AECI-Err | −0.57 |
+| **AECI-Var vs AECI-Err** | **−0.72** |
+
+**The indices do not measure one phenomenon.** SECI measures *social fragmentation*
+(within-community homogeneity ⟺ between-community disagreement). AECI-Var measures
+*population-level homogenization among AI users* (monoculture risk). AECI-Err measures
+*epistemic harm* (confidently-wrong beliefs among AI-influenced agents). AECI-Acc is an
+exposure measure. The two AI indices are strongly ANTI-correlated: where AI reliance
+homogenizes beliefs (AECI-Var < 0), AI-heavy agents tend to be relatively MORE accurate
+(AECI-Err > 0). Treating them as interchangeable "AECI" readings — or summing either
+with SECI without stating which construct is meant — invites misinterpretation. The
+composite |SECI| + |AECI-Var| is defensible only when framed as the sum of two distinct
+harms (fragmentation + monoculture), not as "total echo chamber".
+
+**Truth-convergence blind spot.** Variance-based indices (SECI, AECI-Var) register
+convergence on the TRUE state as an echo chamber: a perfectly truthful AI that teaches
+the whole population the truth maximizes |AECI-Var|. The echo-chamber literature requires
+*insulation from correction*, not mere homogeneity. AECI-Err is the construct that
+operationalizes this (homogeneous AND wrong); headline echo-chamber claims should be
+conditioned on error (the total_score composite partially does this via MAE).
+
+**"AI-reliant" definition audit.** Current: median split by `cum_accepted_ai`
+(cumulative D/δ-accepted AI belief updates). In the toy runs the label is meaningful in
+absolute terms (top half ≈ 57–68 % of queries to AI; median ≈ 550–700 accepted updates
+in 80 ticks) — report these per α in the paper. Two residual issues:
+
+1. **Type-composition confound in AECI-Var**: the split pools both agent types, and the
+   top half's exploiter share swings from ~25 % (α = 0) to 45–75 % (α = 1). Across the α
+   sweep, AECI-Var therefore partly measures *which type self-selects into AI use*, not
+   what AI does to beliefs. Recommended fix: split within type (as AECI-Err does) and
+   average — requires a re-run to take effect.
+2. **Endogeneity**: acceptance counts are outcomes of the trust/Q dynamics, so
+   "AI-reliant" is self-selected. Fine for descriptive indices; causal phrasing
+   ("AI causes homogenization") should be avoided or hedged.
+
+### C12 (mechanism diagnosis): why explorers keep relying on AI even when it is wrong
+
+> **STATUS: counterfactual IMPLEMENTED on this branch.** New `salience_weight`
+> model parameter (default 0.0 = uniform baseline; CLI: `--salience-weight` in
+> test_filter_bubbles.py, `--salience_weight` in simulate.py) scales the verified-
+> evaluation learning rate by (1−s) + s·(max(truth, reported)+1)/6. Validation
+> (3 seeds × 100 ticks): the explorer α-gradient FLIPS SIGN — uniform evaluation
+> (s=0): Q(ai) 0.34 → 0.42 as α goes 0 → 1 (confirming AI mildly preferred);
+> full salience (s=1): Q(ai) 0.33 → 0.27 and AI-trust 0.83 → 0.77 (confirming AI
+> punished). Documented in METHODS_PAPER.md/.tex and SUPPLEMENTARY.md. For the
+> paper: run the α sweep at s ∈ {0, 1} and present trust-persistence-vs-collapse
+> as the C12 figure.
+
+Observed in the paper-scale run (28817810131): explorer AI query share is flat at
+~0.55–0.60 across ALL α (always above 50 %), explorer AI-trust leads friend-trust from
+t = 0 in 100 % of runs, yet explorer SECI jumps to ≈ 0.29 at α ≥ 0.9.
+
+**Diagnosis (instrumented probe, 80 ticks, 40 agents, α ∈ {0, 1}): the verification
+reward is base-rate dominated.** Logging every AI report delivered to explorer queries:
+
+| | α = 0 (truthful) | α = 1 (confirming) |
+|---|---|---|
+| share of reported cells with true level 0 | 89 % | 91 % |
+| exact-correct on those L0 cells | 97 % | 99 % |
+| within ±1 on true L3+ cells | 38 % | **2 %** |
+| **overall within ±1 (positive-reward zone)** | **96 %** | **93 %** |
+
+Explorers query high-uncertainty areas, but ~90 % of those cells are truly empty, and a
+confirming AI echoes the explorer's (mostly correct) "nothing there" prior — so it
+passes situation-report verification on ~93 % of cells even at α = 1. Its failures
+concentrate entirely on the rare high-severity cells (within ±1 accuracy collapses from
+38 % → 2 % on L3+), but those few negative rewards are swamped by the empty-cell
+positives. The Q-learning works exactly as designed; the reward signal itself cannot
+distinguish a truthful AI from a confirming one because **accuracy per cell is not
+weighted by importance**.
+
+This is arguably the paper's most interesting mechanism finding: *a confirming AI
+retains user trust because it is right about the unimportant majority; its errors
+concentrate precisely on the high-severity cells that drive response performance* —
+which is why explorer reliance stays flat while unmet needs explode at α ≥ 0.9.
+
+**Options:** (a) keep as-is and make it a headline finding (defensible; mirrors
+real-world AI assistants that stay trusted by being right on easy queries); (b) add
+severity-weighted (salience) verification — scale the accuracy reward by
+max(truth, reported)/5 so being wrong about a disaster is more memorable than being
+right about nothing (also behaviorally defensible via negativity/salience bias). Option
+(b) would likely restore explorer α-sensitivity and is worth a parameterized variant;
+it changes results and needs a re-run.
 
 ### C7–C10 (paper/code rationale gaps to document)
 
@@ -408,25 +521,64 @@ person familiar with the code.
 7. **Resolve C1**: one name per AECI construct; one sign convention (recommend negative =
    echo chamber for all three); relabel every plot; state in METHODS which construct is in
    the Goldilocks composite.
+   **✅ DONE on this branch.** Names: AECI-Acc (acceptance share, `retain_aeci`),
+   AECI-Err (confidence-weighted error split, `aeci_data`, sign FLIPPED so negative =
+   echo chamber), AECI-Var (variance ratio, composite component). All plot labels
+   updated across DisasterAI_Model.py, test_filter_bubbles.py, plot_results.py.
+   JSONs now carry a `conventions.aeci_err_sign` marker; files written before the
+   flip are auto-converted on load, so run 28808662941's artifacts stay usable.
+   Bonus fix: `plot_aeci_evolution` plotted AECI-Err under query-ratio labels with
+   ylim(0,1) clipping all negative values — it now plots the actual
+   `ai_query_ratio_*` series.
 8. **Resolve C2**: rewrite the SECI formula block in METHODS to match the code
    (component-based, L1+ filter, asymmetric normalization).
+   **✅ DONE on this branch** — METHODS_PAPER.md, SUPPLEMENTARY.md, and
+   SUPPLEMENTARY.tex now carry the code-matching piecewise formula
+   (METHODS_PAPER.tex already had it).
 9. **Resolve C5**: single classification basis for "AI-reliant" (recommend
    `cum_accepted_ai`, which is what the init comment promises); re-run and report the α*
    sensitivity check (composite with/without AECI-Var, and with retain_aeci substituted).
+   **✅ DONE on this branch.** Both AECI-Err and AECI-Var now median-split by
+   `cum_accepted_ai` (AECI-Var previously used the per-period `accepted_ai >= 3` rule,
+   AECI-Err used `accum_calls_ai`). `alpha_star_sensitivity()` reports α* under six
+   composite variants ({SECI+AECI-Var, SECI only, SECI+AECI-Err} × {±MAE}), printed in
+   the collect summary and plotted as alpha_star_sensitivity.png. NOTE: the
+   classification change shifts AECI-Var/AECI-Err values — the paper-scale sweep must
+   be re-run (or replotted via the Replot workflow for α*-sensitivity only, since
+   |AECI| composites are sign-invariant but NOT classification-invariant: full re-run
+   required for final numbers).
 10. **Resolve C3/C4/C6**: pick one MAE and one precision definition for the paper; fix the
     L3/L4 doc string.
     *Acceptance for stage:* a table in SUPPLEMENTARY listing every reported metric, its
     exact formula, its code location, and its sign convention — with no duplicates.
+    **✅ DONE on this branch.** Reported MAE = disaster-cell (L1+) definition; reported
+    precision = placement-time definition (delayed assessment feeds rewards only);
+    unmet needs documented as L3+ everywhere (docstrings fixed). SUPPLEMENTARY.md
+    S5.0 now contains the full metrics reference table (stage acceptance criterion).
 
 ### Stage 3 — Secondary bug fixes (½ day)
 11. Fix B4 (spatial x/y swap) and regenerate all spatial-coverage/periphery figures.
     *Acceptance:* unit test — place epicenter at (25, 5) on a 30×30 grid, assert the
-    near-mask centroid is within 2 cells of the epicenter.
+    near-mask centres on the epicenter (edge clipping shifts the centroid inward, so
+    test against the diagonal reflection, not a 2-cell radius).
+    **✅ DONE on this branch (see B4 status note); figure regeneration needs a
+    post-fix sweep run.**
 12. Fix B2 (tipping sign) or delete the `tp_*` block.
+    **✅ DONE on this branch — block deleted (see B2 status note).**
 13. Fix B5 (`ndim == 2`), B6 (shape unpacking or squareness assert), B7 (seed
     `simulate.py`).
+    **✅ DONE on this branch (see B5/B6/B7 status notes).**
 14. Delete dead code / vestigial params from §5 (esp. `share_confirming`, which implies a
     mechanism that doesn't exist).
+    **◐ PARTIAL on this branch: dead methods (`decay_trust`, `smooth_friend_trust`,
+    `find_exploration_targets`), the `tp_*` block, and stale "AI Call Ratio" comments
+    are deleted. Vestigial constructor parameters (`share_confirming`,
+    `lambda_parameter`, `low_trust_amplification_factor`,
+    `exploitative_correction_factor`, `trust_update_mode`, `exploit_friend_bias`,
+    `exploit_self_bias`) are still accepted-but-ignored — removing them breaks every
+    caller (simulate.py, test_filter_bubbles.py, notebooks), so batch that with the
+    Stage-2 metric renaming, and decide whether `share_confirming` should be
+    implemented instead of removed.**
 
 ### Stage 4 — Re-validation at paper scale (compute-bound)
 15. Re-run the primary α sweep (200 ticks, N = 100, ≥ 20 seeded reps) via

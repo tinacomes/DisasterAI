@@ -24,6 +24,8 @@
 | Trust learning rate (exploratory) | — | 0.030 | Faster but still sub-linear trust revision |
 | Rumour probability | — | 1.00 | All social information propagated (worst-case echo scenario) |
 | Relief outcome delay | — | 15–25 ticks | Random; models logistical pipeline in humanitarian response |
+| Verification probability | p_verify | 0.30 | Per-tick arrival of situation-report verification (explorers) |
+| Salience weight | s | 0.00 | Uniform verification rewards (baseline); s = 1 for the severity-weighted counterfactual |
 | Steady-state window | — | 75 ticks | Last 75 of 200 ticks (15 metric samples × 5-tick cadence) |
 
 ---
@@ -88,17 +90,46 @@ The gap sweep extends the design to a second axis: d\_mid ∈ {2.0, 3.0, 4.0} in
 
 ## S5. Metrics
 
+All signed echo-chamber indices use one convention: **negative = echo chamber**.
+
+### S5.0 Metrics reference table
+
+| Name | Formula (summary) | Code location | Range / sign | Reported as |
+|---|---|---|---|---|
+| SECI | (V_community − V_global)/V_global if V_c < V_g, else (V_c − V_g)/(5 − V_g); L1+ beliefs, per network component, type-averaged | `DisasterModel.step` (SECI block), `seci_data` | [−1, +1]; negative = echo | Time series + steady-state boxplots; composite component |
+| AECI-Var | Same variance formula, grouping = AI-reliant half (median split by `cum_accepted_ai` *within each type*, type values averaged) vs global | `DisasterModel.calculate_aeci_variance`, `aeci_variance_data` | [−1, +1]; negative = echo | Composite component; lifecycle figure |
+| AECI-Err | −(ē_AI-heavy − ē_AI-light)/max(ē), where ē = mean confidence × \|belief − truth\| over L1+ cells; same median split | `DisasterModel.step` (AECI-Err block), `aeci_data` | [−1, +1]; negative = echo | Time series per type; sensitivity composite |
+| AECI-Acc | accepted_AI/(accepted_AI + accepted_human), per 5-tick window | `retain_aeci_data` | [0, 1]; unsigned reliance | Supplementary series |
+| AI query share | per-tick AI queries / total queries (call counts, not acceptances) | `accum_calls_ai` deltas in `run_one_sim` | [0, 1] | Transition-timing + evolution figures |
+| Belief MAE | mean \|belief − truth\| over cells with true severity ≥ 1 | `run_one_sim` / `simulate.run_one` | ≥ 0 | Time series; composite component |
+| Unmet needs | count of cells at true severity ≥ 3 with zero relief tokens that tick | `DisasterModel.step`, `unmet_needs_evolution` | ≥ 0 | Time series, steady-state mean |
+| Targeting precision | tokens on cells at severity ≥ 3 at placement time / all tokens | `run_one_sim` window accumulators | [0, 1] | Time series (5-tick windows) |
+
+The delayed correctness assessment in `process_reward` (ground truth 15–25 ticks after targeting) feeds only the agents' reinforcement signal and is not a reported outcome. The model-internal all-cell MAE (`belief_error_data`) is diagnostic only; every reported MAE uses the disaster-cell definition above.
+
 ### S5.1 Social Echo Chamber Index (SECI)
 
-$$\text{SECI} = 1 - \frac{\text{Var}\bigl(\{b_{f,k} : f \in \text{friends}(i),\, k \in \text{cells}\}\bigr)}{\text{Var}\bigl(\{b_{j,k} : j \in \text{all agents},\, k \in \text{cells}\}\bigr)}$$
+For each connected component $c$ of the social network, pool member beliefs with level ≥ 1 and compare the component variance $V_c$ with the global L1+ variance $V_g$:
 
-Computed separately for exploitative and exploratory agents; reported as the mean across all agents of that type. A formation event is registered when SECI < −0.30 sustained for ≥ 3 consecutive samples; a recovery event when SECI ≥ 0.0 sustained for ≥ 5 consecutive samples after formation. If formation never occurs the lifecycle bar is left blank (○); if formation occurs but recovery does not by the end of the run the bar reaches the maximum height with annotation ✗.
+$$\text{SECI}_c = \begin{cases} \max\!\left(-1, \dfrac{V_c - V_g}{V_g}\right) & V_c < V_g \\[2ex] \min\!\left(+1, \dfrac{V_c - V_g}{5 - V_g}\right) & V_c \geq V_g \end{cases}$$
 
-### S5.2 AI Echo Chamber Index (AECI)
+Component values are averaged within each agent type (the network is type-homogeneous). A formation event is registered when SECI < −0.30 sustained for ≥ 3 consecutive samples; a recovery event when SECI ≥ 0.0 sustained for ≥ 5 consecutive samples after formation. If formation never occurs the lifecycle bar is left blank (○); if formation occurs but recovery does not by the end of the run the bar reaches the maximum height with annotation ✗.
 
-$$\text{AECI} = \frac{\Delta\, q_\text{AI}}{\Delta\, q_\text{AI} + \Delta\, q_\text{human}}$$
+### S5.2 AI Echo Chamber Indices (AECI-Var, AECI-Err, AECI-Acc)
 
-where Δ*q* denotes the increment in accepted information-update calls over a 5-tick window. This window-delta formulation distinguishes recent reliance from cumulative history, making AECI responsive to within-run behavioural shifts.
+**AECI-Var** applies the SECI formula with grouping by AI reliance: within each agent type, agents are median-split by cumulative accepted AI belief updates (`cum_accepted_ai`), the belief variance of each type's AI-reliant half replaces $V_c$, and the two type values are averaged. The within-type split prevents the index from conflating AI's effect on beliefs with which type self-selects into AI use. This is the construct in the Goldilocks composite.
+
+**AECI-Err** compares confidence-weighted belief error between the AI-heavy and AI-light halves (same split):
+
+$$\text{AECI-Err} = -\,\frac{\bar{e}_\text{heavy} - \bar{e}_\text{light}}{\max(\bar{e}_\text{heavy}, \bar{e}_\text{light})}, \qquad \bar{e} = \overline{\text{conf} \times |b - t|}\ \text{over L1+ cells}$$
+
+Negative values mean AI-heavy agents are more confidently wrong (algorithmic echo chamber). *Sign history:* before 2026-07 this index used the opposite sign (positive = echo chamber); result files written before the change are automatically converted on load (`conventions.aeci_err_sign` marker).
+
+**AECI-Acc:**
+
+$$\text{AECI-Acc} = \frac{\Delta\, q_\text{AI}}{\Delta\, q_\text{AI} + \Delta\, q_\text{human}}$$
+
+where Δ*q* denotes the increment in accepted information updates over a 5-tick window — an unsigned reliance share, not an echo-chamber index.
 
 ### S5.3 Belief Accuracy (MAE)
 
@@ -106,27 +137,29 @@ $$\text{MAE} = \frac{1}{|\mathcal{C}|} \sum_{k \in \mathcal{C}} |b_{i,k} - t_k|$
 
 averaged over agents $i$ and over the set $\mathcal{C}$ of cells with true severity $t_k \geq 1$.
 
-### S5.4 Composite Goldilocks Scores
+### S5.4 Composite Goldilocks Scores and α* Sensitivity
 
-Let $\bar{m}(q, \alpha)$ denote the steady-state mean (last 75 ticks) of metric $m$ at alignment level α. Range-normalisation across the sweep:
+Let $\bar{m}(\alpha)$ denote the steady-state mean (last 75 ticks) of metric $m$ at alignment level α. Range-normalisation across the sweep:
 
 $$m_\text{norm}(\alpha) = \frac{\bar{m}(\alpha) - \min_\alpha \bar{m}}{\max_\alpha \bar{m} - \min_\alpha \bar{m}}$$
 
 Then:
 
-$$\text{total\_bubble\_norm}(\alpha) = |\text{SECI}|_\text{norm}(\alpha) + |\text{AECI}|_\text{norm}(\alpha)$$
-$$\text{total\_score\_norm}(\alpha) = |\text{SECI}|_\text{norm}(\alpha) + |\text{AECI}|_\text{norm}(\alpha) + \text{MAE}_\text{norm}(\alpha)$$
+$$\text{total\_bubble\_norm}(\alpha) = |\text{SECI}|_\text{norm}(\alpha) + |\text{AECI-Var}|_\text{norm}(\alpha)$$
+$$\text{total\_score\_norm}(\alpha) = |\text{SECI}|_\text{norm}(\alpha) + |\text{AECI-Var}|_\text{norm}(\alpha) + \text{MAE}_\text{norm}(\alpha)$$
 
 $$\alpha^* = \arg\min_\alpha \text{total\_bubble\_norm}(\alpha)$$
 $$\alpha^*(+\text{MAE}) = \arg\min_\alpha \text{total\_score\_norm}(\alpha)$$
 
-Range normalisation ensures each component contributes on the same [0, 1] scale regardless of the absolute magnitude of SECI, AECI, or MAE. The two optima are reported separately so that the trade-off between echo-chamber suppression and accuracy improvement is explicit.
+Range normalisation ensures each component contributes on the same [0, 1] scale regardless of absolute magnitude. Because the raw AECI-Var signal is small relative to SECI, normalisation can amplify its influence on the location of the minimum. We therefore report α* under six composite variants — {SECI + AECI-Var, SECI only, SECI + AECI-Err} × {without MAE, with MAE} — computed by `alpha_star_sensitivity` and shown in `alpha_star_sensitivity.png`. α* is reported as robust only if the variants agree; otherwise the spread is reported.
 
 ### S5.5 Spatial and Network Periphery Metrics
 
-**Spatial periphery.** For each simulation run, cells are ranked by Euclidean distance to that run's epicentre. Near cells (Q1, closest quartile) and far cells (Q4, furthest quartile) are identified per run; coverage deficit (actual severity − mean aid tokens per tick) and aid density are averaged within each set. These per-run scalars are then averaged across replications. This per-run computation avoids the blurring artefact that would arise from mapping all replications onto a single grid when epicentre locations vary.
+**Spatial periphery.** For each simulation run, cells are ranked by Euclidean distance to that run's epicentre. Near cells (Q1, closest quartile) and far cells (Q4, furthest quartile) are identified per run; coverage deficit (actual severity − mean aid tokens per tick) and aid density are averaged within each set. These per-run scalars are then averaged across replications. This per-run computation avoids the blurring artefact that would arise from mapping all replications onto a single grid when epicentre locations vary. The agent-level spatial split classifies agents by the distance of their (fixed) spawn position to the run's epicentre; because agents are immobile, this is a structural property of the run.
 
-**Network periphery.** Agents are ranked by their Watts–Strogatz degree. Low-degree agents (Q1) and high-degree agents (Q4) are compared on belief MAE and relief tokens sent per tick.
+**Network periphery.** Agents are ranked by betweenness centrality on the type-homogeneous community graph (degree-quartile scalars are also recorded). Low-betweenness agents (Q1) and high-betweenness "brokers" (Q4) are compared on belief MAE and aid tokens sent. Both agent-level comparisons are reported as steady-state means (last 75 ticks) of five-tick-cadence series: belief MAE over disaster cells (L1+, the same construct as the headline MAE) and aid tokens sent per agent per five-tick window, counted at placement time. Figures show 95% confidence intervals over the N = 20 replications; `periphery_gap_evolution.png` additionally shows the full time evolution of the within-run paired gaps (periphery − core).
+
+**Interpretation caveat.** The periphery gaps are structurally bounded in this model: agents are immobile and sense only their own cell, while query targeting, AI sensing (uniform random 15% of the grid per tick), and relief targeting all operate on the full grid independently of agent position; social communities are small (~25 agents) and densely wired (p = 0.7, diameter ≈ 2), and humans may query any other human (non-friends at a small baseline weight), so neither spawn location nor network position gates information access strongly. The gap metrics therefore quantify residual inequity from local sensing and initial-belief differences, not from differential access to communication channels.
 
 ---
 

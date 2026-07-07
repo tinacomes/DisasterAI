@@ -49,8 +49,6 @@ class HumanAgent(Agent):
         self.epsilon = epsilon
         self.pos = None
 
-        self.exploration_targets = []
-
         self.exploit_trust_lr = exploit_trust_lr
 
 
@@ -105,6 +103,7 @@ class HumanAgent(Agent):
         # Performance Counters
         self.correct_targets = 0
         self.incorrect_targets = 0
+        self.tokens_sent_total = 0    # tokens counted at placement time (no evaluation delay)
 
 
     def initialize_beliefs(self, assigned_rumor=None):
@@ -112,7 +111,8 @@ class HumanAgent(Agent):
         Initializes agent beliefs with default values, applies assigned rumor if provided,
         and senses the local environment. Ensures all cells have valid belief dictionaries.
         """
-        height, width = self.model.disaster_grid.shape
+        # disaster_grid is allocated np.zeros((width, height)) — axis 0 is x/width
+        width, height = self.model.disaster_grid.shape
         rumor_epicenter = None
         rumor_intensity = 0
         rumor_conf = 0.6
@@ -833,6 +833,24 @@ class HumanAgent(Agent):
             # (verified situation reports have belief_conf=1.0 → full strength)
             confidence_scaling = min(1.0, belief_conf / 0.5)  # Full strength at 0.5+ confidence
 
+            # --- Salience weighting (C12 counterfactual, model.salience_weight) ---
+            # The uniform per-cell verification reward is base-rate dominated: ~90% of
+            # explorer-queried cells are truly empty, so a fully confirming AI passes
+            # verification on ~93% of cells and keeps explorer trust regardless of α,
+            # failing only on the rare high-severity cells (finding C12).
+            # With salience_weight s ∈ [0,1], the learning-rate scaling of verified
+            # evaluations is multiplied by (1−s) + s·(max(truth, reported)+1)/6:
+            #   s=0 (default): uniform evaluation — current baseline behaviour.
+            #   s=1: full salience — an error about a disaster cell (miss OR false
+            #        alarm) carries up to 6× the weight of a confirmed empty cell,
+            #        modelling negativity/salience bias ("being wrong about a disaster
+            #        is more memorable than being right about nothing").
+            if verified_reference:
+                s = getattr(self.model, 'salience_weight', 0.0)
+                if s > 0.0:
+                    salience = (max(reference_level, reported_level) + 1) / 6.0
+                    confidence_scaling *= (1.0 - s) + s * salience
+
             # --- Accuracy score: reported vs current reference ---
             # Verified items use the (noisy) situation-report level; rejected remote
             # queries (was_accepted=False) and local cells use reference_level
@@ -1125,105 +1143,6 @@ class HumanAgent(Agent):
         else:
             self.believed_epicenter = None  # No valid epicenter outside sensing range
 
-
-    def find_exploration_targets(self, num_targets=1):
-        """Finds cells scoring high on a weighted sum of believed level and uncertainty."""
-        candidates = []
-        min_level_to_explore = 1  # Consider L1+ cells
-
-        # Check if we have any beliefs to work with
-        if not self.beliefs:
-            # Handle case with no beliefs
-            if self.model.debug_mode:
-                print(f"Agent {self.unique_id}: No beliefs available for exploration targeting")
-            self.exploration_targets = []
-            return
-
-        # Gather all valid candidates with their scores
-        for cell, belief_info in self.beliefs.items():
-            if isinstance(belief_info, dict):
-                level = belief_info.get('level', 0)
-
-                # Skip L0 cells for primary exploration targets
-                if level < min_level_to_explore:
-                    continue
-
-                # Check if cell coordinates are valid
-                if not (0 <= cell[0] < self.model.width and 0 <= cell[1] < self.model.height):
-                    continue
-
-                confidence = belief_info.get('confidence', 0.1)
-                uncertainty = 1.0 - confidence
-
-                # --- Scoring Logic: Weighted Sum ---
-                level_weight = 0.7  # Focus heavily on finding higher levels
-                uncertainty_weight = 0.3  # Uncertainty is secondary, but still relevant
-
-                # Normalize level (0-5 -> 0-1)
-                normalized_level = level / 5.0
-
-                score = (level_weight * normalized_level) + (uncertainty_weight * uncertainty)
-
-                # Add to candidates
-                candidates.append({'cell': cell, 'score': score, 'level': level, 'conf': confidence})
-
-        # --- Fallback if no L1+ candidates found ---
-        if not candidates:
-            # NEW APPROACH: Look for L0 cells with highest uncertainty (lowest confidence)
-            l0_candidates = []
-
-            for cell, belief_info in self.beliefs.items():
-                if isinstance(belief_info, dict):
-                    # Check if cell coordinates are valid
-                    if not (0 <= cell[0] < self.model.width and 0 <= cell[1] < self.model.height):
-                        continue
-
-                    level = belief_info.get('level', 0)
-                    conf = belief_info.get('confidence', 1.0)
-
-                    # Focus on L0 cells now
-                    if level == 0:
-                        uncertainty = 1.0 - conf
-                        # For L0 cells, score is purely based on uncertainty
-                        l0_candidates.append({
-                            'cell': cell,
-                            'score': uncertainty,  # Higher uncertainty = higher score
-                            'level': level,
-                            'conf': conf
-                        })
-
-            # Sort L0 candidates by uncertainty (highest first)
-            if l0_candidates:
-                l0_candidates.sort(key=lambda x: x['score'], reverse=True)
-                # Take the top candidate(s)
-                candidates = l0_candidates[:num_targets]
-            else:
-                # Ultimate fallback: pick some random cells
-                random_cells = []
-                for _ in range(3):  # Try to find 3 valid random cells
-                    x = random.randrange(self.model.width)
-                    y = random.randrange(self.model.height)
-                    cell = (x, y)
-                    if cell in self.beliefs and isinstance(self.beliefs[cell], dict):
-                        random_cells.append(cell)
-
-                if random_cells:
-                    random_cell = random.choice(random_cells)
-                    belief_info = self.beliefs.get(random_cell, {'level': 0, 'confidence': 0.1})
-                    candidates = [{'cell': random_cell, 'score': -2, 'level': belief_info.get('level', 0),
-                                  'conf': belief_info.get('confidence', 0.1)}]
-                elif self.model.debug_mode:
-                    print(f"SEVERE: Agent {self.unique_id} couldn't find any valid exploration targets")
-
-        # Sort by score (highest score first) and select top candidates
-        if candidates:
-            candidates.sort(key=lambda x: x['score'], reverse=True)
-            self.exploration_targets = [c['cell'] for c in candidates[:num_targets]]
-        else:
-            # Final fallback if all else fails
-            if self.model.debug_mode:
-                print(f"Agent {self.unique_id}: No exploration candidates found at all, using position as target")
-            self.exploration_targets = [self.pos]  # Use current position as a last resort
 
     def apply_trust_decay(self):
         """Applies decay to all trust relationships toward neutral points.
@@ -1690,6 +1609,7 @@ class HumanAgent(Agent):
                         if cell not in self.model.tokens_this_tick:
                             self.model.tokens_this_tick[cell] = {'exploit': 0, 'explor': 0}
                         self.model.tokens_this_tick[cell][agent_type_key] += 1
+                        self.tokens_sent_total += 1
 
                 # NOTE: correct_targets / incorrect_targets are updated in process_reward()
                 # with delayed ground truth (15-25 ticks). DO NOT also update them here —
@@ -1968,26 +1888,6 @@ class HumanAgent(Agent):
         self.apply_confidence_decay()
         return reward
 
-    def smooth_friend_trust(self):
-
-        if self.friends:
-          # --- Trust Smoothing (Keep, maybe reduce weight) ---
-            friend_ids = [f for f in self.friends if f in self.trust] # Ensure friend exists
-            if not friend_ids: return
-
-            friend_values = [self.trust.get(f, 0) for f in self.friends]
-            avg_friend = sum(friend_values) / len(friend_values)
-            smoothing_factor = 0.1
-            for friend in self.friends:
-                self.trust[friend] = (1-smoothing_factor) * self.trust[friend] + smoothing_factor * avg_friend
-
-
-    def decay_trust(self, candidate):
-        decay_rate = 0.01 if candidate not in self.friends else 0.002
-        self.trust[candidate] = max(0, self.trust[candidate] - decay_rate)
-        if "ai" not in self.tokens_this_tick:
-            self.trust["ai"] = max(0, self.trust["ai"] - 0.005)
-
     def update_trust_for_accuracy(self):
         """Directly updates trust based on observed accuracy of previous information."""
         # Skip if we don't have both tracking measures
@@ -2048,7 +1948,8 @@ class AIAgent(Agent):
         self.sense_environment()
 
     def sense_environment(self):
-        height, width = self.model.disaster_grid.shape
+        # disaster_grid is allocated np.zeros((width, height)) — axis 0 is x/width
+        width, height = self.model.disaster_grid.shape
         all_cells = [(x, y) for x in range(width) for y in range(height)]
         cells = random.sample(all_cells, self.cells_to_sense)
         self.sensed = {}
@@ -2287,8 +2188,10 @@ class DisasterModel(Model):
                  d_explor=4.0,           # Gap-scalar: acceptance threshold for exploratory agents
                  delta_explor=1.2,       # Gap-scalar: acceptance sensitivity for exploratory agents
                  epicenter=None,         # Optional fixed epicenter [x, y]; random if None
-                 verification_probability=0.3  # Per-attempt arrival prob of external "situation report"
-                                               # verification for explorers' accepted remote reports
+                 verification_probability=0.3,  # Per-attempt arrival prob of external "situation report"
+                                                # verification for explorers' accepted remote reports
+                 salience_weight=0.0     # 0 = uniform verification rewards (baseline);
+                                         # 1 = full severity-weighted (salience) evaluation — see C12
                  ):
         super(DisasterModel, self).__init__()
         self.share_exploitative = share_exploitative
@@ -2312,6 +2215,7 @@ class DisasterModel(Model):
         self.ticks = ticks
         self.low_trust_amplification_factor = low_trust_amplification_factor
         self.verification_probability = verification_probability
+        self.salience_weight = salience_weight
 
         # Learning rates and biases
         self.exploit_trust_lr = exploit_trust_lr
@@ -2355,22 +2259,12 @@ class DisasterModel(Model):
         self.component_ai_trust_variance_data = []  # AI Trust Clustering
         self.info_diversity_data = []  # Information Diversity (Shannon Entropy)
 
-        # --- In-simulation tipping point tracking ---
-        # Tick at which each index first crosses its formation threshold (< -0.3)
-        # and recovery threshold (>= 0.0 after having been negative). None = not yet triggered.
-        self.tp_seci_exploit_formation = None   # exploiters' social bubble forms
-        self.tp_seci_explor_formation  = None   # explorers' social bubble forms
-        self.tp_aeci_exploit_formation = None   # exploiters enter AI echo chamber
-        self.tp_aeci_explor_formation  = None   # explorers enter AI echo chamber
-        self.tp_seci_exploit_recovery  = None   # exploiters' social bubble breaks
-        self.tp_seci_explor_recovery   = None   # explorers' social bubble breaks
-        self.tp_aeci_exploit_recovery  = None   # exploiters exit AI echo chamber
-        self.tp_aeci_explor_recovery   = None   # explorers exit AI echo chamber
-        self._seci_exploit_was_negative = False
-        self._seci_explor_was_negative  = False
-        self._aeci_exploit_was_negative = False
-        self._aeci_explor_was_negative  = False
-        self.tipping_point_threshold = -0.3     # index value below which echo chamber is "formed"
+        # NOTE: in-simulation tipping-point tracking (tp_* attributes) was removed.
+        # It used the old variance-based AECI sign convention (negative = echo chamber),
+        # which is inverted relative to the current AECI formula (positive = echo
+        # chamber), and its outputs were never consumed downstream. Transition timing
+        # is measured post-hoc in test_filter_bubbles.py (_first_sustained_break /
+        # _first_sustained_cross) instead.
 
         # Initialize disaster grid with Gaussian decay around an epicenter.
         self.disaster_grid = np.zeros((width, height), dtype=int)
@@ -2541,24 +2435,24 @@ class DisasterModel(Model):
         """Log debug messages if debug mode is enabled or forced."""
 
     def calculate_aeci_variance(self):
-        """Calculate AI Echo Chamber Index variance on a [-1, +1] scale."""
-        aeci_variance = 0.0  # Default neutral value
-        
-        # Classify AI-reliant agents by accepted_ai (actual belief influence),
-        # not query ratio. The feedback loop means agents that validated AI info
-        # as accurate will have built trust and accepted more AI updates. Using
-        # accepted_ai captures this: a query counter (accum_calls_ai) inflated by
-        # low-trust probing does not reflect real AI influence on beliefs.
-        min_accepted_ai = 3  # At least 3 accepted AI belief updates to qualify
+        """AECI-Var: AI Echo Chamber Index, variance-based, on a [-1, +1] scale.
 
-        ai_reliant_agents = []
-        for agent in self.humans.values():
-            if not hasattr(agent, 'accepted_ai'):
-                continue
-            if agent.accepted_ai >= min_accepted_ai:
-                ai_reliant_agents.append(agent)
+        Compares the belief variance of AI-reliant agents against the global
+        belief variance. NEGATIVE = AI-reliant agents more homogeneous than the
+        population (AI echo chamber); positive = more diverse. Same sign
+        convention as SECI and AECI-Err.
 
-        # Get global belief variance
+        Classification: WITHIN-TYPE median split by cum_accepted_ai (cumulative
+        accepted AI belief updates = actual AI influence on beliefs), the same
+        basis and split as AECI-Err. A population-level split let the type
+        composition of the "AI-reliant" group vary with alpha (25% exploiters at
+        alpha=0 vs 45-75% at alpha=1 in seeded probes), so the index partly
+        measured which agent type self-selects into AI use rather than what AI
+        does to beliefs (finding C11). Per-type values are averaged for the
+        headline series; per-type values are stored in _last_metrics for
+        diagnostics.
+        """
+        # Global belief variance (all agents pooled — consistent baseline with SECI)
         all_beliefs = []
         for agent in self.humans.values():
             for belief_info in agent.beliefs.values():
@@ -2566,53 +2460,54 @@ class DisasterModel(Model):
                     level = belief_info.get('level', 0)
                     if not np.isnan(level):  # Filter out NaN values
                         all_beliefs.append(level)
-        
-        # Calculate global variance with safety check
-        if len(all_beliefs) > 1:
-            global_var = np.var(all_beliefs)
-        else:
-            global_var = 0.0
-            
-        # Only proceed if we have a valid global variance and AI-reliant agents
-        if global_var > 0 and ai_reliant_agents:
-            # Get AI-reliant agents' beliefs
-            ai_reliant_beliefs = []
-            for agent in ai_reliant_agents:
+        global_var = np.var(all_beliefs) if len(all_beliefs) > 1 else 0.0
+
+        def _aeci_var_for(type_label):
+            """AECI-Var for one agent type; None if no valid group/signal."""
+            type_agents = [a for a in self.humans.values()
+                           if a.agent_type == type_label and hasattr(a, 'cum_accepted_ai')]
+            if len(type_agents) < 4 or global_var <= 0:
+                return None
+            sorted_agents = sorted(type_agents, key=lambda a: a.cum_accepted_ai)
+            top_half = sorted_agents[len(sorted_agents) // 2:]
+            # Require actual AI influence — with zero acceptances everywhere
+            # there is no "AI-reliant" group and no signal.
+            if not top_half or top_half[-1].cum_accepted_ai <= 0:
+                return None
+            reliant_beliefs = []
+            for agent in top_half:
                 for belief_info in agent.beliefs.values():
                     if isinstance(belief_info, dict):
                         level = belief_info.get('level', 0)
-                        if not np.isnan(level):  # Filter out NaN values
-                            ai_reliant_beliefs.append(level)
-            
-            # Calculate AI-reliant variance with safety check
-            if len(ai_reliant_beliefs) > 1:
-                ai_reliant_var = np.var(ai_reliant_beliefs)
+                        if not np.isnan(level):
+                            reliant_beliefs.append(level)
+            if len(reliant_beliefs) < 2:
+                return None
+            var_diff = np.var(reliant_beliefs) - global_var
+            if var_diff < 0:  # Variance reduction → AI echo chamber (negative)
+                return max(-1.0, var_diff / global_var)
+            max_possible_var = 5.0  # Max variance for belief levels 0-5
+            denom = max_possible_var - global_var
+            return min(1.0, var_diff / denom) if denom > 1e-9 else 0.0
 
-                # Calculate variance effect
-                # Negative means AI reduces variance (echo chamber)
-                # Positive means AI increases variance (diversification)
-                var_diff = ai_reliant_var - global_var
-                
-                # Normalize to [-1, +1] range
-                if var_diff < 0:  # Variance reduction (echo chamber)
-                    aeci_variance = max(-1, var_diff / global_var)  # Normalize by global variance
-                else:  # Variance increase (diversification)
-                    # Find a reasonable upper bound for normalization
-                    max_possible_var = 5.0  # Given belief levels are 0-5, max variance is around 5
-                    aeci_variance = min(1, var_diff / (max_possible_var - global_var))
+        per_type = {t: _aeci_var_for(t) for t in ("exploitative", "exploratory")}
+        valid = [v for v in per_type.values() if v is not None]
+        aeci_variance = float(np.mean(valid)) if valid else 0.0
 
         # Create a CORRECTLY formatted tuple
         aeci_variance_tuple = (self.tick, aeci_variance)
-        
-        # Update metrics dictionary with consistent format
+
+        # Update metrics dictionary with consistent format (+ per-type diagnostics)
         self._last_metrics['aeci_variance'] = {
             'tick': self.tick,
-            'value': aeci_variance
+            'value': aeci_variance,
+            'exploit': per_type["exploitative"],
+            'explor': per_type["exploratory"],
         }
-        
+
         # Store in the array with consistent format
         self.aeci_variance_data.append(aeci_variance_tuple)
-        
+
         return aeci_variance_tuple
 
     def calculate_info_diversity(self):
@@ -3298,27 +3193,33 @@ class DisasterModel(Model):
 
             self.belief_variance_data.append((self.tick, var_exploit, var_explor))
 
-            # --- AECI Calculation: Confidence-Weighted Belief Error ---
+            # --- AECI-Err: Confidence-Weighted Belief Error split ---
             #
-            # The previous variance-based formula failed because confirming AI
-            # (α=0.9) changes CONFIDENCE not LEVEL (d=0 → reported level ≈ prior
-            # level), so level variance is unchanged → AECI ≈ 0 regardless of α.
+            # One of the three AECI constructs (unified naming, all with the
+            # SECI sign convention: NEGATIVE = echo chamber):
+            #   AECI-Acc: acceptance share accepted_AI/(accepted_AI+accepted_human)
+            #             → stored as retain_aeci (0..1 reliance measure, unsigned)
+            #   AECI-Err: THIS metric (confidence-weighted error split, [-1,+1])
+            #   AECI-Var: variance ratio of AI-reliant vs global beliefs
+            #             → calculate_aeci_variance() ([-1,+1])
             #
-            # New formula: for each agent compute the mean of
+            # AECI-Err formula: for each agent compute the mean of
             #   confidence × |believed_level − true_level|
             # over all L1+ cells (high enough belief to matter).  This "confident
             # error" is the actual echo-chamber signal: agents locked into
             # confirming AI accumulate high-confidence FALSE beliefs.
             #
-            # Within each type split by cum_accepted_ai (who queried AI most):
+            # Within each type, median-split by cum_accepted_ai (accepted AI belief
+            # updates — actual AI influence; same classification basis as AECI-Var):
             #   heavy_err > light_err → AI-heavy agents have more confident false
-            #   beliefs → algorithmic echo chamber → AECI > 0
-            #   heavy_err < light_err → AI corrects beliefs → AECI < 0
-            #   AECI ≈ 0 → AI usage has no directional effect on belief accuracy
+            #   beliefs → algorithmic echo chamber → AECI-Err < 0
+            #   heavy_err < light_err → AI corrects beliefs → AECI-Err > 0
+            #   AECI-Err ≈ 0 → AI usage has no directional effect on belief accuracy
             #
-            # Normalised to [-1, +1]:
-            #   positive half: (heavy_err − light_err) / max(heavy_err, light_err)
-            #   negative half: (heavy_err − light_err) / max(light_err, 1e-6)
+            # Normalised to [-1, +1] (SIGN CONVENTION CHANGED 2026-07: previously
+            # positive = echo chamber; now negative = echo chamber to match SECI
+            # and AECI-Var. JSONs written before this change carry the old sign —
+            # the test_filter_bubbles collect step auto-converts unmarked files.)
             aeci_exp = []
             aeci_expl = []
 
@@ -3350,13 +3251,13 @@ class DisasterModel(Model):
                 if len(type_agents) < 4:
                     continue  # need at least 2 per half
 
-                # Median split by total AI calls within this type.
-                # Using accum_calls_ai (total queries, not just accepted) gives genuine
-                # variation at high α where acceptance rate ≈ 100% for all agents and
-                # cum_accepted_ai is near-uniform → meaningless split.
-                # Agents who queried AI more (encountered more uncertain cells) get more
-                # belief reinforcements → higher confident error when AI confirms false beliefs.
-                sorted_agents = sorted(type_agents, key=lambda a: a.accum_calls_ai)
+                # Median split by cum_accepted_ai within this type: accepted AI
+                # belief updates measure actual AI INFLUENCE on beliefs (queries
+                # inflated by low-trust probing do not shape beliefs). This is the
+                # single classification basis shared with AECI-Var. At high α,
+                # acceptance rates converge across agents, so acceptances remain
+                # proportional to calls and the split keeps its variation.
+                sorted_agents = sorted(type_agents, key=lambda a: a.cum_accepted_ai)
                 mid = len(sorted_agents) // 2
                 ai_light = sorted_agents[:mid]
                 ai_heavy = sorted_agents[mid:]
@@ -3365,12 +3266,11 @@ class DisasterModel(Model):
                 heavy_err = _weighted_error(ai_heavy)
 
                 err_diff = heavy_err - light_err
-                if err_diff >= 0:   # AI-heavy more confident-wrong → echo chamber
-                    denom = max(heavy_err, 1e-6)
-                    aeci_val = min(1.0, err_diff / denom)
-                else:               # AI-heavy more accurate → AI breaks echo chamber
-                    denom = max(light_err, 1e-6)
-                    aeci_val = max(-1.0, err_diff / denom)
+                # SIGN: negative = echo chamber (matches SECI / AECI-Var convention)
+                if err_diff >= 0:   # AI-heavy more confident-wrong → AI echo chamber
+                    aeci_val = -min(1.0, err_diff / max(heavy_err, 1e-6))
+                else:               # AI-heavy more accurate → AI breaks bubbles
+                    aeci_val = min(1.0, -err_diff / max(light_err, 1e-6))
 
                 aeci_list.append(aeci_val)
 
@@ -3407,24 +3307,6 @@ class DisasterModel(Model):
             }
 
             self.running_aeci_data.append((self.tick, self.running_aeci_exp, self.running_aeci_expl))
-
-            # --- In-simulation tipping point detection ---
-            # Record the FIRST tick each index crosses the formation threshold (<-0.3)
-            # and the first recovery tick (>= 0.0 after being negative).
-            _tp = self.tipping_point_threshold
-            for idx_val, formed_attr, was_neg_attr, recover_attr in [
-                (seci_exploit_mean, 'tp_seci_exploit_formation', '_seci_exploit_was_negative', 'tp_seci_exploit_recovery'),
-                (seci_explor_mean,  'tp_seci_explor_formation',  '_seci_explor_was_negative',  'tp_seci_explor_recovery'),
-                (avg_aeci_exp,      'tp_aeci_exploit_formation', '_aeci_exploit_was_negative', 'tp_aeci_exploit_recovery'),
-                (avg_aeci_expl,     'tp_aeci_explor_formation',  '_aeci_explor_was_negative',  'tp_aeci_explor_recovery'),
-            ]:
-                if idx_val < _tp:
-                    if getattr(self, formed_attr) is None:
-                        setattr(self, formed_attr, self.tick)  # echo chamber formed
-                    setattr(self, was_neg_attr, True)
-                elif getattr(self, was_neg_attr) and idx_val >= 0.0:
-                    if getattr(self, recover_attr) is None:
-                        setattr(self, recover_attr, self.tick)  # echo chamber broke
 
             # --- Information Diversity (Shannon Entropy) ---
             info_diversity_result = self.calculate_info_diversity()
@@ -4264,8 +4146,8 @@ def aggregate_simulation_results(num_runs, base_params):
         
         # Extract max AECI variance if available
         if isinstance(aeci_variance_data, np.ndarray) and aeci_variance_data.size > 0:
-            # Handle different array structures
-            if aeci_variance_data.ndim == 3 and aeci_variance_data.shape[2] > 1:
+            # Per-run data is 2D (ticks × [tick, value]) from np.column_stack
+            if aeci_variance_data.ndim == 2 and aeci_variance_data.shape[1] > 1:
                 # Extract values column
                 variance_values = aeci_variance_data[:, 1]  # Values column
                 if variance_values.size > 0:
@@ -4412,7 +4294,7 @@ def experiment_alignment_tipping_point(base_params, alignment_values=None, num_r
         if align > 0 and align-0.1 in results:
             prev_result = results[align-0.1]
 
-            # Extract AECI values (AI Call Ratio) for each agent type
+            # Extract AECI values (confidence-weighted error split; NOT a call ratio)
             curr_aeci_exploit = result.get("aeci", np.array([]))
             curr_aeci_explor = result.get("aeci", np.array([]))
             prev_aeci_exploit = prev_result.get("aeci", np.array([]))
@@ -5216,7 +5098,7 @@ def plot_summary_echo_indices_vs_alignment(results_b, alignment_values, title_su
     ax.axhline(0, color='black', linestyle='-', linewidth=0.8, alpha=0.5)  # Zero reference line
     ax.set_ylim(-1.05, 1.05)  # AECI-Var ranges from -1 to +1, allow full range
 
-    # Plot AI Call Ratio boxplots
+    # Plot AECI-Err boxplots
     ax = axes[1, 0]
     bplot_call_exploit = ax.boxplot(aeci_call_exploit_data, positions=positions-boxplot_width/2,
                                   widths=boxplot_width, patch_artist=True,
@@ -5228,11 +5110,12 @@ def plot_summary_echo_indices_vs_alignment(results_b, alignment_values, title_su
                                  boxprops=dict(facecolor='skyblue', alpha=0.7),
                                  flierprops=dict(marker='o', markerfacecolor='skyblue', markersize=3, alpha=0.7),
                                  medianprops=dict(color='black'))
-    ax.set_ylabel("AI Call Ratio")
-    ax.set_title("AI Usage (AECI Call Ratio)")
+    ax.set_ylabel("AECI-Err")
+    ax.set_title("AI Echo Chamber (AECI-Err)\n(Negative = Echo Chamber, Positive = AI Corrects)")
     ax.legend([bplot_call_exploit["boxes"][0], bplot_call_explor["boxes"][0]], ['Exploit', 'Explor'], loc='best')
     ax.grid(True, axis='y', linestyle='--', alpha=0.6)
-    ax.set_ylim(0, 1)
+    ax.axhline(0, color='black', linestyle='-', linewidth=0.8, alpha=0.5)
+    ax.set_ylim(-1.05, 1.05)
 
     # Plot Component AI Trust Variance boxplots
     ax = axes[1, 1]
@@ -5514,18 +5397,18 @@ def plot_final_echo_indices_vs_alignment(results_b, alignment_values, title_suff
     axes[0, 1].legend()
     axes[0, 1].grid(True, axis='y', linestyle='--', alpha=0.6)
 
-    # Plot Final AI Call Ratio with percentile error bars
+    # Plot Final AECI-Err with percentile error bars
     axes[1, 0].bar(index - bar_width/2, final_aeci_call_exploit_mean, bar_width,
                    yerr=final_aeci_call_exploit_err, capsize=4, label='Exploit', color='darkblue')
     axes[1, 0].bar(index + bar_width/2, final_aeci_call_explor_mean, bar_width,
                    yerr=final_aeci_call_explor_err, capsize=4, label='Explor', color='skyblue')
-    axes[1, 0].set_ylabel("Final Mean AI Call Ratio")
-    axes[1, 0].set_title("AI Usage (AECI Call Ratio)")
+    axes[1, 0].set_ylabel("Final Mean AECI-Err")
+    axes[1, 0].set_title("AI Echo Chamber (AECI-Err)\n(Negative = Echo Chamber)")
     axes[1, 0].set_xlabel("AI Alignment Level")
     axes[1, 0].legend()
     axes[1, 0].grid(True, axis='y', linestyle='--', alpha=0.6)
-    # Ensure y-limits are appropriate - AI call ratio should be between 0 and 1
-    axes[1, 0].set_ylim(0, 1)
+    axes[1, 0].axhline(0, color='black', linestyle='-', linewidth=0.8, alpha=0.5)
+    axes[1, 0].set_ylim(-1.05, 1.05)
 
 
     # Plot Component AI Trust Variance with percentile error bars
@@ -6031,7 +5914,7 @@ def plot_echo_chamber_indices(results_dict, title_suffix=""):
 
     # --- Data Extraction ---
     seci = results_dict.get("seci")
-    aeci = results_dict.get("aeci")  # AI Call Ratio
+    aeci = results_dict.get("aeci")  # Confidence-weighted error split (positive = echo chamber)
     retain_seci = results_dict.get("retain_seci")
     retain_aeci = results_dict.get("retain_aeci")
     comp_seci = results_dict.get("component_seci")
@@ -6127,14 +6010,14 @@ def plot_echo_chamber_indices(results_dict, title_suffix=""):
         except Exception as e:
             print(f"Error plotting {label}: {e}")
 
-    # --- Subplot 1: SECI & AECI (AI Call Ratio) ---
+    # --- Subplot 1: SECI & AECI-Err ---
     ax = axes[0, 0]
     safe_plot(ax, seci, 1, "SECI Exploit", "maroon", ticks=ticks)
     safe_plot(ax, seci, 2, "SECI Explor", "salmon", ticks=ticks)
-    safe_plot(ax, aeci, 1, "AI Call Ratio Exploit", "darkblue", ticks=ticks)
-    safe_plot(ax, aeci, 2, "AI Call Ratio Explor", "skyblue", linestyle='--', ticks=ticks)
+    safe_plot(ax, aeci, 1, "AECI-Err Exploit", "darkblue", ticks=ticks)
+    safe_plot(ax, aeci, 2, "AECI-Err Explor", "skyblue", linestyle='--', ticks=ticks)
     add_event_lines(ax, avg_event_ticks)
-    ax.set_title("Social Homogeneity (SECI) & AI Call Ratio (AECI)")
+    ax.set_title("Social Homogeneity (SECI) & AI Echo Chamber (AECI-Err)\n(negative = echo chamber for both)")
     ax.set_ylabel("Index / Ratio")
     ax.grid(True, linestyle='--', alpha=0.6)
     ax.legend(fontsize='small')
@@ -6908,7 +6791,7 @@ def plot_experiment_c_comprehensive(results_c, dynamics_values, shock_values):
             else:
                 print("  No seci data")
             
-            # 5. Calculate final AECI (AI Call Ratio)
+            # 5. Calculate final AECI-Err
             if "aeci" in res and isinstance(res["aeci"], np.ndarray):
                 try:
                     if res["aeci"].ndim >= 3 and res["aeci"].shape[1] > 0:

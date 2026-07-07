@@ -14,6 +14,8 @@ Five AI agents serve the community. Each AI agent senses 15 % of the grid per ti
 
 Because agents sense only their immediate location, exploratory agents cannot observe ground truth for remote cells directly. Instead, accepted remote reports are verified through an exogenous situation-report channel representing official damage assessments and media coverage: after a minimum 3-tick lag, verification arrives with per-tick probability p\_verify = 0.3 (geometric arrival, mean total delay ≈ 6 ticks), carries the same observation noise as direct sensing (±1 level with probability 0.2), and is evaluated against the *current* disaster state, so reports about cells that have since evolved receive noisier credit. Reports that are never verified before their 30-tick expiry produce no learning signal — explorers do not fall back to scoring sources against their own priors, which would collapse the accuracy channel into a confirmation channel. Delayed, imperfect verification of this kind is characteristic of post-disaster information environments (situation reports and needs assessments arrive with lag and error), and p\_verify is treated as a model parameter for sensitivity analysis.
 
+Because most queried cells are truly unaffected, per-cell verification is base-rate dominated: a fully confirming AI (α = 1) still passes verification on ≈ 93 % of cells by echoing mostly-correct "no impact" priors, failing only on the rare high-severity cells. A salience-weighting parameter s ∈ [0, 1] therefore interpolates the verification learning rate between uniform per-cell evaluation (s = 0, default) and severity-weighted evaluation (s = 1), where the weight (max(true, reported) + 1)/6 makes an error about a disaster cell — a miss or a false alarm — carry up to six times the weight of a confirmed empty cell. This operationalises negativity/salience bias in human evaluation of information sources and provides the counterfactual for whether importance-weighted feedback would expose a confirming AI.
+
 ## AI Alignment and Belief Dynamics
 
 The alignment parameter α ∈ [0, 1] governs the truthfulness of AI reports. A queried AI agent responds with:
@@ -34,26 +36,36 @@ with $\pi \propto c/(1-c)$ (odds of current confidence $c$), scaled by a type-sp
 
 ## Echo-Chamber and Accuracy Metrics
 
-We define three primary outcomes. The **Social Echo Chamber Index (SECI)** captures the extent to which an agent's social neighbourhood is epistemically insular:
+All echo-chamber indices share one sign convention: **negative values indicate an echo chamber**, zero is the null, and positive values indicate greater-than-population diversity.
 
-$$\text{SECI} = 1 - \frac{\text{Var}(\text{beliefs of friends})}{\text{Var}(\text{beliefs of all agents})}$$
+The **Social Echo Chamber Index (SECI)** captures the extent to which a social community is epistemically insular. For each connected component *c* of the social network we pool all member beliefs with severity level ≥ 1 (excluding the uninformative no-impact majority) and compare the community's belief variance to the variance of the pooled L1+ beliefs of all agents:
 
-SECI < 0 indicates that friends hold more homogeneous beliefs than the global population (echo chamber); SECI = 0 is the null; SECI > 0 indicates friends are more diverse than the population (anti-echo). Computed every five ticks and reported separately for each agent type, SECI is a network-normalised measure that does not conflate individual accuracy with community insularity. Alternative formulations based on opinion fragmentation (Bail et al. 2018) or information entropy (Sasahara et al. 2021) were considered; the variance ratio was preferred because it has a natural zero, is comparable across agent types, and maps directly onto the information-theoretic notion of surprise that motivates the Bayesian update above.
+$$\text{SECI}_c = \begin{cases} \dfrac{\text{Var}_c - \text{Var}_\text{global}}{\text{Var}_\text{global}} & \text{Var}_c < \text{Var}_\text{global} \\[2ex] \dfrac{\text{Var}_c - \text{Var}_\text{global}}{5 - \text{Var}_\text{global}} & \text{otherwise} \end{cases}$$
 
-The **AI Echo Chamber Index (AECI)** measures the fraction of all accepted information updates that originate from AI sources during any five-tick window:
+The asymmetric normalisation bounds the index to [−1, +1] (5 is the maximum attainable variance for severity levels 0–5). SECI < 0 indicates that community members hold more homogeneous beliefs than the global population (echo chamber). Because the network is type-homogeneous, community values are averaged within each agent type, yielding separate exploitative and exploratory SECI series, computed every five ticks. This follows the within-community homogeneity framing of Cinelli et al. (2021). Alternative formulations based on opinion fragmentation (Bail et al. 2018) or information entropy (Sasahara et al. 2021) were considered; the variance ratio was preferred because it has a natural zero, is comparable across agent types, and maps directly onto the information-theoretic notion of surprise that motivates the Bayesian update above.
 
-$$\text{AECI} = \frac{\text{accepted}_\text{AI}}{\text{accepted}_\text{AI} + \text{accepted}_\text{human}}$$
+The AI-side counterpart comes in three named constructs, each capturing a different facet of AI influence:
 
-Unlike a simple query-count ratio, this tracks whether AI information is actually absorbed into beliefs, distinguishing reliance from mere querying. High AECI signals over-dependence on a potentially confirming source, regardless of how often human contacts are also consulted.
+**AECI-Var** applies the SECI variance formula with grouping by AI reliance instead of network community: within each agent type, agents are median-split by their cumulative count of *accepted* AI belief updates, and the belief variance of each type's AI-reliant half is compared to the global variance; the two type values are averaged. Splitting within type prevents the index from conflating AI's effect on beliefs with which agent type self-selects into AI use (the composition of a population-level split varies strongly with α). AECI-Var < 0 means AI-reliant agents are more epistemically homogeneous than the population — an AI-induced bubble. This is the construct that enters the Goldilocks composite, making total\_bubble a symmetric sum of two structurally identical variance ratios.
 
-**Belief accuracy (MAE)** is the mean absolute error between agent beliefs and true severity, averaged over cells with non-zero severity and over both agent types, sampled every five ticks. MAE enters the analysis as an operational criterion: a Goldilocks alignment should not merely suppress echo chambers but also maintain adequate situational awareness for effective relief delivery.
+**AECI-Err** measures whether AI reliance produces *confidently wrong* beliefs: for each agent we average confidence × |believed − true severity| over L1+ cells, then compare AI-heavy and AI-light halves (same median split as AECI-Var):
+
+$$\text{AECI-Err} = -\,\frac{\bar{e}_\text{AI-heavy} - \bar{e}_\text{AI-light}}{\max(\bar{e}_\text{AI-heavy}, \bar{e}_\text{AI-light})}$$
+
+AECI-Err < 0 means AI-heavy agents hold more confident false beliefs than AI-light agents (algorithmic echo chamber); AECI-Err > 0 means AI corrects beliefs. Reported as time series per agent type.
+
+**AECI-Acc** is the acceptance share $\text{accepted}_\text{AI} / (\text{accepted}_\text{AI} + \text{accepted}_\text{human})$ per five-tick window. Unlike a query-count ratio, it tracks whether AI information is actually absorbed into beliefs, distinguishing reliance from mere querying. It is an unsigned reliance measure (0–1), not an echo-chamber index, and is reported as a supplementary series.
+
+**Belief accuracy (MAE)** is the mean absolute error between agent beliefs and true severity, averaged over cells with non-zero true severity (restricting to disaster cells prevents confident correct beliefs about the no-impact majority from masking failure to track the disaster itself) and over both agent types, sampled every five ticks. MAE enters the analysis as an operational criterion: a Goldilocks alignment should not merely suppress echo chambers but also maintain adequate situational awareness for effective relief delivery.
+
+**Relief performance** is measured by unmet needs (cells at severity ≥ 3 that received no relief token in a given tick) and targeting precision (the fraction of relief tokens placed on cells at severity ≥ 3, evaluated against the disaster state at placement time). A second, delayed correctness assessment (15–25 ticks after targeting) feeds the agents' reinforcement signal but is not reported as an outcome.
 
 To locate the optimal alignment level we construct two composite scores over the steady-state window (last 75 simulation ticks). Both use range normalisation across the alignment sweep so that each component contributes on a [0, 1] scale:
 
-$$\text{total\_bubble} = |\text{SECI}|_\text{norm} + |\text{AECI}|_\text{norm}$$
-$$\text{total\_score} = |\text{SECI}|_\text{norm} + |\text{AECI}|_\text{norm} + \text{MAE}_\text{norm}$$
+$$\text{total\_bubble} = |\text{SECI}|_\text{norm} + |\text{AECI-Var}|_\text{norm}$$
+$$\text{total\_score} = |\text{SECI}|_\text{norm} + |\text{AECI-Var}|_\text{norm} + \text{MAE}_\text{norm}$$
 
-The Goldilocks optimum α* is the alignment level that minimises total\_bubble; α*(+MAE) is the minimiser of total\_score. Reporting both criteria makes the trade-off between echo-chamber suppression and epistemic accuracy explicit.
+The Goldilocks optimum α* is the alignment level that minimises total\_bubble; α*(+MAE) is the minimiser of total\_score. Reporting both criteria makes the trade-off between echo-chamber suppression and epistemic accuracy explicit. Because the raw AECI-Var signal is small relative to SECI, range normalisation can amplify its influence on the location of the minimum; we therefore report an **α\* sensitivity analysis** across composite variants (SECI alone; SECI + AECI-Err; each with and without MAE) and treat α* as robust only if the variants agree.
 
 ## Experimental Design
 
@@ -61,4 +73,4 @@ The primary experiment sweeps α across eleven levels (0.0, 0.1, …, 1.0) with 
 
 A secondary experiment varies the *cognitive gap scalar* g ∈ {0.0, 0.5, 1.0, 1.5}, which scales the difference between exploitative and exploratory acceptance parameters from a shared midpoint (D\_mid = 3.0, δ\_mid = 2.35) while preserving the invariant D\_exploit < D\_explor and δ\_exploit > δ\_explor. At g = 0 both agent types are cognitively identical, providing a null condition for heterogeneity effects; at g = 1 the parameters recover the baseline calibration. This sweep tests whether the Goldilocks α* is robust to the degree of within-population cognitive diversity.
 
-Spatial and network periphery analyses decompose outcomes by proximity to the disaster epicentre (nearest-quartile vs furthest-quartile cells) and by social-network degree (Q1 vs Q4 agents). These periphery gaps address whether alignment benefits are equitably distributed or concentrated among well-connected, centrally located actors — a key equity concern in humanitarian AI applications.
+Spatial and network periphery analyses decompose outcomes by proximity to the disaster epicentre (nearest-quartile vs furthest-quartile cells and agent spawn positions) and by betweenness centrality on the social network (Q1 vs Q4 agents; degree-based scalars are also recorded). Agent-level periphery outcomes are reported as steady-state means over the last 75 ticks with 95% confidence intervals across replications, together with the time evolution of the within-run paired gaps. These periphery gaps address whether alignment benefits are equitably distributed or concentrated among well-connected, centrally located actors — a key equity concern in humanitarian AI applications. Because agents are immobile, sense only their own cell, and query, AI-sensing, and relief mechanisms operate grid-wide independently of agent position, the structural scope for periphery gaps is deliberately narrow (see Supplementary S5.5).

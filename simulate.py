@@ -18,6 +18,7 @@ Usage:
 import argparse
 import json
 import os
+import random
 
 import numpy as np
 from DisasterAI_Model import DisasterModel, HumanAgent
@@ -155,6 +156,12 @@ def main():
                         help='Disaster evolution speed: 0=static 1=slow 2=medium 3=rapid')
     parser.add_argument('--share_exploitative', type=float, default=0.5,
                         help='Fraction of agents that are exploitative')
+    parser.add_argument('--salience_weight',    type=float, default=0.0,
+                        help='Severity-weighted (salience) verification, 0=uniform '
+                             '(baseline) to 1=full salience (C12 counterfactual)')
+    parser.add_argument('--seed_base',          type=int,   default=0,
+                        help='Replicate i is seeded with seed_base + i, so runs are '
+                             'reproducible and conditions share common random numbers')
     args = parser.parse_args()
 
     params = BASE_PARAMS.copy()
@@ -162,6 +169,7 @@ def main():
     params['rumor_probability']   = args.rumor_probability
     params['disaster_dynamics']   = args.disaster_dynamics
     params['share_exploitative']  = args.share_exploitative
+    params['salience_weight']     = args.salience_weight
 
     print(f'Condition: α={args.alpha}, rumor={args.rumor_probability}, '
           f'disaster={args.disaster_dynamics}, exploit={args.share_exploitative}')
@@ -170,11 +178,18 @@ def main():
     runs = []
     for i in range(args.n_runs):
         print(f'  Run {i + 1}/{args.n_runs}...')
+        # Seed each replicate so results are reproducible and every condition
+        # uses the same seed sequence (common random numbers across the sweep).
+        random.seed(args.seed_base + i)
+        np.random.seed(args.seed_base + i)
         runs.append(run_one(params))
 
     out = {
         'condition': {k: params[k] for k in params},
         'n_runs': args.n_runs,
+        # aeci_* series use NEGATIVE = echo chamber (unified 2026-07 convention);
+        # plot_results.py flips files that lack this marker.
+        'conventions': {'aeci_err_sign': 'negative_echo'},
         'runs': runs,
     }
 

@@ -199,6 +199,15 @@ observation noise as direct sensing ($\pm 1$ level with probability $0.2$), and 
 compared against the \emph{current} disaster state.
 Reports never verified before their 30-tick expiry yield no learning signal;
 explorers do not fall back to scoring sources against their own priors.
+Because most queried cells are truly unaffected, per-cell verification is
+base-rate dominated: a fully confirming AI still passes verification on
+$\approx 93\%$ of cells by echoing mostly-correct ``no impact'' priors.
+A salience-weighting parameter $s\in[0,1]$ therefore interpolates the
+verification learning rate between uniform per-cell evaluation ($s=0$, default)
+and severity-weighted evaluation ($s=1$), with weight
+$(\max(t, r)+1)/6$ so that an error about a disaster cell carries up to six
+times the weight of a confirmed empty cell --- operationalising
+negativity/salience bias in source evaluation.
 This dual-track approach captures both the cognitive updating of source reliability
 assessments and the pragmatic evaluation of information utility for decision support,
 and reflects the delayed, imperfect verification characteristic of post-disaster
@@ -247,11 +256,48 @@ approach was preferred because it has a natural zero, is directly comparable acr
 agent types, and maps onto the precision terms in the Bayesian update
 (Equation~\ref{eq:bayesian}).
 
-The AI Echo Chamber Index (AECI) measures the fraction of information updates
-that are actually absorbed from AI sources within each five-tick window:
+The AI-side counterpart comes in three named constructs, each capturing a
+different facet of AI influence.
+All signed indices share the SECI convention: negative = echo chamber.
+
+\paragraph{AECI-Var.}
+Applies the SECI variance formula (Equation~\ref{eq:seci}) with grouping by AI
+reliance instead of network community: within each agent type, agents are
+median-split by their cumulative count of \emph{accepted} AI belief updates,
+the belief variance of each type's AI-reliant half is compared with the global
+variance, and the two type values are averaged.
+Splitting within type prevents the index from conflating AI's effect on beliefs
+with which agent type self-selects into AI use.
+$\mathrm{AECI\text{-}Var}<0$ means AI-reliant agents are more epistemically
+homogeneous than the population---an AI-induced bubble.
+This construct enters the Goldilocks composite, making total\_bubble a symmetric
+sum of two structurally identical variance ratios.
+
+\paragraph{AECI-Err.}
+Measures whether AI reliance produces \emph{confidently wrong} beliefs: for each
+agent, average $\text{confidence}\times|\text{believed}-\text{true severity}|$
+over cells believed at $L\geq1$; then compare AI-heavy and AI-light halves
+(same median split as AECI-Var):
 %
 \begin{equation}
-  \mathrm{AECI} = \frac{\Delta q_{\mathrm{AI}}}
+  \mathrm{AECI\text{-}Err}
+    = -\,\frac{\bar e_{\mathrm{AI\text{-}heavy}} - \bar e_{\mathrm{AI\text{-}light}}}
+              {\max\!\left(\bar e_{\mathrm{AI\text{-}heavy}},\,
+                           \bar e_{\mathrm{AI\text{-}light}}\right)}.
+  \label{eq:aecierr}
+\end{equation}
+%
+$\mathrm{AECI\text{-}Err}<0$ means AI-heavy agents hold more confident false
+beliefs than AI-light agents (algorithmic echo chamber);
+$\mathrm{AECI\text{-}Err}>0$ means AI corrects beliefs.
+Reported as time series per agent type.
+
+\paragraph{AECI-Acc.}
+The acceptance share of information updates actually absorbed from AI sources
+within each five-tick window:
+%
+\begin{equation}
+  \mathrm{AECI\text{-}Acc} = \frac{\Delta q_{\mathrm{AI}}}
                        {\Delta q_{\mathrm{AI}} + \Delta q_{\mathrm{human}}},
   \label{eq:aeci}
 \end{equation}
@@ -260,8 +306,8 @@ where $\Delta q$ counts D$\delta$-accepted updates during the window.
 Unlike a simple query-count ratio, this formulation distinguishes
 \emph{reliance}---AI information that passes the acceptance threshold and
 revises beliefs---from mere querying, which may be rejected without effect.
-High AECI signals over-dependence on a potentially confirming source, regardless
-of how often human contacts are also consulted.
+It is an unsigned $[0,1]$ reliance measure, not an echo-chamber index, and is
+reported as a supplementary series.
 
 % ============================================================
 \subsection{Relief Allocation and Performance Evaluation}
@@ -276,10 +322,14 @@ Token placement effectiveness is evaluated through delayed reward signals
 at the time of delivery.
 
 Performance metrics encompass belief accuracy (mean absolute error against ground
-truth), targeting precision (fraction of tokens directed to cells with actual
-severity $\geq3$), unmet critical needs (cells with severity $\geq4$ receiving zero
-tokens per tick), and spatial coverage deficit (per-cell shortfall averaged near
-and far from the disaster epicentre).
+truth, computed over cells with true severity $\geq1$ so that confident correct
+beliefs about the no-impact majority cannot mask failure to track the disaster),
+targeting precision (fraction of tokens directed to cells with actual severity
+$\geq3$, evaluated against the disaster state at placement time; the delayed
+15--25-tick correctness assessment feeds only the agents' reinforcement signal),
+unmet critical needs (cells with severity $\geq3$ receiving zero tokens per tick),
+and spatial coverage deficit (per-cell shortfall averaged near and far from the
+disaster epicentre).
 Together these measures capture both efficiency and equity dimensions of disaster
 response, crucial for evaluating the downstream consequences of information flow.
 
@@ -300,10 +350,10 @@ sweep so each component contributes on a $[0,1]$ scale:
 \begin{align}
   \text{total\_bubble}(\alpha)
     &= |\mathrm{SECI}|_{\mathrm{norm}}(\alpha)
-       + |\mathrm{AECI}|_{\mathrm{norm}}(\alpha), \label{eq:bubble}\\
+       + |\mathrm{AECI\text{-}Var}|_{\mathrm{norm}}(\alpha), \label{eq:bubble}\\
   \text{total\_score}(\alpha)
     &= |\mathrm{SECI}|_{\mathrm{norm}}(\alpha)
-       + |\mathrm{AECI}|_{\mathrm{norm}}(\alpha)
+       + |\mathrm{AECI\text{-}Var}|_{\mathrm{norm}}(\alpha)
        + \mathrm{MAE}_{\mathrm{norm}}(\alpha). \label{eq:score}
 \end{align}
 %
@@ -311,6 +361,11 @@ The Goldilocks optimum $\alpha^*$ minimises total\_bubble; $\alpha^*(+\mathrm{MA
 minimises total\_score.
 Reporting both criteria makes the trade-off between echo-chamber suppression and
 belief accuracy explicit.
+Because the raw AECI-Var signal is small relative to SECI, range normalisation
+can amplify its influence on the location of the minimum; we therefore report an
+$\alpha^*$ sensitivity analysis across composite variants (SECI alone;
+SECI\,+\,AECI-Err; each with and without MAE) and treat $\alpha^*$ as robust only
+if the variants agree.
 
 \paragraph{Cognitive gap sweep.}
 A secondary experiment varies the cognitive gap scalar $g\in\{0.0,0.5,1.0,1.5\}$,
@@ -333,9 +388,13 @@ Statistical analysis employs non-parametric methods to handle non-normal
 performance distributions across the 20 replications, while time-series analysis
 tracks the evolution of trust and bubble metrics throughout each crisis scenario.
 Spatial and network periphery analyses decompose outcomes by distance to the
-disaster epicentre (nearest vs.\ furthest quartile of cells) and by social-network
-degree (Q1 vs.\ Q4 agents) to examine whether alignment benefits are equitably
-distributed.
+disaster epicentre (nearest vs.\ furthest quartile of cells and agent spawn
+positions) and by betweenness centrality on the social network (Q1 vs.\ Q4
+agents; degree-based scalars are also recorded) to examine whether alignment
+benefits are equitably distributed. Agent-level periphery outcomes are reported
+as steady-state means over the last 75 ticks with 95\% confidence intervals
+across replications, together with the time evolution of the within-run paired
+gaps (Supplementary S5.5).
 
 % ============================================================
 \subsection{Technical Implementation}

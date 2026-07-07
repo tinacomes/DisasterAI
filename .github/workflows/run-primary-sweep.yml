@@ -1,18 +1,41 @@
 name: Run Primary Alignment Sweep only
 
-# Re-runs only the 6α × N_RUNS primary sweep — no factor/gap sweeps.
+# Re-runs only the 11α × N_RUNS primary sweep — no factor/gap sweeps.
 # Use this after bumping N_RUNS or tweaking primary-sweep parameters.
+#
+# PARALLEL version: one job per α level (11 workers, ~30-40 min each at
+# n_runs=20, ticks=200) + a collect/plot job. The previous serial version
+# ran all 11 α levels in a single job (~5 h at n_runs=20) and exceeded the
+# 2 h job execution limit.
 on:
   workflow_dispatch:
+    inputs:
+      n_runs:
+        description: "Replications per α level"
+        required: false
+        default: "20"
+      ticks:
+        description: "Simulation ticks per run"
+        required: false
+        default: "200"
+      salience_weight:
+        description: "Salience-weighted verification: 0 = uniform baseline, 1 = severity-weighted (C12 counterfactual)"
+        required: false
+        default: "0.0"
 
 env:
   MPLBACKEND: Agg
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
-  filter-bubbles-primary:
+  # ── Step 1: one worker per alpha level ───────────────────────────────────
+  primary-alpha:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        alpha: ["0.0", "0.1", "0.2", "0.3", "0.4", "0.5", "0.6", "0.7", "0.8", "0.9", "1.0"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -21,11 +44,46 @@ jobs:
       - run: |
           mkdir -p filter_bubble_results
           python3 test_filter_bubbles.py \
-            --primary-only \
-            --save-dir filter_bubble_results/
+            --single-alpha ${{ matrix.alpha }} \
+            --out-file filter_bubble_results/bubble_alpha_${{ matrix.alpha }}.json \
+            --ticks ${{ inputs.ticks }} \
+            --n-runs ${{ inputs.n_runs }} \
+            --salience-weight ${{ inputs.salience_weight }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: primary-alpha-${{ matrix.alpha }}
+          path: filter_bubble_results/bubble_alpha_${{ matrix.alpha }}.json
+          retention-days: 7
+
+  # ── Step 2: collect per-alpha JSONs and plot (no simulation) ─────────────
+  # Factor/gap plots are skipped automatically when their JSONs are absent.
+  primary-collect:
+    needs: primary-alpha
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11", cache: "pip"}
+      - run: pip install -r requirements.txt
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: primary-alpha-*
+          merge-multiple: true
+          path: filter_bubble_results/
+      - run: ls -lh filter_bubble_results/
+      - run: |
+          python3 test_filter_bubbles.py \
+            --collect-and-plot \
+            --results-dir filter_bubble_results/ \
+            --save-dir filter_bubble_results/ \
+            --ticks ${{ inputs.ticks }} \
+            --n-runs ${{ inputs.n_runs }}
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: filter-bubble-primary-plots
-          path: filter_bubble_results/*.png
+          path: |
+            filter_bubble_results/*.png
+            filter_bubble_results/experiment_results.json
           retention-days: 30
