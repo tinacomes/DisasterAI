@@ -18,6 +18,10 @@ on:
         description: "Simulation ticks per run"
         required: false
         default: "200"
+      salience_weight:
+        description: "Salience-weighted verification: 0 = uniform baseline, 1 = severity-weighted (C12 counterfactual)"
+        required: false
+        default: "0.0"
 
 env:
   MPLBACKEND: Agg
@@ -43,7 +47,8 @@ jobs:
             --single-alpha ${{ matrix.alpha }} \
             --out-file filter_bubble_results/bubble_alpha_${{ matrix.alpha }}.json \
             --ticks ${{ inputs.ticks }} \
-            --n-runs ${{ inputs.n_runs }}
+            --n-runs ${{ inputs.n_runs }} \
+            --salience-weight ${{ inputs.salience_weight }}
       - uses: actions/upload-artifact@v4
         with:
           name: primary-alpha-${{ matrix.alpha }}
