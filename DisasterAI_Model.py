@@ -105,6 +105,10 @@ class HumanAgent(Agent):
         self.incorrect_targets = 0
         self.tokens_sent_total = 0    # tokens counted at placement time (no evaluation delay)
 
+        # Mobility state (DESIGN_PROPOSAL_NETWORK_MOBILITY §1)
+        self.home_pos = None            # set at placement; anchor for home-biased movement
+        self.last_interest_point = None # most recent query target; explorers move toward it
+
 
     def initialize_beliefs(self, assigned_rumor=None):
         """
@@ -1289,6 +1293,41 @@ class HumanAgent(Agent):
             print(f"ERROR in Agent {self.unique_id} update_belief_bayesian: {e}")
             return False
 
+    def _select_human_source_network(self):
+        """Network-gated human source selection (query_scope == 'network').
+
+        Default draw: friends only, weighted by trust (the pre-existing friend
+        machinery — trust-widened acceptance, friend trust anchors — already
+        handles the rest). With p = 0.1 the agent instead reaches ONE hop
+        further and queries a friend-of-a-friend uniformly: exploration without
+        teleportation, preserving the Q-learning rationale for discovering the
+        'human' category while keeping reach socially plausible (dormant-tie
+        activation). Returns a source id, or None if the agent has no friends.
+        """
+        # sorted(): self.friends is a set and its iteration order varies across
+        # processes; sorting keeps seeded runs reproducible.
+        friends = sorted(f for f in self.friends if f in self.model.humans)
+        if not friends:
+            return None
+        if random.random() < 0.1:
+            two_hop = set()
+            for f_id in friends:
+                f_agent = self.model.humans.get(f_id)
+                if f_agent:
+                    two_hop.update(g for g in f_agent.friends if g in self.model.humans)
+            two_hop.discard(self.unique_id)
+            two_hop.difference_update(friends)
+            if two_hop:
+                return random.choice(sorted(two_hop))  # sorted: seed-reproducible
+        weights = [max(0.05, self.trust.get(f_id, 0.1)) for f_id in friends]
+        r = random.random() * sum(weights)
+        cumulative = 0.0
+        for f_id, w in zip(friends, weights):
+            cumulative += w
+            if r <= cumulative:
+                return f_id
+        return friends[-1]
+
     def seek_information(self):
         """
         Queries a single source for information about an interest point, processes the report,
@@ -1399,6 +1438,9 @@ class HumanAgent(Agent):
                 print(f"Agent {self.unique_id}: No valid interest point, skipping seek_information.")
                 return
 
+            # Remember the target for mobility (explorers walk toward it)
+            self.last_interest_point = interest_point
+
             # Source selection (epsilon-greedy with type-specific biases)
             # Use 3-mode structure: self_action, human, ai
             # Then select specific source within chosen mode
@@ -1453,37 +1495,46 @@ class HumanAgent(Agent):
                 source_id = None  # No external source used
 
             elif chosen_mode == "human":
-                # Fix human source selection: use trust-weighted random selection
-                # instead of always picking the highest-trust friend.
-                # Always-max-trust means Q-table["human"] only reflects one friend,
-                # never exploring other humans. Weighted selection lets agents
-                # occasionally query less-trusted or non-friend humans, enabling
-                # Q-learning to discover the true value of human sources as a category.
-                valid_sources = [h for h in self.model.humans if h != self.unique_id]
-                if not valid_sources:
-                    return
-                # Build candidate pool: friends get a trust-based weight, non-friends
-                # get a small baseline weight so they can be discovered.
-                candidates = []
-                weights = []
-                for h_id in valid_sources:
-                    trust_val = self.trust.get(h_id, 0.1)
-                    if h_id in self.friends:
-                        w = max(0.05, trust_val)  # Friends: weight by trust
-                    else:
-                        w = 0.05  # Non-friends: small baseline for exploration
-                    candidates.append(h_id)
-                    weights.append(w)
-                # Weighted random draw
-                total_w = sum(weights)
-                r = random.random() * total_w
-                cumulative = 0.0
-                source_id = candidates[-1]  # fallback
-                for cid, w in zip(candidates, weights):
-                    cumulative += w
-                    if r <= cumulative:
-                        source_id = cid
-                        break
+                if getattr(self.model, 'query_scope', 'global') == 'network':
+                    # Network-gated selection (DESIGN_PROPOSAL §3): friends only,
+                    # trust-weighted, with a p=0.1 friends-of-friends exploration
+                    # draw. Reaching beyond the ego network requires an
+                    # intermediary — this is what makes bridge agents brokers.
+                    source_id = self._select_human_source_network()
+                    if source_id is None:
+                        return  # degenerate: no friends — skip this query
+                else:
+                    # Legacy global pool: use trust-weighted random selection
+                    # instead of always picking the highest-trust friend.
+                    # Always-max-trust means Q-table["human"] only reflects one friend,
+                    # never exploring other humans. Weighted selection lets agents
+                    # occasionally query less-trusted or non-friend humans, enabling
+                    # Q-learning to discover the true value of human sources as a category.
+                    valid_sources = [h for h in self.model.humans if h != self.unique_id]
+                    if not valid_sources:
+                        return
+                    # Build candidate pool: friends get a trust-based weight, non-friends
+                    # get a small baseline weight so they can be discovered.
+                    candidates = []
+                    weights = []
+                    for h_id in valid_sources:
+                        trust_val = self.trust.get(h_id, 0.1)
+                        if h_id in self.friends:
+                            w = max(0.05, trust_val)  # Friends: weight by trust
+                        else:
+                            w = 0.05  # Non-friends: small baseline for exploration
+                        candidates.append(h_id)
+                        weights.append(w)
+                    # Weighted random draw
+                    total_w = sum(weights)
+                    r = random.random() * total_w
+                    cumulative = 0.0
+                    source_id = candidates[-1]  # fallback
+                    for cid, w in zip(candidates, weights):
+                        cumulative += w
+                        if r <= cumulative:
+                            source_id = cid
+                            break
 
                 source_agent = self.model.humans.get(source_id)
                 if source_agent:
@@ -1844,6 +1895,54 @@ class HumanAgent(Agent):
     # Phase 3 (DECIDE):  send_relief() - Agent decides where to send relief based on beliefs
     # =========================================================================
 
+    def move(self):
+        """Home-anchored mobility (active when model.mobility == 1).
+
+        Maps the returners/explorers dichotomy of the human-mobility literature
+        (Pappalardo et al. 2015) onto the agent types
+        (DESIGN_PROPOSAL_NETWORK_MOBILITY §1):
+        - exploitative = returner: random walk within r_home of home_pos, with
+          a p=0.3 pull toward home whenever away from it;
+        - exploratory = explorer: same walk within r_explore, plus a p=0.2
+          excursion step toward its current information target
+          (last_interest_point).
+        One Moore-neighbourhood step per tick; any step that would exceed the
+        type's radius becomes a step toward home instead.
+        """
+        home = self.home_pos or self.pos
+        r_max = (self.model.r_home if self.agent_type == 'exploitative'
+                 else self.model.r_explore)
+
+        def _step_toward(target):
+            return (self.pos[0] + int(np.sign(target[0] - self.pos[0])),
+                    self.pos[1] + int(np.sign(target[1] - self.pos[1])))
+
+        dist_home = math.sqrt((self.pos[0] - home[0]) ** 2 +
+                              (self.pos[1] - home[1]) ** 2)
+        if dist_home > r_max:
+            new_pos = _step_toward(home)
+        elif self.agent_type == 'exploitative':
+            # Returner: recurrent pull back to the home anchor
+            if dist_home > 0 and random.random() < 0.3:
+                new_pos = _step_toward(home)
+            else:
+                new_pos = (self.pos[0] + random.choice([-1, 0, 1]),
+                           self.pos[1] + random.choice([-1, 0, 1]))
+        else:
+            # Explorer: no home pull inside r_explore; excursions toward the
+            # current information target
+            if self.last_interest_point and random.random() < 0.2:
+                new_pos = _step_toward(self.last_interest_point)
+            else:
+                new_pos = (self.pos[0] + random.choice([-1, 0, 1]),
+                           self.pos[1] + random.choice([-1, 0, 1]))
+
+        new_pos = (min(self.model.width - 1, max(0, new_pos[0])),
+                   min(self.model.height - 1, max(0, new_pos[1])))
+        if new_pos != self.pos:
+            self.model.grid.move_agent(self, new_pos)
+            self.pos = new_pos
+
     def phase_observe(self):
         """Phase 1: OBSERVE - Sense local environment and update beliefs from direct perception."""
         self.sense_environment()
@@ -1866,6 +1965,10 @@ class HumanAgent(Agent):
         Order matters: sensing first gives agents ground-truth beliefs that
         improve query target selection and info quality evaluation.
         """
+        # Phase 0: MOVE - home-anchored mobility (no-op unless model.mobility)
+        if getattr(self.model, 'mobility', 0):
+            self.move()
+
         # Phase 1: OBSERVE - sense local environment (supplementary)
         self.phase_observe()
 
@@ -2190,8 +2293,22 @@ class DisasterModel(Model):
                  epicenter=None,         # Optional fixed epicenter [x, y]; random if None
                  verification_probability=0.3,  # Per-attempt arrival prob of external "situation report"
                                                 # verification for explorers' accepted remote reports
-                 salience_weight=0.0     # 0 = uniform verification rewards (baseline);
+                 salience_weight=0.0,    # 0 = uniform verification rewards (baseline);
                                          # 1 = full severity-weighted (salience) evaluation — see C12
+                 # --- DESIGN_PROPOSAL_NETWORK_MOBILITY switches (all default to
+                 #     legacy behaviour; see the proposal doc for rationale) ---
+                 mobility=0,             # 0 = immobile (legacy); 1 = home-anchored returner/explorer movement
+                 network_type='components',   # 'components' (legacy disconnected caveman) |
+                                              # 'spatial_bridged' (spatial communities + weak-tie bridges)
+                 query_scope='global',   # 'global' (legacy all-humans pool) |
+                                         # 'network' (friends + 2-hop exploration)
+                 p_within=0.5,           # within-community edge probability (spatial_bridged)
+                 p_bridge=0.15,          # per-agent probability of carrying one weak-tie bridge
+                 bridge_decay=2.0,       # distance-decay exponent for bridge endpoints (Kleinberg 2D)
+                 n_communities_per_type=4,
+                 spawn_sigma=2.5,        # spatial spread of agents around their community centroid
+                 r_home=3,               # returner (exploitative) mobility radius
+                 r_explore=8             # explorer (exploratory) mobility radius
                  ):
         super(DisasterModel, self).__init__()
         self.share_exploitative = share_exploitative
@@ -2216,6 +2333,24 @@ class DisasterModel(Model):
         self.low_trust_amplification_factor = low_trust_amplification_factor
         self.verification_probability = verification_probability
         self.salience_weight = salience_weight
+
+        # DESIGN_PROPOSAL_NETWORK_MOBILITY switches + sub-parameters
+        self.mobility = mobility
+        self.network_type = network_type
+        self.query_scope = query_scope
+        self.p_within = p_within
+        self.p_bridge = p_bridge
+        self.bridge_decay = bridge_decay
+        self.n_communities_per_type = n_communities_per_type
+        self.spawn_sigma = spawn_sigma
+        self.r_home = r_home
+        self.r_explore = r_explore
+        # Populated by the spatial generator; empty in legacy 'components' mode
+        # (self.communities stays None there so SECI/rumours keep using
+        # connected components exactly as before).
+        self.communities = None      # list[(set[node_id], type_label)] | None
+        self.node_home = {}          # {node_id: (x, y)} spawn homes (spatial mode)
+        self.bridge_agents = set()   # node_ids carrying a weak-tie bridge
 
         # Learning rates and biases
         self.exploit_trust_lr = exploit_trust_lr
@@ -2284,13 +2419,17 @@ class DisasterModel(Model):
         self.disaster_grid[...] = self.baseline_grid
 
         # Construct social network
-        components = self.initialize_social_network()  # Call only once and store result
+        if self.network_type == 'spatial_bridged':
+            components = self.initialize_social_network_spatial()
+        else:
+            components = self.initialize_social_network()  # Call only once and store result
         num_components = len(components)  # Get the count from the returned components list
 
-        if num_components < 2:
-            print("WARNING: Failed to create multiple components in social network")
-        else:
-            print(f"Successfully created social network with {num_components} components")
+        if self.network_type != 'spatial_bridged':
+            if num_components < 2:
+                print("WARNING: Failed to create multiple components in social network")
+            else:
+                print(f"Successfully created social network with {num_components} components")
 
         self.agent_list = []
         self.humans = {}
@@ -2317,10 +2456,14 @@ class DisasterModel(Model):
                              )
             self.humans[f"H_{i}"] = agent
             self.agent_list.append(agent)
-            pos = (random.randrange(width), random.randrange(height))
+            if self.node_home:
+                pos = self.node_home[i]   # spatial mode: home near community centroid
+            else:
+                pos = (random.randrange(width), random.randrange(height))
             self.grid.place_agent(agent, pos)
             agent.pos = pos
-            agent.initial_pos = pos  # fixed spawn location for spatial periphery classification
+            agent.initial_pos = pos  # spawn location for spatial periphery classification
+            agent.home_pos = pos     # mobility anchor (== initial_pos; agents return here)
 
         # validate_social_network(self, save_dir="analysis_plots") #debug
 
@@ -2335,9 +2478,10 @@ class DisasterModel(Model):
         # Map node ID back to agent ID string 'H_i'
         node_to_agent_id = {i: f"H_{i}" for i in range(self.num_humans)}
 
-        # Find connected components in the social network
+        # Rumour assignment groups: stored communities in spatial mode (bridges
+        # merge connected components), connected components in legacy mode.
         # Note: This assumes node IDs 0..N-1 correspond to agent indices
-        components = list(nx.connected_components(self.social_network))
+        components = self.get_seci_communities()
 
         for i, component_nodes in enumerate(components):
             # Decide if this component gets a rumor
@@ -2654,6 +2798,130 @@ class DisasterModel(Model):
             print(f"  Component {i}: {comp_size} agents ({comp_exploit_count} exploit, {comp_explor_count} explor)")
 
         return components
+
+    def initialize_social_network_spatial(self):
+        """Spatially embedded caveman network with weak-tie bridges
+        (DESIGN_PROPOSAL_NETWORK_MOBILITY §2).
+
+        - Per agent type, n_communities_per_type spatial communities: a centroid
+          on the grid (minimum-separation sampling) with members spawned
+          Gaussian(spawn_sigma) around it. Membership is stored in
+          self.communities and homes in self.node_home; agent placement uses
+          the homes so network communities ARE spatial neighbourhoods.
+        - Within-community Erdős–Rényi edges at p_within (mean degree ≈ 6 at
+          the defaults — Dunbar-scale support cliques).
+        - Each agent independently carries ONE weak-tie bridge with probability
+          p_bridge; the endpoint is drawn from OTHER communities with
+          probability ∝ (1 + d)^(−bridge_decay) (Kleinberg's 2D exponent at the
+          default 2.0). Bridge endpoints are recorded in self.bridge_agents —
+          these are the structural brokers.
+
+        Returns the list of community member-sets (the SECI grouping — NOT
+        connected components, which bridges would merge).
+        """
+        num_exploitative = int(self.num_humans * self.share_exploitative)
+        ids_by_type = [
+            ('exploitative', list(range(num_exploitative))),
+            ('exploratory',  list(range(num_exploitative, self.num_humans))),
+        ]
+
+        self.social_network = nx.Graph()
+        self.social_network.add_nodes_from(range(self.num_humans))
+        self.communities = []
+        self.node_home = {}
+        self.bridge_agents = set()
+
+        centroids = []
+        K = max(1, int(self.n_communities_per_type))
+        # Loose separation target so communities do not stack on one spot
+        min_sep = min(self.width, self.height) / (K + 1)
+
+        def _draw_centroid():
+            for _ in range(200):
+                c = (random.uniform(2, self.width - 3),
+                     random.uniform(2, self.height - 3))
+                if all((c[0] - o[0]) ** 2 + (c[1] - o[1]) ** 2 >= min_sep ** 2
+                       for o in centroids):
+                    return c
+            return (random.uniform(2, self.width - 3),
+                    random.uniform(2, self.height - 3))
+
+        def _clamp(v, hi):
+            return int(round(min(hi - 1, max(0, v))))
+
+        for type_label, ids in ids_by_type:
+            ids = list(ids)
+            random.shuffle(ids)
+            k = max(1, min(K, len(ids)))
+            size = max(1, len(ids) // k)
+            comms = [ids[i * size:(i + 1) * size] for i in range(k - 1)]
+            comms.append(ids[(k - 1) * size:])
+            for comm in [c for c in comms if c]:
+                cx, cy = _draw_centroid()
+                centroids.append((cx, cy))
+                for n in comm:
+                    self.node_home[n] = (_clamp(random.gauss(cx, self.spawn_sigma), self.width),
+                                         _clamp(random.gauss(cy, self.spawn_sigma), self.height))
+                for i in range(len(comm)):
+                    for j in range(i + 1, len(comm)):
+                        if random.random() < self.p_within:
+                            self.social_network.add_edge(comm[i], comm[j])
+                # No isolated members: everyone gets at least one within-community tie
+                for n in comm:
+                    if self.social_network.degree(n) == 0 and len(comm) > 1:
+                        other = random.choice([m for m in comm if m != n])
+                        self.social_network.add_edge(n, other)
+                self.communities.append((set(comm), type_label))
+
+        node_comm = {}
+        for idx, (members, _t) in enumerate(self.communities):
+            for n in members:
+                node_comm[n] = idx
+
+        for n in range(self.num_humans):
+            if random.random() >= self.p_bridge:
+                continue
+            hx, hy = self.node_home[n]
+            cands, weights = [], []
+            for m in range(self.num_humans):
+                if m == n or node_comm[m] == node_comm[n] or self.social_network.has_edge(n, m):
+                    continue
+                mx, my = self.node_home[m]
+                d = math.sqrt((mx - hx) ** 2 + (my - hy) ** 2)
+                cands.append(m)
+                weights.append((1.0 + d) ** (-self.bridge_decay))
+            if not cands:
+                continue
+            r = random.random() * sum(weights)
+            cum = 0.0
+            target = cands[-1]
+            for c, w in zip(cands, weights):
+                cum += w
+                if r <= cum:
+                    target = c
+                    break
+            self.social_network.add_edge(n, target)
+            self.bridge_agents.add(n)
+            self.bridge_agents.add(target)
+
+        n_comp = nx.number_connected_components(self.social_network)
+        print(f"Spatial-bridged network: {len(self.communities)} communities "
+              f"({K} per type), {self.social_network.number_of_edges()} edges, "
+              f"{len(self.bridge_agents)} bridge agents, "
+              f"{n_comp} connected component{'s' if n_comp != 1 else ''}")
+        return [members for members, _t in self.communities]
+
+    def get_seci_communities(self):
+        """Grouping for SECI and rumour assignment.
+
+        Legacy 'components' mode: connected components (identical to the stored
+        communities because there are no inter-community edges). Spatial mode:
+        the stored community membership — bridges merge components, so
+        components would silently mix types and break the SECI construct.
+        """
+        if self.communities:
+            return [members for members, _t in self.communities]
+        return list(nx.connected_components(self.social_network))
 
     def initialize_ai_knowledge_maps(self):
         """Initialize maps showing which areas each AI agent has knowledge about."""
@@ -2978,10 +3246,10 @@ class DisasterModel(Model):
             exploit_community_vars = []
             explor_community_vars  = []
 
-            for component_nodes in nx.connected_components(self.social_network):
+            for component_nodes in self.get_seci_communities():
                 if len(component_nodes) <= 1:
                     continue
-                # Network is type-homogeneous — all members share the same type
+                # Communities are type-homogeneous — all members share the same type
                 comp_agents = [self.humans.get(f"H_{n}") for n in component_nodes
                                if self.humans.get(f"H_{n}") is not None]
                 if not comp_agents:

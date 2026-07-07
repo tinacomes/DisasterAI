@@ -1,6 +1,14 @@
 # Design Proposal: Spatially Embedded Network, Mobility, and Network-Gated Queries
 
-Status: PROPOSAL (nothing in this document is implemented yet).
+Status: IMPLEMENTED on branch `claude/network-mobility-implementation` behind
+three model switches — `mobility` (0/1), `network_type`
+('components'/'spatial_bridged'), `query_scope` ('global'/'network') — all
+defaulting to legacy behaviour (a seeded run with switches off is bit-identical
+to the pre-change code). CLI: `--mobility 1 --network-type spatial_bridged
+--query-scope network` on `test_filter_bubbles.py`. Broker-flag scalars
+(`bridge_mae`, `nonbridge_mae`, `bridge_aid`, `nonbridge_aid`,
+`n_bridge_agents`) are recorded per run. The paper-scale validation sweep
+(§4) has not been run yet.
 Scope: answers three design questions — (1) how agents should move, (2) what
 social-network model supports genuine brokerage and periphery analysis at this
 model's scale (30 × 30 grid, 100 humans, 200 ticks, N = 20 replications), and

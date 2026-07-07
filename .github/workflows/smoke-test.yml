@@ -92,6 +92,20 @@ jobs:
           print('test_filter_bubbles.py: OK')
           "
 
+      - name: Smoke-test network/mobility/query switches (1 run, 20 ticks)
+        run: |
+          python3 -c "
+          import test_filter_bubbles as fb
+          fb.base_params.update({'ticks': 20, 'mobility': 1,
+                                 'network_type': 'spatial_bridged',
+                                 'query_scope': 'network'})
+          params = {**fb.base_params, 'ai_alignment_level': 0.5}
+          r = fb.run_replicated(params, 1, 'switches-on smoke')
+          assert r['n_bridge_agents_mean'] > 0, 'no bridge agents recorded'
+          assert r['periph_sp_mae_gap_mean'], 'periphery series missing'
+          print('network/mobility/query switches: OK')
+          "
+
       - name: Upload smoke plots
         uses: actions/upload-artifact@v4
         if: always()

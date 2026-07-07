@@ -402,9 +402,11 @@ def run_one_sim(params):
     far_cell_aid      = float(np.nanmean(avg_aid[_far_mask]))
     all_dists  = []
     agent_data = []                    # (dist, degree, betw, mae, ai_frac, aid_sent)
+    _agent_order = []                  # HumanAgents in agent_data order (for broker flag)
     for agent in model.agent_list:
         if not isinstance(agent, HumanAgent):
             continue
+        _agent_order.append(agent)
         node_id = int(agent.unique_id.split('_')[1])
         deg     = degrees.get(node_id, 0)
         betw    = betweenness.get(node_id, 0.0)
@@ -437,8 +439,19 @@ def run_one_sim(params):
     hideg_mae, hideg_ai, hideg_aid = [], [], []
     lobetw_mae, lobetw_aid = [], []
     hibetw_mae, hibetw_aid = [], []
+    bridge_mae, bridge_aid = [], []
+    nonbridge_mae, nonbridge_aid = [], []
 
-    for dist, deg, betw, err, ai_frac, aid_sent in agent_data:
+    # Broker flag: agents carrying a weak-tie bridge (spatial_bridged network;
+    # empty set in legacy mode → both bridge lists stay empty → NaN scalars)
+    _bridge_nodes = getattr(model, 'bridge_agents', set()) or set()
+    for (dist, deg, betw, err, ai_frac, aid_sent), agent in zip(agent_data, _agent_order):
+        node_id = int(agent.unique_id.split('_')[1])
+        if _bridge_nodes:
+            if node_id in _bridge_nodes:
+                bridge_mae.append(err);    bridge_aid.append(aid_sent)
+            else:
+                nonbridge_mae.append(err); nonbridge_aid.append(aid_sent)
         if dist <= dist_q1:
             near_mae.append(err); near_ai.append(ai_frac); near_aid.append(aid_sent)
         elif dist >= dist_q3:
@@ -533,6 +546,10 @@ def run_one_sim(params):
         # Network-periphery scalars (betweenness centrality: low Q1 vs high Q4)
         'lobetw_mae': _m(lobetw_mae), 'hibetw_mae': _m(hibetw_mae),
         'lobetw_aid': _m(lobetw_aid), 'hibetw_aid': _m(hibetw_aid),
+        # Broker-flag scalars (spatial_bridged network only; NaN in legacy mode)
+        'bridge_mae':    _m(bridge_mae),    'nonbridge_mae': _m(nonbridge_mae),
+        'bridge_aid':    _m(bridge_aid),    'nonbridge_aid': _m(nonbridge_aid),
+        'n_bridge_agents': float(len(_bridge_nodes)),
     }
 
 
@@ -564,6 +581,7 @@ def _aggregate(runs):
         'near_mae', 'far_mae', 'near_ai', 'far_ai', 'near_aid', 'far_aid',
         'lodeg_mae', 'hideg_mae', 'lodeg_ai', 'hideg_ai', 'lodeg_aid', 'hideg_aid',
         'lobetw_mae', 'hibetw_mae', 'lobetw_aid', 'hibetw_aid',
+        'bridge_mae', 'nonbridge_mae', 'bridge_aid', 'nonbridge_aid', 'n_bridge_agents',
     ]
     result = {
         'metric_ticks': runs[0]['metric_ticks'],
@@ -2217,6 +2235,21 @@ if __name__ == '__main__':
              'compute metrics, and generate spatial_coverage.png + periphery_gap.png. '
              'Used after the parallel --single-alpha --epicenter CI jobs.',
     )
+    # DESIGN_PROPOSAL_NETWORK_MOBILITY switches (defaults preserve legacy behaviour)
+    parser.add_argument(
+        '--mobility', type=int, choices=[0, 1], default=None,
+        help='1 = home-anchored returner/explorer movement; 0 = immobile (legacy default).',
+    )
+    parser.add_argument(
+        '--network-type', choices=['components', 'spatial_bridged'], default=None,
+        help="'spatial_bridged' = spatial communities with weak-tie bridges; "
+             "'components' = legacy disconnected caveman (default).",
+    )
+    parser.add_argument(
+        '--query-scope', choices=['global', 'network'], default=None,
+        help="'network' = human queries limited to friends + 2-hop exploration; "
+             "'global' = legacy all-humans pool (default).",
+    )
     args = parser.parse_args()
 
     # Apply CLI overrides
@@ -2226,6 +2259,12 @@ if __name__ == '__main__':
         base_params['epicenter'] = args.epicenter   # fixed epicenter for spatial experiment
     if args.salience_weight is not None:
         base_params['salience_weight'] = args.salience_weight
+    if args.mobility is not None:
+        base_params['mobility'] = args.mobility
+    if args.network_type is not None:
+        base_params['network_type'] = args.network_type
+    if args.query_scope is not None:
+        base_params['query_scope'] = args.query_scope
     n_runs_primary = args.n_runs if args.n_runs is not None else N_RUNS
     # Factor/gap sweeps use at most half the primary ticks (they measure relative
     # differences, not absolute steady-state values, so shorter runs suffice)
