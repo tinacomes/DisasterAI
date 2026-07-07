@@ -44,7 +44,7 @@ The asymmetric normalisation bounds the index to [−1, +1] (5 is the maximum at
 
 The AI-side counterpart comes in three named constructs, each capturing a different facet of AI influence:
 
-**AECI-Var** applies the SECI variance formula with grouping by AI reliance instead of network community: agents are median-split by their cumulative count of *accepted* AI belief updates, and the belief variance of the AI-reliant half is compared to the global variance. AECI-Var < 0 means AI-reliant agents are more epistemically homogeneous than the population — an AI-induced bubble. This is the construct that enters the Goldilocks composite, making total\_bubble a symmetric sum of two structurally identical variance ratios.
+**AECI-Var** applies the SECI variance formula with grouping by AI reliance instead of network community: within each agent type, agents are median-split by their cumulative count of *accepted* AI belief updates, and the belief variance of each type's AI-reliant half is compared to the global variance; the two type values are averaged. Splitting within type prevents the index from conflating AI's effect on beliefs with which agent type self-selects into AI use (the composition of a population-level split varies strongly with α). AECI-Var < 0 means AI-reliant agents are more epistemically homogeneous than the population — an AI-induced bubble. This is the construct that enters the Goldilocks composite, making total\_bubble a symmetric sum of two structurally identical variance ratios.
 
 **AECI-Err** measures whether AI reliance produces *confidently wrong* beliefs: for each agent we average confidence × |believed − true severity| over L1+ cells, then compare AI-heavy and AI-light halves (same median split as AECI-Var):
 

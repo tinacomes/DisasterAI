@@ -2419,27 +2419,17 @@ class DisasterModel(Model):
         population (AI echo chamber); positive = more diverse. Same sign
         convention as SECI and AECI-Err.
 
-        Classification: median split by cum_accepted_ai (cumulative accepted AI
-        belief updates = actual AI influence on beliefs; queries inflated by
-        low-trust probing do not shape beliefs). This is the single
-        classification basis shared with AECI-Err. The previous rule
-        (accepted_ai >= 3 in the current 5-tick window) depended on the
-        per-period reset timing and starved the metric at low alpha, where D/delta
-        rejections made the per-period threshold rarely reachable.
+        Classification: WITHIN-TYPE median split by cum_accepted_ai (cumulative
+        accepted AI belief updates = actual AI influence on beliefs), the same
+        basis and split as AECI-Err. A population-level split let the type
+        composition of the "AI-reliant" group vary with alpha (25% exploiters at
+        alpha=0 vs 45-75% at alpha=1 in seeded probes), so the index partly
+        measured which agent type self-selects into AI use rather than what AI
+        does to beliefs (finding C11). Per-type values are averaged for the
+        headline series; per-type values are stored in _last_metrics for
+        diagnostics.
         """
-        aeci_variance = 0.0  # Default neutral value
-
-        humans = [a for a in self.humans.values() if hasattr(a, 'cum_accepted_ai')]
-        ai_reliant_agents = []
-        if len(humans) >= 4:
-            sorted_humans = sorted(humans, key=lambda a: a.cum_accepted_ai)
-            top_half = sorted_humans[len(sorted_humans) // 2:]
-            # Require actual AI influence in the top half — with zero acceptances
-            # everywhere there is no "AI-reliant" group and no signal.
-            if top_half and top_half[-1].cum_accepted_ai > 0:
-                ai_reliant_agents = top_half
-
-        # Get global belief variance
+        # Global belief variance (all agents pooled — consistent baseline with SECI)
         all_beliefs = []
         for agent in self.humans.values():
             for belief_info in agent.beliefs.values():
@@ -2447,53 +2437,54 @@ class DisasterModel(Model):
                     level = belief_info.get('level', 0)
                     if not np.isnan(level):  # Filter out NaN values
                         all_beliefs.append(level)
-        
-        # Calculate global variance with safety check
-        if len(all_beliefs) > 1:
-            global_var = np.var(all_beliefs)
-        else:
-            global_var = 0.0
-            
-        # Only proceed if we have a valid global variance and AI-reliant agents
-        if global_var > 0 and ai_reliant_agents:
-            # Get AI-reliant agents' beliefs
-            ai_reliant_beliefs = []
-            for agent in ai_reliant_agents:
+        global_var = np.var(all_beliefs) if len(all_beliefs) > 1 else 0.0
+
+        def _aeci_var_for(type_label):
+            """AECI-Var for one agent type; None if no valid group/signal."""
+            type_agents = [a for a in self.humans.values()
+                           if a.agent_type == type_label and hasattr(a, 'cum_accepted_ai')]
+            if len(type_agents) < 4 or global_var <= 0:
+                return None
+            sorted_agents = sorted(type_agents, key=lambda a: a.cum_accepted_ai)
+            top_half = sorted_agents[len(sorted_agents) // 2:]
+            # Require actual AI influence — with zero acceptances everywhere
+            # there is no "AI-reliant" group and no signal.
+            if not top_half or top_half[-1].cum_accepted_ai <= 0:
+                return None
+            reliant_beliefs = []
+            for agent in top_half:
                 for belief_info in agent.beliefs.values():
                     if isinstance(belief_info, dict):
                         level = belief_info.get('level', 0)
-                        if not np.isnan(level):  # Filter out NaN values
-                            ai_reliant_beliefs.append(level)
-            
-            # Calculate AI-reliant variance with safety check
-            if len(ai_reliant_beliefs) > 1:
-                ai_reliant_var = np.var(ai_reliant_beliefs)
+                        if not np.isnan(level):
+                            reliant_beliefs.append(level)
+            if len(reliant_beliefs) < 2:
+                return None
+            var_diff = np.var(reliant_beliefs) - global_var
+            if var_diff < 0:  # Variance reduction → AI echo chamber (negative)
+                return max(-1.0, var_diff / global_var)
+            max_possible_var = 5.0  # Max variance for belief levels 0-5
+            denom = max_possible_var - global_var
+            return min(1.0, var_diff / denom) if denom > 1e-9 else 0.0
 
-                # Calculate variance effect
-                # Negative means AI reduces variance (echo chamber)
-                # Positive means AI increases variance (diversification)
-                var_diff = ai_reliant_var - global_var
-                
-                # Normalize to [-1, +1] range
-                if var_diff < 0:  # Variance reduction (echo chamber)
-                    aeci_variance = max(-1, var_diff / global_var)  # Normalize by global variance
-                else:  # Variance increase (diversification)
-                    # Find a reasonable upper bound for normalization
-                    max_possible_var = 5.0  # Given belief levels are 0-5, max variance is around 5
-                    aeci_variance = min(1, var_diff / (max_possible_var - global_var))
+        per_type = {t: _aeci_var_for(t) for t in ("exploitative", "exploratory")}
+        valid = [v for v in per_type.values() if v is not None]
+        aeci_variance = float(np.mean(valid)) if valid else 0.0
 
         # Create a CORRECTLY formatted tuple
         aeci_variance_tuple = (self.tick, aeci_variance)
-        
-        # Update metrics dictionary with consistent format
+
+        # Update metrics dictionary with consistent format (+ per-type diagnostics)
         self._last_metrics['aeci_variance'] = {
             'tick': self.tick,
-            'value': aeci_variance
+            'value': aeci_variance,
+            'exploit': per_type["exploitative"],
+            'explor': per_type["exploratory"],
         }
-        
+
         # Store in the array with consistent format
         self.aeci_variance_data.append(aeci_variance_tuple)
-        
+
         return aeci_variance_tuple
 
     def calculate_info_diversity(self):

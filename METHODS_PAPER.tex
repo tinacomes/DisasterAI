@@ -253,9 +253,12 @@ All signed indices share the SECI convention: negative = echo chamber.
 
 \paragraph{AECI-Var.}
 Applies the SECI variance formula (Equation~\ref{eq:seci}) with grouping by AI
-reliance instead of network community: agents are median-split by their
-cumulative count of \emph{accepted} AI belief updates, and the belief variance
-of the AI-reliant half is compared with the global variance.
+reliance instead of network community: within each agent type, agents are
+median-split by their cumulative count of \emph{accepted} AI belief updates,
+the belief variance of each type's AI-reliant half is compared with the global
+variance, and the two type values are averaged.
+Splitting within type prevents the index from conflating AI's effect on beliefs
+with which agent type self-selects into AI use.
 $\mathrm{AECI\text{-}Var}<0$ means AI-reliant agents are more epistemically
 homogeneous than the population---an AI-induced bubble.
 This construct enters the Goldilocks composite, making total\_bubble a symmetric

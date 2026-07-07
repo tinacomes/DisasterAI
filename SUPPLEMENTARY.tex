@@ -185,8 +185,10 @@ with annotation $\times$.
 \subsubsection*{S5.2\enspace AI Echo Chamber Indices (AECI-Var, AECI-Err, AECI-Acc)}
 
 \paragraph{AECI-Var.} Applies the SECI formula (S5) with grouping by AI reliance:
-agents are median-split by cumulative accepted AI belief updates, and the belief
-variance of the AI-reliant half replaces $V_c$.
+within each agent type, agents are median-split by cumulative accepted AI belief
+updates, the belief variance of each type's AI-reliant half replaces $V_c$, and
+the two type values are averaged (the within-type split avoids conflating AI's
+effect on beliefs with type self-selection into AI use).
 Negative = AI-induced bubble; this construct enters the Goldilocks composite.
 
 \paragraph{AECI-Err.} Compares confidence-weighted belief error between the

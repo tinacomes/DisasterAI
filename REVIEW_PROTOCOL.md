@@ -382,6 +382,44 @@ in 80 ticks) — report these per α in the paper. Two residual issues:
    "AI-reliant" is self-selected. Fine for descriptive indices; causal phrasing
    ("AI causes homogenization") should be avoided or hedged.
 
+### C12 (mechanism diagnosis): why explorers keep relying on AI even when it is wrong
+
+Observed in the paper-scale run (28817810131): explorer AI query share is flat at
+~0.55–0.60 across ALL α (always above 50 %), explorer AI-trust leads friend-trust from
+t = 0 in 100 % of runs, yet explorer SECI jumps to ≈ 0.29 at α ≥ 0.9.
+
+**Diagnosis (instrumented probe, 80 ticks, 40 agents, α ∈ {0, 1}): the verification
+reward is base-rate dominated.** Logging every AI report delivered to explorer queries:
+
+| | α = 0 (truthful) | α = 1 (confirming) |
+|---|---|---|
+| share of reported cells with true level 0 | 89 % | 91 % |
+| exact-correct on those L0 cells | 97 % | 99 % |
+| within ±1 on true L3+ cells | 38 % | **2 %** |
+| **overall within ±1 (positive-reward zone)** | **96 %** | **93 %** |
+
+Explorers query high-uncertainty areas, but ~90 % of those cells are truly empty, and a
+confirming AI echoes the explorer's (mostly correct) "nothing there" prior — so it
+passes situation-report verification on ~93 % of cells even at α = 1. Its failures
+concentrate entirely on the rare high-severity cells (within ±1 accuracy collapses from
+38 % → 2 % on L3+), but those few negative rewards are swamped by the empty-cell
+positives. The Q-learning works exactly as designed; the reward signal itself cannot
+distinguish a truthful AI from a confirming one because **accuracy per cell is not
+weighted by importance**.
+
+This is arguably the paper's most interesting mechanism finding: *a confirming AI
+retains user trust because it is right about the unimportant majority; its errors
+concentrate precisely on the high-severity cells that drive response performance* —
+which is why explorer reliance stays flat while unmet needs explode at α ≥ 0.9.
+
+**Options:** (a) keep as-is and make it a headline finding (defensible; mirrors
+real-world AI assistants that stay trusted by being right on easy queries); (b) add
+severity-weighted (salience) verification — scale the accuracy reward by
+max(truth, reported)/5 so being wrong about a disaster is more memorable than being
+right about nothing (also behaviorally defensible via negativity/salience bias). Option
+(b) would likely restore explorer α-sensitivity and is worth a parameterized variant;
+it changes results and needs a re-run.
+
 ### C7–C10 (paper/code rationale gaps to document)
 
 - **C7.** METHODS line 13 says only exploratory agents get fast information-quality

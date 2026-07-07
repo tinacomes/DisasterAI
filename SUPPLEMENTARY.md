@@ -95,7 +95,7 @@ All signed echo-chamber indices use one convention: **negative = echo chamber**.
 | Name | Formula (summary) | Code location | Range / sign | Reported as |
 |---|---|---|---|---|
 | SECI | (V_community − V_global)/V_global if V_c < V_g, else (V_c − V_g)/(5 − V_g); L1+ beliefs, per network component, type-averaged | `DisasterModel.step` (SECI block), `seci_data` | [−1, +1]; negative = echo | Time series + steady-state boxplots; composite component |
-| AECI-Var | Same variance formula, grouping = AI-reliant half (median split by `cum_accepted_ai`) vs global | `DisasterModel.calculate_aeci_variance`, `aeci_variance_data` | [−1, +1]; negative = echo | Composite component; lifecycle figure |
+| AECI-Var | Same variance formula, grouping = AI-reliant half (median split by `cum_accepted_ai` *within each type*, type values averaged) vs global | `DisasterModel.calculate_aeci_variance`, `aeci_variance_data` | [−1, +1]; negative = echo | Composite component; lifecycle figure |
 | AECI-Err | −(ē_AI-heavy − ē_AI-light)/max(ē), where ē = mean confidence × \|belief − truth\| over L1+ cells; same median split | `DisasterModel.step` (AECI-Err block), `aeci_data` | [−1, +1]; negative = echo | Time series per type; sensitivity composite |
 | AECI-Acc | accepted_AI/(accepted_AI + accepted_human), per 5-tick window | `retain_aeci_data` | [0, 1]; unsigned reliance | Supplementary series |
 | AI query share | per-tick AI queries / total queries (call counts, not acceptances) | `accum_calls_ai` deltas in `run_one_sim` | [0, 1] | Transition-timing + evolution figures |
@@ -115,7 +115,7 @@ Component values are averaged within each agent type (the network is type-homoge
 
 ### S5.2 AI Echo Chamber Indices (AECI-Var, AECI-Err, AECI-Acc)
 
-**AECI-Var** applies the SECI formula with grouping by AI reliance: agents are median-split by cumulative accepted AI belief updates (`cum_accepted_ai`), and the belief variance of the AI-reliant half replaces $V_c$. This is the construct in the Goldilocks composite.
+**AECI-Var** applies the SECI formula with grouping by AI reliance: within each agent type, agents are median-split by cumulative accepted AI belief updates (`cum_accepted_ai`), the belief variance of each type's AI-reliant half replaces $V_c$, and the two type values are averaged. The within-type split prevents the index from conflating AI's effect on beliefs with which type self-selects into AI use. This is the construct in the Goldilocks composite.
 
 **AECI-Err** compares confidence-weighted belief error between the AI-heavy and AI-light halves (same split):
 
