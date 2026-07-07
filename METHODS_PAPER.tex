@@ -388,9 +388,13 @@ Statistical analysis employs non-parametric methods to handle non-normal
 performance distributions across the 20 replications, while time-series analysis
 tracks the evolution of trust and bubble metrics throughout each crisis scenario.
 Spatial and network periphery analyses decompose outcomes by distance to the
-disaster epicentre (nearest vs.\ furthest quartile of cells) and by social-network
-degree (Q1 vs.\ Q4 agents) to examine whether alignment benefits are equitably
-distributed.
+disaster epicentre (nearest vs.\ furthest quartile of cells and agent spawn
+positions) and by betweenness centrality on the social network (Q1 vs.\ Q4
+agents; degree-based scalars are also recorded) to examine whether alignment
+benefits are equitably distributed. Agent-level periphery outcomes are reported
+as steady-state means over the last 75 ticks with 95\% confidence intervals
+across replications, together with the time evolution of the within-run paired
+gaps (Supplementary S5.5).
 
 % ============================================================
 \subsection{Technical Implementation}

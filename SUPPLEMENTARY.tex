@@ -286,9 +286,29 @@ This per-run computation avoids the blurring artefact that would arise from
 projecting all replications onto a single grid when epicentre locations vary.
 
 \paragraph{Network periphery.}
-Agents are ranked by social-network degree.
-Low-degree agents (Q1) and high-degree agents (Q4) are compared on belief MAE
-and relief tokens sent per tick.
+Agents are ranked by betweenness centrality on the type-homogeneous community
+graph (degree-quartile scalars are also recorded).
+Low-betweenness agents (Q1) and high-betweenness ``brokers'' (Q4) are compared
+on belief MAE and aid tokens sent.
+Both agent-level comparisons are reported as steady-state means (last 75 ticks)
+of five-tick-cadence series: belief MAE over disaster cells (L1+, the same
+construct as the headline MAE) and aid tokens sent per agent per five-tick
+window, counted at placement time.
+Figures show 95\% confidence intervals over the $N=20$ replications, and the
+full time evolution of the within-run paired gaps (periphery $-$ core) is
+reported separately.
+
+\paragraph{Interpretation caveat.}
+The periphery gaps are structurally bounded in this model: agents are immobile
+and sense only their own cell, while query targeting, AI sensing (uniform
+random 15\% of the grid per tick), and relief targeting all operate on the full
+grid independently of agent position; social communities are small
+($\sim$25 agents) and densely wired ($p=0.7$, diameter $\approx 2$), and humans
+may query any other human (non-friends at a small baseline weight), so neither
+spawn location nor network position gates information access strongly.
+The gap metrics therefore quantify residual inequity from local sensing and
+initial-belief differences, not from differential access to communication
+channels.
 
 % ============================================================
 \subsection*{S6\quad Primary Experiment: Goldilocks Alignment Sweep}

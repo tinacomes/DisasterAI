@@ -103,6 +103,7 @@ class HumanAgent(Agent):
         # Performance Counters
         self.correct_targets = 0
         self.incorrect_targets = 0
+        self.tokens_sent_total = 0    # tokens counted at placement time (no evaluation delay)
 
 
     def initialize_beliefs(self, assigned_rumor=None):
@@ -1608,6 +1609,7 @@ class HumanAgent(Agent):
                         if cell not in self.model.tokens_this_tick:
                             self.model.tokens_this_tick[cell] = {'exploit': 0, 'explor': 0}
                         self.model.tokens_this_tick[cell][agent_type_key] += 1
+                        self.tokens_sent_total += 1
 
                 # NOTE: correct_targets / incorrect_targets are updated in process_reward()
                 # with delayed ground truth (15-25 ticks). DO NOT also update them here —

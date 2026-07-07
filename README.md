@@ -104,7 +104,8 @@ All figures are saved to `analysis_plots/`.
 | `echo_chamber_lifecycle.png` | SECI/AECI trajectories + bar charts showing echo-chamber formation and recovery timing per α level. |
 | `aeci_evolution.png` | Cumulative AI query ratio over simulation time, separately for exploitative and exploratory agents. |
 | `spatial_coverage.png` | Coverage deficit and aid density maps for α = 0 (baseline), α*(+MAE), and α*(bubble). |
-| `periphery_gap.png` | Spatial near/far and network degree periphery gaps across α. |
+| `periphery_gap.png` | Spatial near/far and network betweenness periphery gaps across α. Steady-state means (last 75 ticks; MAE over disaster cells L1+) with 95% CI bands over replications. |
+| `periphery_gap_evolution.png` | Time evolution of the within-run paired periphery gaps (periphery − core) with 95% CI bands, for α ∈ {0, 0.5, α*, 1}. |
 | `gap_sweep.png` | Effect of cognitive polarisation (gap scalar g) on optimal α and composite scores. |
 
 ## Experimental Design Summary

@@ -178,6 +178,47 @@ def run_one_sim(params):
     """Run a single simulation and return per-tick metrics dict."""
     model = DisasterModel(**params)
 
+    # --- Periphery group membership (fixed for the whole run: agents never
+    #     move and the social network is static, so both classifications are
+    #     structural properties determined at initialisation) ----------------
+    _p_humans = [a for a in model.agent_list if isinstance(a, HumanAgent)]
+    _p_ex, _p_ey = model.epicenter
+    _p_dists = {
+        a.unique_id: float(np.sqrt((a.initial_pos[0] - _p_ex) ** 2 +
+                                   (a.initial_pos[1] - _p_ey) ** 2))
+        for a in _p_humans
+    }
+    _p_dq1 = np.percentile(list(_p_dists.values()), 25)
+    _p_dq3 = np.percentile(list(_p_dists.values()), 75)
+    periph_near_ids = {u for u, d in _p_dists.items() if d <= _p_dq1}
+    periph_far_ids  = {u for u, d in _p_dists.items() if d >= _p_dq3}
+
+    _p_betw  = nx.betweenness_centrality(model.social_network)
+    _p_bvals = sorted(_p_betw.values())
+    _p_nb    = len(_p_bvals)
+    _p_blo   = _p_bvals[max(0, _p_nb // 4 - 1)]
+    _p_bhi   = _p_bvals[min(_p_nb - 1, 3 * _p_nb // 4)]
+    periph_lobetw_ids = {f"H_{n}" for n, b in _p_betw.items() if b <= _p_blo}
+    periph_hibetw_ids = {f"H_{n}" for n, b in _p_betw.items() if b >= _p_bhi}
+
+    # Periphery time series (5-tick cadence, aligned with metric_ticks).
+    # MAE is over disaster cells (L1+) only — same construct as the headline
+    # MAE — so the series is not diluted by the ~92% of cells with true
+    # severity 0 that all agents believe correctly by default.
+    periph_near_mae_l1,   periph_far_mae_l1    = [], []
+    periph_lobetw_mae_l1, periph_hibetw_mae_l1 = [], []
+    # Aid tokens sent per agent per 5-tick window, counted at placement time.
+    periph_near_aid,   periph_far_aid    = [], []
+    periph_lobetw_aid, periph_hibetw_aid = [], []
+    # Gap series stored per run so _aggregate() yields the mean AND spread of
+    # the gap itself (pairing near/far within run — a cross-run difference of
+    # means would have no uncertainty estimate). Convention: periphery − core,
+    # i.e. positive MAE gap = periphery worse informed; negative aid gap =
+    # periphery contributes fewer tokens.
+    periph_sp_mae_gap, periph_nw_mae_gap = [], []
+    periph_sp_aid_gap, periph_nw_aid_gap = [], []
+    _prev_tokens_sent = {a.unique_id: 0 for a in _p_humans}
+
     seci_exploit, seci_explor           = [], []
     aeci_exploit, aeci_explor           = [], []
     trust_ai_exploit, trust_fri_exploit = [], []
@@ -260,6 +301,8 @@ def run_one_sim(params):
             aeci_explor.append( float(model.aeci_data[-1][2]) if model.aeci_data else float('nan'))
 
             ex_errors, er_errors = [], []
+            _g_mae = {'near': [], 'far': [], 'lobetw': [], 'hibetw': []}
+            _g_aid = {'near': [], 'far': [], 'lobetw': [], 'hibetw': []}
             for agent in model.agent_list:
                 if not isinstance(agent, HumanAgent):
                     continue
@@ -276,8 +319,39 @@ def run_one_sim(params):
                     ex_errors.append(err)
                 else:
                     er_errors.append(err)
+                # Periphery time series: bucket the same L1+ error and the
+                # tokens sent since the previous metric tick by group.
+                uid = agent.unique_id
+                sent_tot = getattr(agent, 'tokens_sent_total', 0)
+                d_sent = sent_tot - _prev_tokens_sent.get(uid, 0)
+                _prev_tokens_sent[uid] = sent_tot
+                if uid in periph_near_ids:
+                    _g_mae['near'].append(err);   _g_aid['near'].append(d_sent)
+                elif uid in periph_far_ids:
+                    _g_mae['far'].append(err);    _g_aid['far'].append(d_sent)
+                if uid in periph_lobetw_ids:
+                    _g_mae['lobetw'].append(err); _g_aid['lobetw'].append(d_sent)
+                elif uid in periph_hibetw_ids:
+                    _g_mae['hibetw'].append(err); _g_aid['hibetw'].append(d_sent)
             mae_exploit.append(float(np.nanmean(ex_errors)) if ex_errors else float('nan'))
             mae_explor.append( float(np.nanmean(er_errors)) if er_errors else float('nan'))
+
+            def _gm(key, buckets):
+                vals = buckets[key]
+                return float(np.nanmean(vals)) if vals else float('nan')
+            _nm, _fm = _gm('near', _g_mae),   _gm('far', _g_mae)
+            _lm, _hm = _gm('lobetw', _g_mae), _gm('hibetw', _g_mae)
+            _na, _fa = _gm('near', _g_aid),   _gm('far', _g_aid)
+            _la, _ha = _gm('lobetw', _g_aid), _gm('hibetw', _g_aid)
+            periph_near_mae_l1.append(_nm);   periph_far_mae_l1.append(_fm)
+            periph_lobetw_mae_l1.append(_lm); periph_hibetw_mae_l1.append(_hm)
+            periph_near_aid.append(_na);      periph_far_aid.append(_fa)
+            periph_lobetw_aid.append(_la);    periph_hibetw_aid.append(_ha)
+            # Gaps: periphery − core (spatial: far − near; network: low − high betw)
+            periph_sp_mae_gap.append(_fm - _nm)
+            periph_nw_mae_gap.append(_lm - _hm)
+            periph_sp_aid_gap.append(_fa - _na)
+            periph_nw_aid_gap.append(_la - _ha)
             prec_exploit.append(float(_win_ex_correct / _win_ex_total) if _win_ex_total > 0 else 0.0)
             prec_explor.append( float(_win_er_correct / _win_er_total) if _win_er_total > 0 else 0.0)
             _win_ex_correct = _win_ex_total = _win_er_correct = _win_er_total = 0
@@ -334,9 +408,9 @@ def run_one_sim(params):
         node_id = int(agent.unique_id.split('_')[1])
         deg     = degrees.get(node_id, 0)
         betw    = betweenness.get(node_id, 0.0)
-        # Use initial spawn position, not final position — agents move every tick so
-        # their end position is arbitrary relative to epicenter.  initial_pos reflects
-        # structural periphery (whether an agent's home area is far from the disaster).
+        # Agents are immobile (pos is set once at spawn and never changes), so
+        # initial_pos == pos always. It reflects structural periphery: whether an
+        # agent's home cell is far from the disaster.
         ax, ay  = getattr(agent, 'initial_pos', agent.pos)
         dist    = float(np.sqrt((ax - ex) ** 2 + (ay - ey) ** 2))
         all_dists.append(dist)
@@ -416,6 +490,21 @@ def run_one_sim(params):
         'prec_explor':             prec_explor,
         'unmet_needs':             [float(v) for v in model.unmet_needs_evolution],
         'metric_ticks':            metric_ticks,
+        # Periphery time series (5-tick cadence; MAE over disaster cells L1+;
+        # aid = tokens sent per agent per 5-tick window, counted at placement)
+        'periph_near_mae_l1':   periph_near_mae_l1,
+        'periph_far_mae_l1':    periph_far_mae_l1,
+        'periph_lobetw_mae_l1': periph_lobetw_mae_l1,
+        'periph_hibetw_mae_l1': periph_hibetw_mae_l1,
+        'periph_near_aid':      periph_near_aid,
+        'periph_far_aid':       periph_far_aid,
+        'periph_lobetw_aid':    periph_lobetw_aid,
+        'periph_hibetw_aid':    periph_hibetw_aid,
+        # Within-run paired gap series (periphery − core)
+        'periph_sp_mae_gap':    periph_sp_mae_gap,
+        'periph_nw_mae_gap':    periph_nw_mae_gap,
+        'periph_sp_aid_gap':    periph_sp_aid_gap,
+        'periph_nw_aid_gap':    periph_nw_aid_gap,
         # Scalar timing values (one per replication, aggregated across reps later)
         'trust_cross_exploit':  float(trust_cross_exploit),
         'trust_cross_explor':   float(trust_cross_explor),
@@ -457,6 +546,14 @@ def _aggregate(runs):
         'info_div_exploit', 'info_div_explor',
         'mae_exploit', 'mae_explor', 'prec_exploit', 'prec_explor',
         'unmet_needs',
+        # Periphery time series (absent in caches predating this feature;
+        # _aggregate degrades gracefully to empty lists)
+        'periph_near_mae_l1', 'periph_far_mae_l1',
+        'periph_lobetw_mae_l1', 'periph_hibetw_mae_l1',
+        'periph_near_aid', 'periph_far_aid',
+        'periph_lobetw_aid', 'periph_hibetw_aid',
+        'periph_sp_mae_gap', 'periph_nw_mae_gap',
+        'periph_sp_aid_gap', 'periph_nw_aid_gap',
     ]
     scalar_keys = [
         'trust_cross_exploit', 'trust_cross_explor',
@@ -1473,9 +1570,32 @@ def _gini(arr):
     return float((2.0 * np.dot(idx, v) / (n * v.sum())) - (n + 1.0) / n)
 
 
+def _t_crit(n, conf=0.95):
+    """Two-sided t critical value; falls back to the normal 1.96 without scipy."""
+    if n <= 1:
+        return float('nan')
+    try:
+        from scipy import stats as _st
+        return float(_st.t.ppf(0.5 + conf / 2, df=n - 1))
+    except ImportError:
+        return 1.96
+
+
+def _mean_ci(per_run_vals):
+    """Mean and 95% CI half-width across replications (NaN-safe)."""
+    v = np.asarray(per_run_vals, dtype=float)
+    v = v[~np.isnan(v)]
+    if len(v) == 0:
+        return float('nan'), float('nan')
+    if len(v) == 1:
+        return float(v[0]), 0.0
+    return float(np.mean(v)), float(_t_crit(len(v)) * np.std(v, ddof=1) / np.sqrt(len(v)))
+
+
 def plot_periphery_gap(all_results, metrics, save_dir):
     """
-    2-row × 2-col figure showing spatial and network periphery outcomes vs α.
+    2-row × 2-col figure showing spatial and network periphery outcomes vs α,
+    with 95% CI bands across replications.
 
     Left column — Spatial distance from disaster epicentre (per-run scalars,
                   computed with the correct per-run epicentre → valid even with
@@ -1489,7 +1609,12 @@ def plot_periphery_gap(all_results, metrics, save_dir):
       Row 1: Belief MAE — high-betweenness brokers (Q4) vs peripheral agents (Q1).
       Row 2: Aid tokens sent — high-betweenness (Q4) vs low-betweenness (Q1).
 
-    All metrics are per-run scalars aggregated in _aggregate() — no maps used.
+    Data source (preferred): steady-state means of the periphery time series
+    (last STEADY_STATE_WINDOW samples of `periph_*` keys; MAE over disaster
+    cells L1+ — same construct as the headline MAE). For caches predating
+    those keys the plot falls back to the legacy per-run scalars: an
+    end-of-run MAE snapshot over ALL cells (diluted by the ~92% zero-severity
+    cells) and full-run cumulative evaluated tokens.
     """
     alphas = ALIGNMENT_SWEEP
     total_n  = [metrics[a]['total_bubble_norm']  for a in alphas]
@@ -1497,21 +1622,52 @@ def plot_periphery_gap(all_results, metrics, save_dir):
     best_alpha       = alphas[int(np.argmin(total_n))]   # α*(bubble)
     best_alpha_score = alphas[int(np.argmin(total_sn))]  # α*(bubble + MAE)
 
-    def _get(res, key):
-        return float(res.get(f'{key}_mean', float('nan')))
+    def _has_ts(key):
+        return all(
+            r.get(f'{key}_ss_runs') and any(not np.isnan(v) for v in r[f'{key}_ss_runs'])
+            for r in all_results
+        )
 
-    near_mae   = [_get(r, 'near_mae')   for r in all_results]
-    far_mae    = [_get(r, 'far_mae')    for r in all_results]
-    near_aid   = [_get(r, 'near_aid')   for r in all_results]
-    far_aid    = [_get(r, 'far_aid')    for r in all_results]
-    lobetw_mae = [_get(r, 'lobetw_mae') for r in all_results]
-    hibetw_mae = [_get(r, 'hibetw_mae') for r in all_results]
-    lobetw_aid = [_get(r, 'lobetw_aid') for r in all_results]
-    hibetw_aid = [_get(r, 'hibetw_aid') for r in all_results]
+    use_ts_mae = all(_has_ts(k) for k in
+                     ('periph_near_mae_l1', 'periph_far_mae_l1',
+                      'periph_lobetw_mae_l1', 'periph_hibetw_mae_l1'))
+    use_ts_aid = all(_has_ts(k) for k in
+                     ('periph_near_aid', 'periph_far_aid',
+                      'periph_lobetw_aid', 'periph_hibetw_aid'))
+
+    def _series(ts_key, legacy_key, use_ts):
+        """Per-α (mean, ci) tuples from steady-state ts runs or legacy scalars."""
+        means, cis = [], []
+        for r in all_results:
+            if use_ts:
+                vals = r.get(f'{ts_key}_ss_runs', [])
+            else:
+                vals = r.get(f'{legacy_key}_runs',
+                             [r.get(f'{legacy_key}_mean', float('nan'))])
+            m, c = _mean_ci(vals)
+            means.append(m)
+            cis.append(c)
+        return np.array(means), np.array(cis)
+
+    near_mae,   near_mae_ci   = _series('periph_near_mae_l1',   'near_mae',   use_ts_mae)
+    far_mae,    far_mae_ci    = _series('periph_far_mae_l1',    'far_mae',    use_ts_mae)
+    lobetw_mae, lobetw_mae_ci = _series('periph_lobetw_mae_l1', 'lobetw_mae', use_ts_mae)
+    hibetw_mae, hibetw_mae_ci = _series('periph_hibetw_mae_l1', 'hibetw_mae', use_ts_mae)
+    near_aid,   near_aid_ci   = _series('periph_near_aid',   'near_aid',   use_ts_aid)
+    far_aid,    far_aid_ci    = _series('periph_far_aid',    'far_aid',    use_ts_aid)
+    lobetw_aid, lobetw_aid_ci = _series('periph_lobetw_aid', 'lobetw_aid', use_ts_aid)
+    hibetw_aid, hibetw_aid_ci = _series('periph_hibetw_aid', 'hibetw_aid', use_ts_aid)
+
+    mae_label = ('Belief MAE, disaster cells L1+\n(steady-state mean, last 75 ticks)'
+                 if use_ts_mae else
+                 'Belief MAE, all cells (final-tick snapshot)')
+    aid_label = ('Aid tokens sent / agent / 5-tick window\n(steady-state mean)'
+                 if use_ts_aid else
+                 'Cumulative evaluated aid tokens / agent (full run)')
 
     fig, axes = plt.subplots(2, 2, figsize=(13, 9))
     fig.suptitle(
-        'Periphery Gap across AI Alignment (α)\n'
+        'Periphery Gap across AI Alignment (α) — shading: 95% CI over replications\n'
         'Left: spatial distance from epicentre  |  Right: network betweenness centrality',
         fontsize=12, fontweight='bold'
     )
@@ -1522,12 +1678,16 @@ def plot_periphery_gap(all_results, metrics, save_dir):
         ax.axvline(best_alpha_score, color='tomato', linestyle=':', linewidth=1.8,
                    label=f'α*(+MAE)={best_alpha_score}')
 
-    def _net_panel(ax, core_vals, periph_vals, core_label, periph_label,
-                   ylabel, title):
+    def _net_panel(ax, core_vals, core_ci, periph_vals, periph_ci,
+                   core_label, periph_label, ylabel, title):
         ax.plot(alphas, core_vals,   'o-',  color='steelblue', linewidth=2,
                 label=core_label,   markersize=7)
+        ax.fill_between(alphas, core_vals - core_ci, core_vals + core_ci,
+                        color='steelblue', alpha=0.18)
         ax.plot(alphas, periph_vals, 's--', color='firebrick', linewidth=2,
                 label=periph_label, markersize=7)
+        ax.fill_between(alphas, periph_vals - periph_ci, periph_vals + periph_ci,
+                        color='firebrick', alpha=0.18)
         ax.fill_between(alphas, core_vals, periph_vals, alpha=0.12, color='orange',
                         label='Gap')
         _vlines(ax)
@@ -1537,24 +1697,24 @@ def plot_periphery_gap(all_results, metrics, save_dir):
         ax.legend(fontsize=8)
         ax.grid(True, alpha=0.3)
 
-    _net_panel(axes[0, 0], near_mae, far_mae,
+    _net_panel(axes[0, 0], near_mae, near_mae_ci, far_mae, far_mae_ci,
                'Near epicentre (Q1)', 'Far epicentre (Q4)',
-               'Belief MAE',
+               mae_label,
                'Spatial Periphery — Belief Accuracy\nNear vs far spawn from epicentre')
 
-    _net_panel(axes[1, 0], near_aid, far_aid,
+    _net_panel(axes[1, 0], near_aid, near_aid_ci, far_aid, far_aid_ci,
                'Near epicentre (Q1)', 'Far epicentre (Q4)',
-               'Avg aid tokens sent / agent',
+               aid_label,
                'Spatial Periphery — Aid Contribution\nNear vs far spawn from epicentre')
 
-    _net_panel(axes[0, 1], hibetw_mae, lobetw_mae,
+    _net_panel(axes[0, 1], hibetw_mae, hibetw_mae_ci, lobetw_mae, lobetw_mae_ci,
                'High betweenness (Q4)', 'Low betweenness (Q1)',
-               'Belief MAE',
+               mae_label,
                'Network Periphery — Belief Accuracy\nBroker vs peripheral agents')
 
-    _net_panel(axes[1, 1], hibetw_aid, lobetw_aid,
+    _net_panel(axes[1, 1], hibetw_aid, hibetw_aid_ci, lobetw_aid, lobetw_aid_ci,
                'High betweenness (Q4)', 'Low betweenness (Q1)',
-               'Avg aid tokens sent / agent',
+               aid_label,
                'Network Periphery — Aid Contribution\nBroker vs peripheral agents')
 
     plt.tight_layout()
@@ -1562,7 +1722,81 @@ def plot_periphery_gap(all_results, metrics, save_dir):
     path = os.path.join(save_dir, 'periphery_gap.png')
     plt.savefig(path, dpi=150, bbox_inches='tight')
     plt.close()
-    print(f"Periphery gap figure saved: {path}")
+    print(f"Periphery gap figure saved: {path}"
+          + ('' if use_ts_mae and use_ts_aid else
+             '  [legacy scalars — re-run sweep for steady-state periphery series]'))
+
+
+def plot_periphery_gap_evolution(all_results, metrics, save_dir):
+    """
+    Time evolution of the periphery gaps with 95% CI bands across replications.
+
+    2 × 2 grid: rows = belief-MAE gap (L1+ cells) / aid-contribution gap,
+    columns = spatial (far − near) / network (low − high betweenness).
+    Gaps are paired within run (periphery − core), so the CI reflects the
+    across-replication spread of the gap itself. One line per selected α.
+    Skipped when the cache predates the periphery time-series keys.
+    """
+    gap_keys = ('periph_sp_mae_gap', 'periph_nw_mae_gap',
+                'periph_sp_aid_gap', 'periph_nw_aid_gap')
+    if not all(all_results[i].get(f'{k}_mean')
+               for i in range(len(all_results)) for k in gap_keys):
+        print('Periphery gap evolution figure skipped: cache has no periphery '
+              'time series (produced by an older run) — re-run the sweep.')
+        return
+
+    alphas = ALIGNMENT_SWEEP
+    total_n    = [metrics[a]['total_bubble_norm'] for a in alphas]
+    best_alpha = alphas[int(np.argmin(total_n))]
+    # Ends of the sweep, the midpoint, and α* (deduplicated, sorted)
+    show_alphas = sorted({0.0, 0.5, best_alpha, 1.0} & set(alphas)) or alphas[:1]
+    colors = plt.cm.viridis(np.linspace(0.0, 0.85, len(show_alphas)))
+
+    panels = [
+        ('periph_sp_mae_gap', 'Spatial: belief-MAE gap (far − near)',
+         'MAE gap, disaster cells L1+'),
+        ('periph_nw_mae_gap', 'Network: belief-MAE gap (low − high betweenness)',
+         'MAE gap, disaster cells L1+'),
+        ('periph_sp_aid_gap', 'Spatial: aid gap (far − near)',
+         'Aid tokens / agent / 5-tick window'),
+        ('periph_nw_aid_gap', 'Network: aid gap (low − high betweenness)',
+         'Aid tokens / agent / 5-tick window'),
+    ]
+
+    fig, axes = plt.subplots(2, 2, figsize=(13, 9))
+    fig.suptitle(
+        'Periphery Gap Evolution (periphery − core, paired within run)\n'
+        'Positive MAE gap = periphery worse informed; negative aid gap = '
+        'periphery contributes less. Shading: 95% CI over replications',
+        fontsize=12, fontweight='bold'
+    )
+
+    for ax, (key, title, ylabel) in zip(axes.flat, panels):
+        for color, a in zip(colors, show_alphas):
+            res   = all_results[alphas.index(a)]
+            mean  = np.asarray(res.get(f'{key}_mean', []), dtype=float)
+            std   = np.asarray(res.get(f'{key}_std',  []), dtype=float)
+            ticks = res.get('metric_ticks', list(range(len(mean))))[:len(mean)]
+            if len(mean) == 0:
+                continue
+            n_runs = int(res.get('n_runs', 1))
+            ci = _t_crit(n_runs) * std / np.sqrt(n_runs) if n_runs > 1 else 0 * std
+            label = f'α={a}' + (' (α*)' if a == best_alpha else '')
+            ax.plot(ticks, mean, color=color, linewidth=1.8, label=label)
+            ax.fill_between(ticks, mean - ci, mean + ci, color=color, alpha=0.15)
+        ax.axhline(0.0, color='black', linewidth=0.8, alpha=0.6)
+        ax.set_xlabel('Tick')
+        ax.set_ylabel(ylabel)
+        ax.set_title(title)
+        ax.legend(fontsize=8)
+        ax.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    os.makedirs(save_dir, exist_ok=True)
+    path = os.path.join(save_dir, 'periphery_gap_evolution.png')
+    plt.savefig(path, dpi=150, bbox_inches='tight')
+    plt.close()
+    print(f"Periphery gap evolution figure saved: {path}")
 
 
 # ---------------------------------------------------------------------------
@@ -2017,6 +2251,7 @@ if __name__ == '__main__':
         os.makedirs(save_dir, exist_ok=True)
         plot_spatial_coverage(spatial_results, spatial_metrics, save_dir)
         plot_periphery_gap(spatial_results, spatial_metrics, save_dir)
+        plot_periphery_gap_evolution(spatial_results, spatial_metrics, save_dir)
         sp_path = os.path.join(save_dir, 'spatial_experiment.json')
         with open(sp_path, 'w') as f:
             json.dump({'alignment_sweep': ALIGNMENT_SWEEP,
@@ -2185,6 +2420,7 @@ if __name__ == '__main__':
         os.makedirs(save_dir, exist_ok=True)
         plot_spatial_coverage(all_results, spatial_metrics, save_dir)
         plot_periphery_gap(all_results, spatial_metrics, save_dir)
+        plot_periphery_gap_evolution(all_results, spatial_metrics, save_dir)
         print('Spatial plots saved.')
         import sys; sys.exit(0)
 
@@ -2432,6 +2668,7 @@ if __name__ == '__main__':
     plot_echo_chamber_lifecycle(all_results, save_dir)
     plot_spatial_coverage(all_results, metrics, save_dir)
     plot_periphery_gap(all_results, metrics, save_dir)
+    plot_periphery_gap_evolution(all_results, metrics, save_dir)
     if gap_results:
         plot_gap_sweep(gap_results, save_dir)
 

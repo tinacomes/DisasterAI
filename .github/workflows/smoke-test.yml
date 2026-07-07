@@ -88,6 +88,7 @@ jobs:
           metrics = fb.compute_goldilocks_metrics(all_results)
           fb.plot_spatial_coverage(all_results, metrics, save_dir)
           fb.plot_periphery_gap(all_results, metrics, save_dir)
+          fb.plot_periphery_gap_evolution(all_results, metrics, save_dir)
           print('test_filter_bubbles.py: OK')
           "
 
