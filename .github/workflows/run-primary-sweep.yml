@@ -22,6 +22,14 @@ on:
         description: "Salience-weighted verification: 0 = uniform baseline, 1 = severity-weighted (C12 counterfactual)"
         required: false
         default: "0.0"
+      epsilon_decay:
+        description: "Per-tick exploration-rate decay: 1.0 = constant epsilon (baseline); try 0.98 to anneal toward epsilon_min"
+        required: false
+        default: "1.0"
+      epsilon_min:
+        description: "Floor for the annealed exploration rate (ignored when epsilon_decay = 1.0)"
+        required: false
+        default: "0.05"
 
 env:
   MPLBACKEND: Agg
@@ -48,7 +56,9 @@ jobs:
             --out-file filter_bubble_results/bubble_alpha_${{ matrix.alpha }}.json \
             --ticks ${{ inputs.ticks }} \
             --n-runs ${{ inputs.n_runs }} \
-            --salience-weight ${{ inputs.salience_weight }}
+            --salience-weight ${{ inputs.salience_weight }} \
+            --epsilon-decay ${{ inputs.epsilon_decay }} \
+            --epsilon-min ${{ inputs.epsilon_min }}
       - uses: actions/upload-artifact@v4
         with:
           name: primary-alpha-${{ matrix.alpha }}
