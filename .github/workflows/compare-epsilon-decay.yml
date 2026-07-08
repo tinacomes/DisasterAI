@@ -1,0 +1,130 @@
+name: Compare Epsilon Decay (Primary Sweep)
+
+# Runs the 11-alpha primary alignment sweep for TWO (or more) epsilon_decay
+# settings in a single dispatch, so the baseline (constant epsilon = no decay)
+# and an annealed run can be compared side by side.
+#
+# Each setting produces its own plots + results artifact
+# (plots-epsilon-<decay>), and a final `compare` job prints a side-by-side
+# table of Goldilocks alpha* and the mode-choice diagnostics.
+#
+# Structure mirrors run-primary-sweep.yml: parallel per-alpha workers + a
+# collect/plot job, here fanned out across the decay settings as well.
+
+on:
+  workflow_dispatch:
+    inputs:
+      n_runs:
+        description: "Replications per alpha level"
+        required: false
+        default: "20"
+      ticks:
+        description: "Simulation ticks per run"
+        required: false
+        default: "200"
+      epsilon_min:
+        description: "Floor for the annealed exploration rate (used when a decay value < 1.0)"
+        required: false
+        default: "0.05"
+      decay_values:
+        description: 'JSON list of epsilon_decay values to compare. 1.0 = constant-epsilon baseline.'
+        required: false
+        default: '["1.0", "0.98"]'
+
+env:
+  MPLBACKEND: Agg
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  # ── Step 1: one worker per (decay setting × alpha level) ──────────────────
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        decay: ${{ fromJSON(inputs.decay_values) }}
+        alpha: ["0.0", "0.1", "0.2", "0.3", "0.4", "0.5", "0.6", "0.7", "0.8", "0.9", "1.0"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11", cache: "pip"}
+      - run: pip install -r requirements.txt
+      - run: |
+          mkdir -p out
+          python3 test_filter_bubbles.py \
+            --single-alpha ${{ matrix.alpha }} \
+            --out-file out/bubble_alpha_${{ matrix.alpha }}.json \
+            --ticks ${{ inputs.ticks }} \
+            --n-runs ${{ inputs.n_runs }} \
+            --epsilon-decay ${{ matrix.decay }} \
+            --epsilon-min ${{ inputs.epsilon_min }}
+      - uses: actions/upload-artifact@v4
+        with:
+          # Prefix is unique per decay setting; the collect job globs by it.
+          name: sweep-${{ matrix.decay }}-${{ matrix.alpha }}
+          path: out/bubble_alpha_${{ matrix.alpha }}.json
+          retention-days: 7
+
+  # ── Step 2: collect + plot, once per decay setting ───────────────────────
+  collect:
+    needs: sweep
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        decay: ${{ fromJSON(inputs.decay_values) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11", cache: "pip"}
+      - run: pip install -r requirements.txt
+      - uses: actions/download-artifact@v4
+        with:
+          # Only this setting's per-alpha files (prefixes are disjoint, so the
+          # "1.0" pattern never captures "0.98" and vice versa).
+          pattern: sweep-${{ matrix.decay }}-*
+          merge-multiple: true
+          path: results/
+      - run: ls -lh results/
+      - run: |
+          python3 test_filter_bubbles.py \
+            --collect-and-plot \
+            --results-dir results/ \
+            --save-dir results/ \
+            --ticks ${{ inputs.ticks }} \
+            --n-runs ${{ inputs.n_runs }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: plots-epsilon-${{ matrix.decay }}
+          path: |
+            results/*.png
+            results/experiment_results.json
+          retention-days: 30
+
+  # ── Step 3: side-by-side comparison table across settings ────────────────
+  compare:
+    needs: collect
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11", cache: "pip"}
+      - run: pip install -r requirements.txt
+      - uses: actions/download-artifact@v4
+        with:
+          # Each artifact lands in its own subdir: compare/plots-epsilon-<decay>/
+          pattern: plots-epsilon-*
+          path: compare/
+      - run: |
+          python3 tools/compare_epsilon.py compare/ | tee comparison.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: epsilon-comparison
+          path: comparison.txt
+          retention-days: 30
