@@ -470,6 +470,9 @@ def run_one_sim(params):
     ai_query50_exploit = _first_sustained_cross(ai_query_ratio_exploit, 0.5, sustain=5)
     ai_query50_explor  = _first_sustained_cross(ai_query_ratio_explor,  0.5, sustain=5)
 
+    # Lifetime source-mode choice tallies (exploration floor diagnostics)
+    _mode_choice = model.get_mode_choice_summary()
+
     return {
         'seci_exploit':            seci_exploit,
         'seci_explor':             seci_explor,
@@ -533,6 +536,9 @@ def run_one_sim(params):
         # Network-periphery scalars (betweenness centrality: low Q1 vs high Q4)
         'lobetw_mae': _m(lobetw_mae), 'hibetw_mae': _m(hibetw_mae),
         'lobetw_aid': _m(lobetw_aid), 'hibetw_aid': _m(hibetw_aid),
+        # Source-mode choice diagnostics (exploration floor vs learned policy)
+        'mode_choice_exploit': _mode_choice.get('exploit', {}),
+        'mode_choice_explor':  _mode_choice.get('explor', {}),
     }
 
 
@@ -609,6 +615,27 @@ def _aggregate(runs):
         if maps:
             result[f'{map_key}_mean'] = np.mean(maps, axis=0).tolist()
     result['epicenter'] = runs[0].get('epicenter', [0, 0])
+
+    # Mode-choice diagnostics: average the nested fraction dicts across runs.
+    def _avg_mode_choice(dicts):
+        modes = ('self_action', 'human', 'ai')
+        sub = ('overall', 'exploration', 'exploitation')
+        out = {}
+        for s in sub:
+            out[s] = {
+                m: float(np.nanmean([d[s][m] for d in dicts if s in d]))
+                for m in modes
+            }
+        out['exploration_rate'] = float(np.nanmean(
+            [d['exploration_rate'] for d in dicts if 'exploration_rate' in d]))
+        out['n_decisions'] = float(np.nanmean(
+            [d['n_decisions'] for d in dicts if 'n_decisions' in d]))
+        return out
+
+    for mc_key in ('mode_choice_exploit', 'mode_choice_explor'):
+        dicts = [r[mc_key] for r in runs if r.get(mc_key)]
+        if dicts:
+            result[mc_key] = _avg_mode_choice(dicts)
     return result
 
 
@@ -626,7 +653,37 @@ def run_replicated(params, n_runs, label=''):
         _random.seed(i)
         np.random.seed(i)
         runs.append(run_one_sim(params))
-    return _aggregate(runs)
+    result = _aggregate(runs)
+    _print_mode_choice_summary(result, params)
+    return result
+
+
+def _print_mode_choice_summary(result, params):
+    """Print per-type source-mode choice fractions so the epsilon exploration
+    floor is directly visible. 'exploration' rows should be ~0.33 each (pure
+    random); 'exploitation' rows reflect the learned Q-policy. The overall AI
+    share is floored near exploration_rate/3 no matter what Q-learning prefers.
+    """
+    eps      = params.get('epsilon', 0.3)
+    eps_dec  = params.get('epsilon_decay', 1.0)
+    floor    = None
+    for label, key in (('Exploitative', 'mode_choice_exploit'),
+                       ('Exploratory',  'mode_choice_explor')):
+        mc = result.get(key)
+        if not mc:
+            continue
+        er = mc['exploration_rate']
+        print(f"\n  Source-mode choices — {label}  "
+              f"(exploration_rate={er:.2f}, "
+              f"epsilon={eps}, epsilon_decay={eps_dec})")
+        print(f"    {'branch':<13} {'self':>7} {'human':>7} {'ai':>7}")
+        for s in ('overall', 'exploration', 'exploitation'):
+            d = mc[s]
+            print(f"    {s:<13} {d['self_action']:>7.3f} "
+                  f"{d['human']:>7.3f} {d['ai']:>7.3f}")
+        # Theoretical AI floor from the random-exploration branch alone.
+        print(f"    → AI-share floor from exploration alone ≈ {er/3:.3f} "
+              f"(exploration is {er:.2f} of all choices, split 3 ways)")
 
 
 # ---------------------------------------------------------------------------
@@ -2146,6 +2203,18 @@ if __name__ == '__main__':
         help=f'Override primary sweep replications (default: N_RUNS={N_RUNS}).',
     )
     parser.add_argument(
+        '--epsilon-decay', type=float, default=None, metavar='D',
+        help='Per-tick multiplicative decay of the exploration rate (default: 1.0 = '
+             'constant epsilon, exact baseline). D<1.0 anneals epsilon toward '
+             '--epsilon-min so agents increasingly act on learned Q-values. '
+             'Try 0.98 for a moderate anneal over 200 ticks.',
+    )
+    parser.add_argument(
+        '--epsilon-min', type=float, default=None, metavar='M',
+        help='Floor for the annealed exploration rate (default: 0.05). '
+             'Ignored when --epsilon-decay is 1.0.',
+    )
+    parser.add_argument(
         '--single-alpha', type=float, default=None, metavar='ALPHA',
         help='Run N replications for one alignment level only and save the '
              'aggregated result to --out-file.  Used by the CI matrix job so '
@@ -2226,6 +2295,10 @@ if __name__ == '__main__':
         base_params['epicenter'] = args.epicenter   # fixed epicenter for spatial experiment
     if args.salience_weight is not None:
         base_params['salience_weight'] = args.salience_weight
+    if args.epsilon_decay is not None:
+        base_params['epsilon_decay'] = args.epsilon_decay
+    if args.epsilon_min is not None:
+        base_params['epsilon_min'] = args.epsilon_min
     n_runs_primary = args.n_runs if args.n_runs is not None else N_RUNS
     # Factor/gap sweeps use at most half the primary ticks (they measure relative
     # differences, not absolute steady-state values, so shorter runs suffice)

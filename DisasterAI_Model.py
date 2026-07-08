@@ -63,6 +63,14 @@ class HumanAgent(Agent):
         self.tokens_this_tick = {} # Tracks mode choice leading to send_relief THIS tick
         self.last_queried_source_ids = [] # Temp store for source IDs
         self.last_belief_update = {}  # Tracks when each cell was last updated
+        # Lifetime source-mode choice tally, split by whether the choice came from
+        # the epsilon exploration branch (uniform random over modes) or the
+        # Q-value exploitation branch (argmax). Instrumentation for diagnosing the
+        # exploration floor — see DisasterModel.get_mode_choice_summary().
+        self.mode_choice_counts = {
+            'exploration':  {'self_action': 0, 'human': 0, 'ai': 0},
+            'exploitation': {'self_action': 0, 'human': 0, 'ai': 0},
+        }
                      
         # --- Q-Table for Source Values ---
         # Use high-level modes: self_action, human, ai (not individual AIs)
@@ -1409,8 +1417,19 @@ class HumanAgent(Agent):
                 decision_factors['q_values'][mode] = self.q_table.get(mode, 0.0)
 
             # Epsilon greedy strategy - not to be confused with the agent types :)
+            # Effective exploration rate: constant by default (epsilon_decay == 1.0,
+            # exact baseline behaviour), or exponentially annealed toward epsilon_min
+            # so that late in the run agents act on their learned Q-values instead of
+            # picking a source uniformly at random.
+            eps_eff = self.epsilon
+            _decay = getattr(self.model, 'epsilon_decay', 1.0)
+            if _decay < 1.0:
+                eps_eff = max(getattr(self.model, 'epsilon_min', 0.05),
+                              self.epsilon * (_decay ** self.model.tick))
+            decision_factors['epsilon_eff'] = eps_eff
+
             # Exploration case - record randomly chosen mode
-            if random.random() < self.epsilon: #epsilon parameter for randomness
+            if random.random() < eps_eff: #epsilon parameter for randomness
                 chosen_mode = random.choice(possible_modes)
                 decision_factors['selection_type'] = 'exploration'
                 decision_factors['chosen_mode'] = chosen_mode
@@ -1442,6 +1461,12 @@ class HumanAgent(Agent):
                 # Choose highest scoring mode
                 chosen_mode = max(scores, key=scores.get)
                 decision_factors['chosen_mode'] = chosen_mode
+
+            # Instrumentation: tally the mode choice by branch (exploration vs
+            # exploitation) so the epsilon floor is directly observable.
+            _sel = decision_factors['selection_type']
+            if chosen_mode in self.mode_choice_counts[_sel]:
+                self.mode_choice_counts[_sel][chosen_mode] += 1
 
             self.tokens_this_tick = {chosen_mode: 1}
             self.last_queried_source_ids = []
@@ -2190,8 +2215,14 @@ class DisasterModel(Model):
                  epicenter=None,         # Optional fixed epicenter [x, y]; random if None
                  verification_probability=0.3,  # Per-attempt arrival prob of external "situation report"
                                                 # verification for explorers' accepted remote reports
-                 salience_weight=0.0     # 0 = uniform verification rewards (baseline);
+                 salience_weight=0.0,    # 0 = uniform verification rewards (baseline);
                                          # 1 = full severity-weighted (salience) evaluation — see C12
+                 epsilon_decay=1.0,      # Per-tick multiplicative decay of the exploration rate.
+                                         # 1.0 = constant epsilon (baseline, no decay). <1.0 anneals
+                                         # epsilon toward epsilon_min so agents increasingly act on
+                                         # learned Q-values instead of choosing a source at random.
+                 epsilon_min=0.05        # Floor for the annealed exploration rate (ignored when
+                                         # epsilon_decay == 1.0).
                  ):
         super(DisasterModel, self).__init__()
         self.share_exploitative = share_exploitative
@@ -2212,6 +2243,8 @@ class DisasterModel(Model):
         self.lambda_parameter = lambda_parameter
         self.learning_rate = learning_rate
         self.epsilon = epsilon
+        self.epsilon_decay = epsilon_decay
+        self.epsilon_min = epsilon_min
         self.ticks = ticks
         self.low_trust_amplification_factor = low_trust_amplification_factor
         self.verification_probability = verification_probability
@@ -2557,6 +2590,48 @@ class DisasterModel(Model):
         explor_entropy = calculate_entropy(exploratory_agents)
 
         return (self.tick, exploit_entropy, explor_entropy)
+
+    def get_mode_choice_summary(self):
+        """Aggregate lifetime source-mode choices across agents, split by agent
+        type and by whether the choice came from the epsilon exploration branch
+        (uniform random over the 3 modes) or the Q-value exploitation branch
+        (argmax over the Q-table).
+
+        Diagnoses the exploration floor: with a constant epsilon the exploration
+        branch alone forces each mode to be chosen ~epsilon/3 of the time
+        regardless of what Q-learning prefers, so the AI-query share can never
+        fall below ~epsilon/3 nor rise above ~1-2*epsilon/3. Compare the
+        'exploration' sub-dict (should be ~1/3 each — pure noise) against
+        'exploitation' (reflects learned Q-values).
+        """
+        modes = ('self_action', 'human', 'ai')
+        summary = {}
+        for label, atype in (('exploit', 'exploitative'), ('explor', 'exploratory')):
+            agents = [a for a in self.humans.values() if a.agent_type == atype]
+            expl = {m: 0 for m in modes}   # exploration branch (random)
+            expt = {m: 0 for m in modes}   # exploitation branch (argmax)
+            for a in agents:
+                mc = getattr(a, 'mode_choice_counts', None)
+                if not mc:
+                    continue
+                for m in modes:
+                    expl[m] += mc['exploration'][m]
+                    expt[m] += mc['exploitation'][m]
+            n_expl = sum(expl.values())
+            n_expt = sum(expt.values())
+            total = n_expl + n_expt
+
+            def _frac(d, n):
+                return {m: (d[m] / n if n else 0.0) for m in modes}
+
+            summary[label] = {
+                'overall':          _frac({m: expl[m] + expt[m] for m in modes}, total),
+                'exploration':      _frac(expl, n_expl),
+                'exploitation':     _frac(expt, n_expt),
+                'exploration_rate': (n_expl / total if total else 0.0),
+                'n_decisions':      total,
+            }
+        return summary
 
     def initialize_social_network(self):
         """Initialize social network with multiple components and meaningful homophily."""
