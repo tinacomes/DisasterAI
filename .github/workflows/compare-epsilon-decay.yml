@@ -121,10 +121,12 @@ jobs:
           pattern: plots-epsilon-*
           path: compare/
       - run: |
-          python3 tools/compare_epsilon.py compare/ | tee comparison.txt
+          python3 tools/compare_epsilon.py compare/ . | tee comparison.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: epsilon-comparison
-          path: comparison.txt
+          path: |
+            comparison.txt
+            comparison_epsilon.png
           retention-days: 30
