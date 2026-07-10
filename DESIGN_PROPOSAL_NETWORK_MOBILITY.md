@@ -1,6 +1,38 @@
 # Design Proposal: Spatially Embedded Network, Mobility, and Network-Gated Queries
 
-Status: PROPOSAL (nothing in this document is implemented yet).
+Status: **IMPLEMENTED** (2026-07-10) behind three switches that all default to
+the pre-proposal behaviour: `mobility=0`, `network_type='components'`,
+`query_scope='global'`. Seeded regression fingerprints are bitwise identical
+to the pre-implementation code at the defaults (under a fixed
+`PYTHONHASHSEED`, which the model already required for reproducibility).
+Implementation notes:
+
+- §0 prerequisite refactor: done — `model.communities` (list of
+  `(set[node_id], type_label)`) is stored at network construction; SECI,
+  rumor seeding, and the component-level metrics iterate it instead of
+  `nx.connected_components`.
+- §1 mobility: done — `HumanAgent.move()`, phase 0 of `step()`. Toy-scale
+  validation (30 × 30, 200 ticks): returners cover ~27 cells within max
+  excursion radius 3.0; explorers cover ~92 (55–125) cells, home-anchored.
+- §2 network: done — `initialize_spatial_bridged_network()`. Validation
+  (N = 100, 3 seeds): ~305 edges, mean degree ≈ 6, 8 type-pure communities,
+  13–20 bridges; betweenness heavy-tailed (max/median 13–32×; bridge
+  endpoints 7–17× non-endpoints). Broker flag (`model.bridge_endpoints`)
+  recorded into results JSON (`broker_mae`/`nonbroker_mae` etc.).
+- §3 queries: done — `HumanAgent.select_human_source()`; at
+  `query_scope='network'`: 92 % friends / 8 % two-hop / 0 % strangers in a
+  seeded smoke run, Q(human) still learns for all agents. Dead
+  `exploit_friend_bias` / `exploit_self_bias` parameters removed.
+- §4 validation: H-P1 confirmed directionally at toy scale (far−near
+  disaster-cell MAE gap +0.17 at α = 0 → +0.24 at α = 1 with all three
+  switches on); H-P2 within noise at 3 seeds — decide at paper scale
+  (step 5 below, still outstanding).
+
+The paper-scale 3-switch sweep (validation step 5) runs via the
+`run-primary-sweep` workflow inputs `mobility` / `network_type` /
+`query_scope`.
+
+Original proposal follows.
 Scope: answers three design questions — (1) how agents should move, (2) what
 social-network model supports genuine brokerage and periphery analysis at this
 model's scale (30 × 30 grid, 100 humans, 200 ticks, N = 20 replications), and

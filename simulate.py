@@ -162,6 +162,17 @@ def main():
     parser.add_argument('--seed_base',          type=int,   default=0,
                         help='Replicate i is seeded with seed_base + i, so runs are '
                              'reproducible and conditions share common random numbers')
+    parser.add_argument('--mobility',           type=int,   default=0, choices=[0, 1],
+                        help='1 = home-anchored agent movement (returners/explorers); '
+                             '0 = immobile (baseline)')
+    parser.add_argument('--network_type',       default='components',
+                        choices=['components', 'spatial_bridged'],
+                        help="'spatial_bridged' = spatial communities + weak-tie "
+                             "bridges; 'components' = disconnected communities (baseline)")
+    parser.add_argument('--query_scope',        default='global',
+                        choices=['global', 'network'],
+                        help="'network' = queries follow social edges (friends + "
+                             "2-hop); 'global' = any human reachable (baseline)")
     args = parser.parse_args()
 
     params = BASE_PARAMS.copy()
@@ -170,6 +181,9 @@ def main():
     params['disaster_dynamics']   = args.disaster_dynamics
     params['share_exploitative']  = args.share_exploitative
     params['salience_weight']     = args.salience_weight
+    params['mobility']            = args.mobility
+    params['network_type']        = args.network_type
+    params['query_scope']         = args.query_scope
 
     print(f'Condition: α={args.alpha}, rumor={args.rumor_probability}, '
           f'disaster={args.disaster_dynamics}, exploit={args.share_exploitative}')

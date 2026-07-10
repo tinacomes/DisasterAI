@@ -30,6 +30,18 @@ on:
         description: "Floor for the annealed exploration rate (ignored when epsilon_decay = 1.0)"
         required: false
         default: "0.05"
+      mobility:
+        description: "1 = home-anchored agent movement (returners/explorers); 0 = immobile baseline"
+        required: false
+        default: "0"
+      network_type:
+        description: "Social network: components (baseline) or spatial_bridged (spatial communities + weak-tie bridges)"
+        required: false
+        default: "components"
+      query_scope:
+        description: "Human-query reach: global (baseline) or network (friends + 2-hop, access follows edges)"
+        required: false
+        default: "global"
 
 env:
   MPLBACKEND: Agg
@@ -58,7 +70,10 @@ jobs:
             --n-runs ${{ inputs.n_runs }} \
             --salience-weight ${{ inputs.salience_weight }} \
             --epsilon-decay ${{ inputs.epsilon_decay }} \
-            --epsilon-min ${{ inputs.epsilon_min }}
+            --epsilon-min ${{ inputs.epsilon_min }} \
+            --mobility ${{ inputs.mobility }} \
+            --network-type ${{ inputs.network_type }} \
+            --query-scope ${{ inputs.query_scope }}
       - uses: actions/upload-artifact@v4
         with:
           name: primary-alpha-${{ matrix.alpha }}
