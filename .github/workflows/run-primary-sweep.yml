@@ -110,5 +110,7 @@ jobs:
           name: filter-bubble-primary-plots
           path: |
             filter_bubble_results/*.png
+            filter_bubble_results/summary_table.csv
+            filter_bubble_results/summary_table.md
             filter_bubble_results/experiment_results.json
           retention-days: 30
