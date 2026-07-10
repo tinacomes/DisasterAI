@@ -2095,11 +2095,11 @@ class AIAgent(Agent):
             else:
                 value = self.model.disaster_grid[x, y]
 
-                # When alignment is low, AI should be more truthful/accurate
-                noise_prob = 0.1  # Default 10% chance of noise
-                if hasattr(self.model, 'ai_alignment_level'):
-                    # Reduce noise when alignment is low (more truthful)
-                    noise_prob = 0.1 * self.model.ai_alignment_level
+                # Constant sensing noise, independent of alignment (C8 fix).
+                # The old `0.1 * ai_alignment_level` coupling made high-α AI
+                # simultaneously more confirming AND noisier, so α no longer
+                # isolated the confirmation effect in the alignment sweep.
+                noise_prob = 0.1
 
                 if random.random() < noise_prob:
                     value = max(0, min(5, value + random.choice([-1, 1])))
@@ -2640,14 +2640,21 @@ class DisasterModel(Model):
         does to beliefs (finding C11). Per-type values are averaged for the
         headline series; per-type values are stored in _last_metrics for
         diagnostics.
+
+        Belief pool: L1+ beliefs only, exactly like SECI. Including the
+        no-impact majority (~85% of cells at level 0) made the index dominated
+        by how many cells agents believe are affected at all, and made
+        total_bubble = |SECI| + |AECI-Var| a sum over two different belief
+        populations, contradicting the METHODS claim that the two indices are
+        structurally identical variance ratios.
         """
-        # Global belief variance (all agents pooled — consistent baseline with SECI)
+        # Global belief variance (all agents pooled, L1+ — same pool as SECI)
         all_beliefs = []
         for agent in self.humans.values():
             for belief_info in agent.beliefs.values():
                 if isinstance(belief_info, dict):
                     level = belief_info.get('level', 0)
-                    if not np.isnan(level):  # Filter out NaN values
+                    if not np.isnan(level) and level >= 1:
                         all_beliefs.append(level)
         global_var = np.var(all_beliefs) if len(all_beliefs) > 1 else 0.0
 
@@ -2668,7 +2675,7 @@ class DisasterModel(Model):
                 for belief_info in agent.beliefs.values():
                     if isinstance(belief_info, dict):
                         level = belief_info.get('level', 0)
-                        if not np.isnan(level):
+                        if not np.isnan(level) and level >= 1:
                             reliant_beliefs.append(level)
             if len(reliant_beliefs) < 2:
                 return None

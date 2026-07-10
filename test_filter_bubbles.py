@@ -871,6 +871,73 @@ def alpha_star_sensitivity(metrics):
     return out
 
 
+def write_summary_tables(metrics, save_dir, n_runs=None):
+    """Write the late-run metrics as machine-readable tables next to the plots.
+
+    Produces summary_table.csv (one row per α: raw metric means, standard
+    errors, range-normalised values, composites) and summary_table.md (the
+    same table in Markdown plus the α* sensitivity block), so that CI
+    artifacts carry numbers, not just figures.
+
+    NOTE for cross-configuration comparisons: the *_norm columns and the
+    composites built from them are range-normalised WITHIN this sweep — they
+    are not comparable across runs with different configurations. Compare
+    configurations on the raw columns (tools/compare_configs.py does this).
+    """
+    available = [a for a in ALIGNMENT_SWEEP if a in metrics]
+    cols = [
+        ('alpha',             lambda a, m: a),
+        ('seci',              lambda a, m: m['seci']),
+        ('seci_se',           lambda a, m: m['seci_std']),
+        ('aeci_var',          lambda a, m: m['aeci']),
+        ('aeci_var_se',       lambda a, m: m['aeci_std']),
+        ('aeci_err',          lambda a, m: m['aeci_err']),
+        ('aeci_err_se',       lambda a, m: m['aeci_err_std']),
+        ('mae',               lambda a, m: m['mae']),
+        ('mae_se',            lambda a, m: m['mae_std']),
+        ('unmet_needs',       lambda a, m: m['unmet']),
+        ('precision',         lambda a, m: m['prec']),
+        ('seci_norm',         lambda a, m: m.get('seci_norm', float('nan'))),
+        ('aeci_var_norm',     lambda a, m: m.get('aeci_norm', float('nan'))),
+        ('mae_norm',          lambda a, m: m.get('mae_norm', float('nan'))),
+        ('total_bubble_norm', lambda a, m: m.get('total_bubble_norm', float('nan'))),
+        ('total_score_norm',  lambda a, m: m.get('total_score_norm', float('nan'))),
+    ]
+    os.makedirs(save_dir, exist_ok=True)
+
+    csv_path = os.path.join(save_dir, 'summary_table.csv')
+    with open(csv_path, 'w') as f:
+        f.write(','.join(name for name, _ in cols) + '\n')
+        for a in available:
+            f.write(','.join(f'{fn(a, metrics[a]):.6g}' for _, fn in cols) + '\n')
+
+    stars = alpha_star_sensitivity(metrics)
+    md_path = os.path.join(save_dir, 'summary_table.md')
+    with open(md_path, 'w') as f:
+        f.write('# Late-run metrics summary (last 75 ticks)\n\n')
+        if n_runs is not None:
+            f.write(f'{n_runs} replications per α; SE columns are across-replication '
+                    'standard errors.\n\n')
+        f.write('| ' + ' | '.join(name for name, _ in cols) + ' |\n')
+        f.write('|' + '---|' * len(cols) + '\n')
+        for a in available:
+            f.write('| ' + ' | '.join(f'{fn(a, metrics[a]):.4g}' for _, fn in cols) + ' |\n')
+        f.write('\n## α* sensitivity to composite definition\n\n')
+        f.write('| composite | α* | min value |\n|---|---|---|\n')
+        for label, (a_star, v_star) in stars.items():
+            f.write(f'| {label} | {a_star} | {v_star:.3f} |\n')
+        star_values = sorted({a for a, _ in stars.values()})
+        if len(star_values) == 1:
+            f.write('\nα* is **robust** to the composite choice.\n')
+        else:
+            f.write(f'\nα* is **composite-dependent** (spread: {star_values}). '
+                    'Report the spread, not a single value.\n')
+        f.write('\n*Normalised columns are range-normalised within this sweep only — '
+                'never compare them across configurations; use the raw columns '
+                '(see tools/compare_configs.py).*\n')
+    print(f'Summary tables saved: {csv_path}, {md_path}')
+
+
 def plot_alpha_star_sensitivity(metrics, save_dir):
     """Composite-vs-α curves for every α* sensitivity variant, minima marked.
 
@@ -2783,6 +2850,8 @@ if __name__ == '__main__':
         print(f'  → α* is COMPOSITE-DEPENDENT (spread: {sorted(star_values)}).')
         print('    Report the spread in the paper, not just the primary value.')
 
+    write_summary_tables(metrics, save_dir,
+                         n_runs=all_results[0].get('n_runs') if all_results else None)
     plot_alpha_star_sensitivity(metrics, save_dir)
     plot_goldilocks(metrics, all_results, save_dir)
     if rumor_results and disaster_results and mix_results:
