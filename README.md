@@ -1,14 +1,14 @@
 # DisasterAI
 
-Agent-based simulation of disaster response under varying AI alignment levels. The model investigates whether there exists a "Goldilocks" alignment — a level at which AI is informative enough to break social echo chambers without creating AI-enforced filter bubbles.
+Agent-based simulation of disaster response under varying AI alignment levels. The model investigates whether there exists a "Goldilocks" alignment — a level at which AI is informative enough to break social echo chambers without creating AI-enforced filter bubbles — and under which structural conditions that optimum exists at all.
 
 ## Research Question
 
-AI systems in disaster response can be calibrated along a spectrum from *fully truthful* (reporting ground-truth severity) to *fully confirming* (echoing the human querier's own beliefs). We ask: what alignment level α minimises both social echo chambers (measured by SECI) and AI-induced filter bubbles (AECI) while preserving belief accuracy (MAE)?
+AI systems in disaster response can be calibrated along a spectrum from *fully truthful* (reporting ground-truth severity) to *fully confirming* (echoing the querier's beliefs). We ask: what alignment level α minimises social echo chambers (SECI) and AI-induced filter bubbles (AECI-Var) while preserving belief accuracy (MAE) and relief performance — and does the answer depend on whether information access is bounded by the social network and agents' physical mobility?
 
 ## Model Overview
 
-A 30 × 30 grid represents a disaster-affected area. 100 human agents update beliefs about local severity, seek information from peers and AI, and dispatch relief tokens. Five AI agents respond to queries with reports whose truth content is governed by α.
+A 30 × 30 grid represents a disaster-affected area. 100 human agents update beliefs about local severity, seek information from peers and AI, and dispatch relief tokens. Five AI agents sense 15 % of the grid per tick (constant ±1 noise with p = 0.1, independent of α) and respond to queries with reports whose truth content is governed by α.
 
 **Two agent types:**
 
@@ -22,34 +22,68 @@ A 30 × 30 grid represents a disaster-affected area. 100 human agents update bel
 **AI alignment formula:**
 
 ```
-r_AI = (1 − α) × truth + α × agent_belief
+r_AI = (1 − α) × truth + α × belief_target
 ```
 
-α = 0 → fully truthful; α = 1 → pure echo.
+α = 0 → fully truthful; α = 1 → pure echo. For exploitative queriers the confirmation target is the *trusted-network consensus* belief (community narrative); for exploratory queriers it is the individual prior. See METHODS_PAPER.md for the full mechanism, including the AI's deliberate overconfidence on unsensed cells.
+
+**Three mechanism switches** (all default to baseline) define the two studied configurations:
+
+| Switch | Baseline | Switched |
+|---|---|---|
+| `mobility` | 0 — agents immobile | 1 — home-anchored movement: exploiters are *returners* (r = 3), explorers roam to uncertain cells (r = 8) |
+| `network_type` | `components` — disconnected type-homogeneous communities | `spatial_bridged` — spatially embedded communities + weak-tie bridges (brokers) |
+| `query_scope` | `global` — any human reachable (trust-weighted) | `network` — friends + 2-hop reach only; access follows edges |
+
+The baseline serves as the structural null (position and network topology barely constrain information access); the switched configuration is the realistic arm where spatial and network periphery effects are structurally possible.
 
 ## Key Metrics
 
+All signed echo indices share one convention: **negative = echo chamber**, 0 = null, positive = more-diverse-than-population.
+
 | Metric | Definition |
 |---|---|
-| **SECI** | Social Echo Chamber Index: 1 − Var(friend beliefs) / Var(global beliefs). Negative = echo chamber. |
-| **AECI** | AI Echo Chamber Index: fraction of accepted updates from AI sources in a 5-tick window. |
-| **MAE** | Mean absolute belief error on non-zero severity cells. |
-| **α\*(bubble)** | argmin(‖SECI‖\_norm + ‖AECI‖\_norm) across the alignment sweep. |
-| **α\*(+MAE)** | argmin(‖SECI‖\_norm + ‖AECI‖\_norm + MAE\_norm). |
-| **Coverage deficit** | Mean (actual severity − aid tokens) per cell; positive = under-served. |
+| **SECI** | Social Echo Chamber Index: community belief variance vs global variance (L1+ beliefs), piecewise-normalised to [−1, +1]. Computed per stored community, averaged per agent type. |
+| **AECI-Var** | Same variance formula and L1+ pool as SECI, grouping by AI reliance (within-type median split on accepted AI updates). Enters the Goldilocks composite. Caveat: cannot distinguish convergence on truth from convergence on shared error — read together with AECI-Err. |
+| **AECI-Err** | Confidence-weighted belief-error split, AI-heavy vs AI-light halves. Negative = AI-heavy agents more confidently wrong. |
+| **AECI-Acc** | Share of accepted belief updates coming from AI (0–1, unsigned reliance measure). |
+| **MAE** | Mean absolute belief error over disaster cells (true severity ≥ 1). |
+| **Unmet needs** | Cells at severity ≥ 3 receiving zero relief tokens per tick. |
+| **Precision** | Fraction of relief tokens placed on cells at severity ≥ 3 (at placement time). |
+| **α\*(bubble)** | argmin(\|SECI\|ₙ + \|AECI-Var\|ₙ) across the sweep. |
+| **α\*(+MAE)** | argmin(\|SECI\|ₙ + \|AECI-Var\|ₙ + MAEₙ). |
+
+Normalised composites are range-normalised **within one sweep** — never compare their values across configurations; cross-configuration comparisons use raw metrics with paired per-seed deltas (`tools/compare_configs.py`). An α\* sensitivity analysis across six composite variants is reported with every sweep.
+
+## Headline Results (comparison run, 2026-07-10)
+
+From the seed-paired baseline-vs-switched comparison ([run 29100134858](https://github.com/tinacomes/DisasterAI/actions/runs/29100134858), post-fix code):
+
+1. **Network-bounded access is a precondition for AI-amplified social echo chambers.** Under the switched configuration SECI deepens sharply at high α (−0.32 at α ≥ 0.9); under the baseline's global query pool it *weakens* instead (−0.13 at α = 1). Paired ΔSECI is significantly negative for α ≥ 0.7.
+2. **A Goldilocks optimum exists only in the switched configuration**, and there it is robust: α\* ∈ [0.3, 0.6] across all six composite variants (primary 0.6, operational +MAE 0.4). The baseline has no interior bubble optimum (α\* = 1.0 for bubble-only composites).
+3. **The switched configuration is operationally more robust to a confirming AI**: significantly lower MAE and higher precision at essentially every α, and the α ≥ 0.9 relief collapse is buffered (unmet needs ~3.5 vs ~11; precision 0.50 vs 0.21).
+
+The PNG/CSV/MD files in the repository root are the committed snapshot of the **switched-configuration** sweep from that run (`summary_table.md` carries its α\* sensitivity block).
 
 ## Repository Structure
 
 ```
 DisasterAI/
-├── DisasterAI_Model.py       # Core ABM: agents, network, belief update, AI alignment
-├── test_filter_bubbles.py    # Primary experiment: Goldilocks alignment sweep + all plots
-├── simulate.py               # Lightweight single-run script
-├── plot_results.py           # Aggregation and plotting for simulate.py outputs
-├── requirements.txt          # Python dependencies
-├── test_results/             # Output figures (gitignored; generated locally or via CI)
-├── METHODS_PAPER.md          # Paper methodology section (main text)
-└── SUPPLEMENTARY.md          # Supplementary tables and experimental design
+├── DisasterAI_Model.py           # Core ABM: agents, networks, mobility, belief update, AI alignment
+├── test_filter_bubbles.py        # Experiment driver: sweeps, metrics, plots, summary tables
+├── simulate.py                   # Lightweight single-run script
+├── plot_results.py               # Aggregation/plots for simulate.py outputs
+├── tools/
+│   ├── compare_configs.py        # Baseline-vs-switched comparison: tables + paired deltas + figure
+│   └── compare_epsilon.py        # Epsilon-decay comparison
+├── .github/workflows/            # CI experiment pipelines (see table below)
+├── METHODS_PAPER.md / .tex       # Paper methods section (Markdown + LaTeX)
+├── SUPPLEMENTARY.md / .tex       # Supplementary tables and design
+├── FINAL_MECHANICS_REVIEW.md     # Pre-submission mechanism audit (limitations inventory)
+├── REVIEW_PROTOCOL.md            # Review findings C1–C12 and fix log
+├── DESIGN_PROPOSAL_NETWORK_MOBILITY.md  # Design doc for the three mechanism switches
+├── *.png, summary_table.*, experiment_results.json  # Results snapshot (switched config, 2026-07-10)
+└── requirements.txt              # Python dependencies
 ```
 
 ## Installation
@@ -63,79 +97,44 @@ Requires Python ≥ 3.11, Mesa ≥ 3.0, NumPy, NetworkX, Matplotlib, SciPy.
 
 ## Running Experiments
 
-### Full Goldilocks sweep (N=20 replications per α level, ~30–60 min)
+Paper-scale sweeps run on GitHub Actions (parallel per-α workers; a serial local sweep takes many hours):
 
-```bash
-python test_filter_bubbles.py --n-runs 20 --collect-and-plot
-```
-
-Results are cached to `agent_model_results/`. Re-running with `--collect-and-plot` overwrites the cache; use `--plot-only` to regenerate figures without rerunning.
-
-### Plot only (from existing JSON cache)
-
-```bash
-python test_filter_bubbles.py --plot-only
-```
-
-### Cognitive gap sweep
-
-The 2D gap sweep (4g × 3 d\_mid × 11α = 132 conditions, N=20 seeded replications each)
-is run via GitHub Actions:
-
-- **GitHub → Actions → "Run Gap Sweep only"** — launches 132 parallel jobs, uploads
-  per-cell JSON artifacts, then assembles `gap_sweep.png`
-- **GitHub → Actions → "Replot Gap Sweep"** — re-generates `gap_sweep.png` from
-  existing artifacts without re-running simulations (requires the source run ID)
-
-### Single quick run
-
-```bash
-python simulate.py --alpha 0.5 --ticks 200
-```
-
-## Output Figures
-
-All figures are saved to `analysis_plots/`.
-
-| File | Description |
+| Workflow (Actions tab) | Purpose |
 |---|---|
-| `goldilocks_sweep.png` | Primary result: SECI, AECI, MAE, coverage deficit, and composite scores across α. Boxplots over N replications. Both α* values marked. |
-| `timeseries_overview.png` | Time-series evolution of SECI, AECI, MAE, unmet needs, and AI query ratio for each α. |
-| `echo_chamber_lifecycle.png` | SECI/AECI trajectories + bar charts showing echo-chamber formation and recovery timing per α level. |
-| `aeci_evolution.png` | Cumulative AI query ratio over simulation time, separately for exploitative and exploratory agents. |
-| `spatial_coverage.png` | Coverage deficit and aid density maps for α = 0 (baseline), α*(+MAE), and α*(bubble). |
-| `periphery_gap.png` | Spatial near/far and network betweenness periphery gaps across α. Steady-state means (last 75 ticks; MAE over disaster cells L1+) with 95% CI bands over replications. |
-| `periphery_gap_evolution.png` | Time evolution of the within-run paired periphery gaps (periphery − core) with 95% CI bands, for α ∈ {0, 0.5, α*, 1}. |
-| `gap_sweep.png` | Effect of cognitive polarisation (gap scalar g) on optimal α and composite scores. |
+| **Compare Baseline vs Network/Mobility Switches** | The headline experiment: 11 α × 2 configs, then comparison tables (CSV/MD), paired per-seed deltas, overlay figure |
+| **Run Primary Alignment Sweep only** | One 11-α sweep; inputs expose ticks, n_runs, salience, epsilon decay, and the three mechanism switches |
+| **Run Gap Sweep only** | 2D cognitive-polarisation sweep (g × d_mid × α) |
+| **Replot Primary Sweep / Replot Gap Sweep** | Regenerate figures + summary tables from a previous run's artifacts, no re-simulation |
+| **Compare Epsilon Decay (Primary Sweep)** | Constant-ε baseline vs annealed exploration |
+| **Spatial Visualization (manual)** | Fixed-epicentre (15, 15) sweep for interpretable coverage maps |
+| **Run DisasterAI Experiment (full, manual)** | Full pipeline incl. factor sweeps |
+| **Smoke test (on push)** | Fast integrity check |
 
-## Experimental Design Summary
+Sweep artifacts include every figure plus `summary_table.csv` / `summary_table.md` (per-α raw metrics with SEs, normalised composites, α\* sensitivity) and `experiment_results.json` for replotting. Per-α JSON artifacts expire after 7 days, plots/tables after 30 — download or commit anything you need to keep.
 
-### Primary: Goldilocks Alignment Sweep
+Local quick runs:
 
-- α ∈ {0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0}, N = 20 replications each
-- 200 simulation ticks; steady-state window = last 75 ticks
-- Total: 220 simulation runs
+```bash
+# Single simulation
+python3 simulate.py --alpha 0.5 --ticks 200
 
-### Secondary: Cognitive Gap Sweep (2D)
+# Small local sweep (3 replications, ~15 min) — writes to test_results/
+python3 test_filter_bubbles.py
 
-- Gap scalar g ∈ {0.0, 0.5, 1.0, 1.5} × acceptance midpoint d\_mid ∈ {2.0, 3.0, 4.0} × α at 11 levels
-- N = 20 independently seeded replications per cell, T = 200 ticks (2640 total runs)
-- Tests robustness of α\* to both the degree of cognitive polarisation and the absolute level of cognitive openness
-- α\* = 0.8 confirmed across all 132 (g, d\_mid) conditions
+# Regenerate figures from an existing results file
+python3 test_filter_bubbles.py --plots-only
 
-### Factor Sensitivity Sweeps (at fixed α = 0.5)
-
-- Share of exploitative agents: {0.2, 0.5, 0.8}
-- Disaster dynamics mode: {0 = static, 2 = moderate, 3 = high volatility}
-- Rumour probability: {0.0, 0.5, 1.0}
+# Compare two collected sweeps on raw metrics
+python3 tools/compare_configs.py <dir-with-plots-config-*/> <save-dir>
+```
 
 ## Interpreting Results
 
-**SECI < 0** means friends hold more homogeneous beliefs than the full population — a social echo chamber. Very negative SECI at α = 1.0 reflects pure confirmation creating community convergence; near-zero SECI at α = 0.0 suggests truthful AI diversifies beliefs.
+**SECI < 0**: community members hold more homogeneous beliefs than the population — a social echo chamber. **AECI-Var < 0**: AI-reliant agents are more homogeneous than the population — but at low α this partly reflects convergence *on the truth*; check AECI-Err (confidently-wrong beliefs) before calling it harm.
 
-**AECI near 1** means agents are routing nearly all accepted updates through AI, creating AI-enforced homogeneity even if SECI is low. The Goldilocks zone is where both indices are simultaneously low.
+**Spatial coverage maps** from randomised-epicentre sweeps average 20 different disaster locations and are not interpretable as maps; use the fixed-epicentre Spatial Visualization workflow for map figures. The near/far periphery *statistics* are unaffected (computed per run relative to each run's own epicentre).
 
-**The spatial coverage maps** show averaged relief distribution (no epicentre marker, as epicentre locations vary randomly across replications). Red cells in the deficit map are chronically under-served; the near/far periphery gap quantifies whether distant cells suffer disproportionately.
+**Cross-configuration claims** must use raw metrics (paired per-seed deltas in `comparison_table.md`), never the within-sweep normalised composites.
 
 ## Citation
 
