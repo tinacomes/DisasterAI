@@ -1,5 +1,17 @@
 # Final Mechanics Review — Pre-Submission Audit
 
+> **ADDENDUM (2026-07-10, same day):** §2.2 and §4 of this review are now
+> resolved — the design proposal has been implemented on this branch behind
+> three flags defaulting to baseline behaviour (`mobility`, `network_type`,
+> `query_scope`), with the §0 stored-communities refactor, broker metrics in
+> the results JSON, CLI/workflow wiring, and seeded bitwise regression
+> guards. See the status header of DESIGN_PROPOSAL_NETWORK_MOBILITY.md for
+> validation results. Still outstanding from §5: the C8 α-noise confound,
+> C9/C10 paper documentation, the remaining vestigial parameters
+> (`share_confirming` etc. — `exploit_friend_bias`/`exploit_self_bias` are
+> now removed), and the paper-scale Stage-4 re-run (now including the
+> 3-switch sweep).
+
 **Review date:** 2026-07-10
 **Reviewed branch:** `claude/paper-mechanics-review-39dmm1` at `1c547bc`
 **Method:** full read of the mechanism code paths, cross-check against

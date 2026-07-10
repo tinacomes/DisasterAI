@@ -400,17 +400,21 @@ def run_one_sim(params):
     far_cell_deficit  = float(np.nanmean(coverage_deficit[_far_mask]))
     near_cell_aid     = float(np.nanmean(avg_aid[_near_mask]))
     far_cell_aid      = float(np.nanmean(avg_aid[_far_mask]))
+    # Broker flag: endpoints of weak-tie bridges (network_type='spatial_bridged'
+    # only; empty set in the baseline 'components' network → broker scalars NaN).
+    _broker_ids = getattr(model, 'bridge_endpoints', set())
+
     all_dists  = []
-    agent_data = []                    # (dist, degree, betw, mae, ai_frac, aid_sent)
+    agent_data = []   # (dist, degree, betw, mae, ai_frac, aid_sent, is_broker, coverage, type)
     for agent in model.agent_list:
         if not isinstance(agent, HumanAgent):
             continue
         node_id = int(agent.unique_id.split('_')[1])
         deg     = degrees.get(node_id, 0)
         betw    = betweenness.get(node_id, 0.0)
-        # Agents are immobile (pos is set once at spawn and never changes), so
-        # initial_pos == pos always. It reflects structural periphery: whether an
-        # agent's home cell is far from the disaster.
+        # Spatial periphery is classified by the SPAWN cell (initial_pos == home_pos):
+        # with mobility=0 the agent never leaves it; with mobility=1 movement is
+        # home-anchored, so spawn distance remains the structural classifier.
         ax, ay  = getattr(agent, 'initial_pos', agent.pos)
         dist    = float(np.sqrt((ax - ex) ** 2 + (ay - ey) ** 2))
         all_dists.append(dist)
@@ -422,7 +426,10 @@ def run_one_sim(params):
         ai_frac  = (agent.accum_calls_ai /
                     max(agent.accum_calls_total, 1))
         aid_sent = float(agent.correct_targets + agent.incorrect_targets)
-        agent_data.append((dist, deg, betw, err, ai_frac, aid_sent))
+        is_broker = node_id in _broker_ids
+        coverage  = float(len(getattr(agent, 'cells_visited', ()) or (agent.pos,)))
+        agent_data.append((dist, deg, betw, err, ai_frac, aid_sent,
+                           is_broker, coverage, agent.agent_type))
 
     # Split by spatial distance quartile (Q1 = near, Q4 = far)
     if all_dists:
@@ -437,8 +444,11 @@ def run_one_sim(params):
     hideg_mae, hideg_ai, hideg_aid = [], [], []
     lobetw_mae, lobetw_aid = [], []
     hibetw_mae, hibetw_aid = [], []
+    broker_mae, broker_aid = [], []
+    nonbroker_mae, nonbroker_aid = [], []
+    cov_exploit, cov_explor = [], []
 
-    for dist, deg, betw, err, ai_frac, aid_sent in agent_data:
+    for dist, deg, betw, err, ai_frac, aid_sent, is_broker, coverage, a_type in agent_data:
         if dist <= dist_q1:
             near_mae.append(err); near_ai.append(ai_frac); near_aid.append(aid_sent)
         elif dist >= dist_q3:
@@ -451,6 +461,17 @@ def run_one_sim(params):
             lobetw_mae.append(err); lobetw_aid.append(aid_sent)
         elif betw >= hi_betw:
             hibetw_mae.append(err); hibetw_aid.append(aid_sent)
+        # Broker flag (bridge endpoint) — the clean binary complement to the
+        # noisy betweenness quartiles (design proposal H-P2)
+        if is_broker:
+            broker_mae.append(err); broker_aid.append(aid_sent)
+        else:
+            nonbroker_mae.append(err); nonbroker_aid.append(aid_sent)
+        # Mobility coverage diagnostics (== 1 for every agent when mobility=0)
+        if a_type == 'exploitative':
+            cov_exploit.append(coverage)
+        else:
+            cov_explor.append(coverage)
 
     def _m(lst): return float(np.nanmean(lst)) if lst else float('nan')
 
@@ -536,6 +557,13 @@ def run_one_sim(params):
         # Network-periphery scalars (betweenness centrality: low Q1 vs high Q4)
         'lobetw_mae': _m(lobetw_mae), 'hibetw_mae': _m(hibetw_mae),
         'lobetw_aid': _m(lobetw_aid), 'hibetw_aid': _m(hibetw_aid),
+        # Broker scalars (weak-tie bridge endpoints; NaN unless
+        # network_type='spatial_bridged') and mobility coverage diagnostics
+        'broker_mae':    _m(broker_mae),    'nonbroker_mae': _m(nonbroker_mae),
+        'broker_aid':    _m(broker_aid),    'nonbroker_aid': _m(nonbroker_aid),
+        'n_brokers':     float(len(broker_mae)),
+        'coverage_exploit': _m(cov_exploit),
+        'coverage_explor':  _m(cov_explor),
         # Source-mode choice diagnostics (exploration floor vs learned policy)
         'mode_choice_exploit': _mode_choice.get('exploit', {}),
         'mode_choice_explor':  _mode_choice.get('explor', {}),
@@ -570,6 +598,8 @@ def _aggregate(runs):
         'near_mae', 'far_mae', 'near_ai', 'far_ai', 'near_aid', 'far_aid',
         'lodeg_mae', 'hideg_mae', 'lodeg_ai', 'hideg_ai', 'lodeg_aid', 'hideg_aid',
         'lobetw_mae', 'hibetw_mae', 'lobetw_aid', 'hibetw_aid',
+        'broker_mae', 'nonbroker_mae', 'broker_aid', 'nonbroker_aid',
+        'n_brokers', 'coverage_exploit', 'coverage_explor',
     ]
     result = {
         'metric_ticks': runs[0]['metric_ticks'],
@@ -2281,6 +2311,23 @@ if __name__ == '__main__':
              'confirmed empty cells. C12 counterfactual: compare runs at 0 vs 1.',
     )
     parser.add_argument(
+        '--mobility', type=int, choices=[0, 1], default=None,
+        help='1 = home-anchored agent movement (returners/explorers per type); '
+             '0 = immobile agents (default baseline).',
+    )
+    parser.add_argument(
+        '--network-type', choices=['components', 'spatial_bridged'], default=None,
+        help="'spatial_bridged' = spatially embedded communities with weak-tie "
+             "bridges (brokers exist by construction); 'components' = disconnected "
+             "type-homogeneous communities (default baseline).",
+    )
+    parser.add_argument(
+        '--query-scope', choices=['global', 'network'], default=None,
+        help="'network' = human queries reach friends (trust-weighted) or, with "
+             "p=0.1, friends-of-friends — access follows edges; 'global' = any "
+             "human reachable with non-friends at a small baseline (default).",
+    )
+    parser.add_argument(
         '--collect-spatial-and-plot', action='store_true',
         help='Load per-alpha spatial JSONs (spatial_alpha_*.json) from --results-dir, '
              'compute metrics, and generate spatial_coverage.png + periphery_gap.png. '
@@ -2299,6 +2346,12 @@ if __name__ == '__main__':
         base_params['epsilon_decay'] = args.epsilon_decay
     if args.epsilon_min is not None:
         base_params['epsilon_min'] = args.epsilon_min
+    if args.mobility is not None:
+        base_params['mobility'] = args.mobility
+    if args.network_type is not None:
+        base_params['network_type'] = args.network_type
+    if args.query_scope is not None:
+        base_params['query_scope'] = args.query_scope
     n_runs_primary = args.n_runs if args.n_runs is not None else N_RUNS
     # Factor/gap sweeps use at most half the primary ticks (they measure relative
     # differences, not absolute steady-state values, so shorter runs suffice)
