@@ -80,6 +80,20 @@ catchment:  # 2SFCA congestion factor (everyday regime only)
   # Numerical guards on the inflation factor (not literature parameters).
   factor_clip: [0.5, 4.0]
 
+regimes:
+  # Which travel-time mode(s) feed each regime's surface. With several modes
+  # the elementwise minimum per origin-destination pair is used (traveller
+  # takes the faster option). The FIRST mode also selects the 2SFCA catchment
+  # bandwidth. Tier-1 runs must not list "transit".
+  everyday:
+    modes: ["walk"]
+    # Composite across everyday services: equal-weight mean of the
+    # per-service deprivation surfaces (weights overridable per city).
+    composite: "mean"
+  emergency:
+    modes: ["car"]
+    composite: "mean"
+
 unreachable:
   # Policy for cells with zero reachable facilities of a service within
   # max_time_min: "exclude" drops them from aggregate statistics (but always
