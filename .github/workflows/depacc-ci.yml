@@ -25,8 +25,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Install core package + test deps
-        run: pip install -e ".[dev]"
+      - name: Install core package + test deps (stats extra enables the
+              regression/clustering tests)
+        run: pip install -e ".[dev,stats]"
       - name: Run unit tests
         run: pytest --cov=depacc --cov-report=term-missing
       - name: Validate shipped configs load
