@@ -1,0 +1,52 @@
+# ============================================================================
+# Hamburg — first Tier-2 deep-dive city.
+# ============================================================================
+
+city:
+  id: "hamburg"
+  name: "Hamburg"
+  country: "DE"
+  tier: 2
+  # Eurostat Urban Audit code of the Hamburg Functional Urban Area (URAU
+  # category FUA). Boundary fetched from GISCO URAU 2021.
+  fua_code: "DE002L1"
+  # Local projected CRS for routing accuracy (UTM 32N); analysis outputs are
+  # reprojected to the global analysis CRS (EPSG:3035).
+crs:
+  local: "EPSG:32632"
+
+sources:
+  osm_pbf:
+    # Geofabrik extract covering the Hamburg FUA (the FUA spills into
+    # Schleswig-Holstein and Lower Saxony, so use the north-Germany-covering
+    # extracts and clip to the FUA boundary).
+    url: "https://download.geofabrik.de/europe/germany/hamburg-latest.osm.pbf"
+    # Additional extracts merged before clipping (FUA commuting zone):
+    extra_urls:
+      - "https://download.geofabrik.de/europe/germany/schleswig-holstein-latest.osm.pbf"
+      - "https://download.geofabrik.de/europe/germany/niedersachsen-latest.osm.pbf"
+    licence: "ODbL 1.0"
+  gtfs:
+    # Aggregated Germany-wide GTFS (DELFI via gtfs.de); clipped to the FUA
+    # bounding box during ingest. Free tier, attribution required.
+    feeds:
+      - id: "gtfs_de_germany"
+        url: "https://download.gtfs.de/germany/free/latest.zip"
+        licence: "CC-BY 4.0 (gtfs.de aggregation of DELFI open data)"
+  ses:
+    # Germany Zensus 2022 100 m INSPIRE grid CSVs (open data). Layer file
+    # names are resolved by the ingest module; the base page is stable.
+    provider: "zensus2022_de_100m"
+    base_url: "https://www.zensus2022.de/DE/Ergebnisse-des-Zensus/_inhalt.html"
+    layers:
+      - "population"        # Einwohnerzahl
+      - "age_structure"     # Durchschnittsalter / Altersgruppen
+      - "household_size"    # Durchschnittliche Haushaltsgroesse
+      - "net_rent"          # Durchschnittliche Nettokaltmiete
+      - "ownership_rate"    # Eigentuemerquote
+      - "vacancy_rate"      # Leerstandsquote
+    licence: "dl-de/by-2-0"
+
+routing:
+  # Tier-2 modes; departure settings inherited from defaults.yaml.
+  modes: ["walk", "car", "transit"]

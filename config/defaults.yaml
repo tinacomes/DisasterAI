@@ -1,0 +1,105 @@
+# ============================================================================
+# Global defaults for the potential-deprivation accessibility study.
+# Per-city files in config/cities/*.yaml override any key here (deep merge).
+# ============================================================================
+
+crs:
+  # Continental analysis CRS: ETRS89 / LAEA Europe.
+  analysis: "EPSG:3035"
+  # Optional per-city projected CRS for local routing accuracy; a city config
+  # may set e.g. "EPSG:32632" (UTM 32N). null = use analysis CRS throughout.
+  local: null
+
+city_definition:
+  # One harmonised definition for every city in the sample:
+  # Eurostat-OECD Functional Urban Areas (GISCO URAU), cross-checked against
+  # JRC GHS Urban Centre Database / Degree of Urbanisation.
+  source: "eurostat_oecd_fua"
+  # Tier-1 inclusion threshold on FUA population.
+  fua_size_threshold: 100000
+  # "stratified": size-stratified sample within a few countries (fast first
+  # cross-city figure). "all_eu_fua": full continental run.
+  city_sample_mode: "stratified"
+  stratified_countries: ["DE", "NL", "FR"]
+  # Size strata bounds (FUA population) used by the stratified sampler.
+  strata_bounds: [100000, 250000, 500000, 1000000, 5000000]
+
+tiers:
+  tier1:
+    # Harmonised continental layer: OSM-based walk + car ONLY. No transit.
+    modes: ["walk", "car"]
+    population: "ghs_pop_100m"
+    demographics: "eurostat_census_2021_1km"
+    # Optional coarse cross-check with the Weiss et al. motorised friction
+    # surface (1 km).
+    friction_surface_check: false
+  tier2:
+    # Deep-dive subset: adds multimodal public transit (r5py + R5 + GTFS) and
+    # fine national SES grids (DE Zensus 2022 100m, NL CBS 100m, FR INSEE
+    # Filosofi 200m, UK LSOA + IMD).
+    modes: ["walk", "car", "transit"]
+    countries: ["DE", "NL", "FR", "UK", "SE", "NO", "DK", "FI"]
+
+routing:
+  engine: "r5"          # single engine for all modes -> harmonised matrices
+  departure:
+    # Fixed representative departure for transit routing (Tier 2); walk/car
+    # are time-independent in R5. Weekday morning, local time.
+    weekday: "tuesday"
+    time_window_start: "08:00"
+    time_window_minutes: 60
+  max_time_min: 120      # travel-time cutoff; beyond this a pair is unreachable
+  walk_speed_kmh: 4.8
+  # Origins are centroids of populated GHS-POP 100m cells inside the FUA.
+  min_cell_population: 1.0
+
+softmin:
+  # Soft-minimum smoothing parameter kappa (per minute). Larger kappa -> closer
+  # to the hard minimum; the softmin lies in [min - ln(n)/kappa, min].
+  # Methodological smoothing choice, NOT a literature-transferred parameter;
+  # sensitivity-test over `kappa_sensitivity`.
+  kappa: 0.5
+  kappa_sensitivity: [0.1, 0.25, 0.5, 1.0, 2.0]
+
+catchment:  # 2SFCA congestion factor (everyday regime only)
+  kernel:
+    type: "gaussian"     # gaussian | binary
+    # Catchment bandwidth in minutes, per mode. Methodological choice,
+    # sensitivity-tested; harmonised across cities.
+    bandwidth_min:
+      walk: 15
+      car: 30
+      transit: 30
+  # Congestion-inflation exponent gamma: c_j = (R_ref / R_j) ** gamma, where
+  # R_j is the 2SFCA supply-to-demand ratio of facility j and R_ref the
+  # population-weighted median ratio in the city. gamma = 0 disables
+  # congestion inflation. Sensitivity-tested.
+  gamma: 0.5
+  gamma_sensitivity: [0.0, 0.25, 0.5, 1.0]
+  reference: "weighted_median"   # weighted_median | mean
+  # Numerical guards on the inflation factor (not literature parameters).
+  factor_clip: [0.5, 4.0]
+
+unreachable:
+  # Policy for cells with zero reachable facilities of a service within
+  # max_time_min: "exclude" drops them from aggregate statistics (but always
+  # reports their count and population share); "cap_at_max_time" assigns the
+  # deprivation value at max_time_min.
+  policy: "cap_at_max_time"
+
+typology:
+  # Bivariate everyday x emergency classification threshold: population-
+  # weighted quantile of each surface (0.5 = weighted median split).
+  quantile: 0.5
+
+quality:
+  # Restrict the Tier-1 sample to cities in countries whose OSM completeness
+  # ratio (OSM facility count / registry count) is at least this value.
+  # null disables the filter.
+  completeness_threshold: null
+  benchmark_services: ["hospital", "pharmacy"]
+
+output:
+  root: "data/derived"
+  raw_root: "data/raw"
+  cache_root: "data/cache"

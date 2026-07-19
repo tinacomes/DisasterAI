@@ -1,0 +1,73 @@
+# ============================================================================
+# Deprivation functions g(t): increasing, convex functions of travel time t
+# (minutes). The deprivation function IS the impedance function of a gravity
+# model run in the opposite direction — increasing rather than decreasing —
+# and is applied to an EFFECTIVE travel time:
+#
+#   everyday  : g( softmin_j( t_ij * c_j ) )   with 2SFCA congestion factor c_j
+#   emergency : g( min_j t_ij )                nearest facility only
+#
+# ALL parameters are TRANSFERRED FROM THE LITERATURE, never estimated here and
+# never fabricated. Every `null` below is a deliberate placeholder: the
+# pipeline refuses to evaluate a function whose parameters are null and its
+# error message repeats the `source` line so you know exactly which paper the
+# number must come from. Fill values ONLY from the cited publications.
+#
+# Functional forms implemented in src/depacc/deprivation/functions.py:
+#   exponential : g(t) = scale * (exp(beta * t) - 1)            beta > 0
+#   box_cox     : g(t) = scale * ((t + shift)^lam - shift^lam) / lam,  lam > 1
+# Both satisfy g(0) = 0, g' > 0, g'' >= 0 (convex).
+# ============================================================================
+
+deprivation:
+  everyday:
+    # PRIMARY form for the everyday/urban-planning framing: dimensionless
+    # Deprivation Level Function (DLF), needs-based relative severity.
+    kind: "DLF"
+    form: "exponential"
+    params:
+      beta: null   # TODO(cite): Wang et al., NRS-based Deprivation Level
+                   # Function — transfer the exponential growth-rate parameter
+                   # from the published NRS/DLF estimates (exact table/eq. to
+                   # be recorded in methods.md when filled).
+      scale: null  # TODO(cite): same source; DLF normalisation constant
+                   # (dimensionless). Use 1.0 ONLY if the cited paper defines
+                   # the DLF as unit-normalised.
+    source: >-
+      TODO(cite): Wang et al., needs-based relative severity (NRS) Deprivation
+      Level Functions. Record full reference + table/equation in methods.md.
+
+  emergency:
+    # ALTERNATIVE monetary framing for the emergency/disaster regime:
+    # Deprivation Cost Function (DCF). Convex and steeply rising in time —
+    # its shape matters most here.
+    kind: "DCF"
+    form: "box_cox"
+    params:
+      lam: null    # TODO(cite): Holguín-Veras et al. / Cantillo et al. /
+                   # Macea et al. / Delgado-Lindeman et al. — Box-Cox exponent
+                   # from the published econometric DCF estimates.
+      scale: null  # TODO(cite): same source; monetary scaling (per person,
+                   # currency-year to be recorded in methods.md).
+      shift: null  # TODO(cite): same source; time offset of the Box-Cox form
+                   # as published (often 1, in the paper's time unit).
+    source: >-
+      TODO(cite): Holguín-Veras et al.; Cantillo et al.; Macea et al.;
+      Delgado-Lindeman et al. — econometrically estimated Deprivation Cost
+      Functions. Record full reference + table/equation in methods.md.
+
+  # Sensitivity analysis: each entry is an alternative specification that can
+  # be swapped in for either regime via `depacc run --deprivation-spec NAME`.
+  alternatives:
+    everyday_box_cox:
+      kind: "DLF"
+      form: "box_cox"
+      params: { lam: null, scale: null, shift: null }
+      source: "TODO(cite): Box-Cox DLF variant from the Wang et al. line of work."
+    emergency_exponential:
+      kind: "DCF"
+      form: "exponential"
+      params: { beta: null, scale: null }
+      source: >-
+        TODO(cite): exponential DCF variant (Holguín-Veras et al. line of
+        work).

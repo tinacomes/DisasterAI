@@ -1,0 +1,68 @@
+# ============================================================================
+# Service definitions: OSM extraction tags + capacity source per service.
+#
+# regime: everyday  -> potential/gravity measure (soft-min over facilities of
+#                      2SFCA-congestion-inflated travel time), DLF applied.
+#         emergency -> nearest-facility travel time only, convex DCF applied.
+# Both regimes ALSO get a plain nearest-facility-time baseline for comparison.
+#
+# capacity: how facility supply S_j enters the 2SFCA step. "uniform" means
+# every facility counts 1 (proxy, flagged in outputs); named fields are used
+# where OSM or registries provide them.
+# ============================================================================
+
+everyday_services:
+  gp:
+    label: "General practitioner"
+    osm:
+      - { key: "amenity", value: "doctors" }
+      - { key: "healthcare", value: "doctor" }
+    capacity: { source: "uniform", proxy: true }
+  pharmacy:
+    label: "Pharmacy"
+    osm:
+      - { key: "amenity", value: "pharmacy" }
+      - { key: "healthcare", value: "pharmacy" }
+    capacity: { source: "uniform", proxy: true }
+  supermarket:
+    label: "Supermarket"
+    osm:
+      - { key: "shop", value: "supermarket" }
+    capacity: { source: "uniform", proxy: true }
+  school:
+    label: "School (primary/secondary)"
+    osm:
+      - { key: "amenity", value: "school" }
+    capacity: { source: "uniform", proxy: true }
+  green_space:
+    label: "Public green space"
+    # Polygons; access is measured to entrances/boundary vertices of parks
+    # above min_area_m2.
+    geometry: "polygon"
+    osm:
+      - { key: "leisure", value: "park" }
+      - { key: "landuse", value: "recreation_ground" }
+    min_area_m2: 5000
+    capacity: { source: "area_m2", proxy: false }
+
+emergency_services:
+  emergency_dept_hospital:
+    label: "Hospital with emergency department"
+    osm:
+      - { key: "amenity", value: "hospital", require: { key: "emergency", value: "yes" } }
+      - { key: "healthcare", value: "hospital", require: { key: "emergency", value: "yes" } }
+    # Fallback when emergency=* tagging is sparse in a country (flagged in the
+    # completeness table): accept all hospitals.
+    fallback_osm:
+      - { key: "amenity", value: "hospital" }
+    capacity: { source: "beds", tag: "beds", fallback: "uniform", proxy: true }
+  ambulance_station:
+    label: "Ambulance station"
+    osm:
+      - { key: "emergency", value: "ambulance_station" }
+    capacity: { source: "uniform", proxy: true }
+  # Config-extensible: broaden later to fire / civil-protection assets, e.g.
+  # fire_station:
+  #   label: "Fire station"
+  #   osm: [{ key: "amenity", value: "fire_station" }]
+  #   capacity: { source: "uniform", proxy: true }
