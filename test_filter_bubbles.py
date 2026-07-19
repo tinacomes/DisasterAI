@@ -1,4 +1,8 @@
 """
+Main experiment driver (not a pytest suite, despite the historical file name):
+sweeps, metrics, figures, and summary tables for the Goldilocks experiments.
+All CI workflows in .github/workflows/ invoke this file.
+
 Goldilocks AI Alignment Experiment: Social vs. AI Filter Bubble Interplay
 
 Research Question:
