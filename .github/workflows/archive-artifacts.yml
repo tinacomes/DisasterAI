@@ -42,13 +42,16 @@ jobs:
           pattern: ${{ inputs.pattern || '{plots-config-baseline,config-comparison}' }}
           path: ${{ inputs.dest || 'results' }}
       - name: Commit and push
+        env:
+          DEST: ${{ inputs.dest || 'results' }}
+          RUN_ID: ${{ inputs.run_id || '29100134858' }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add -f "${{ inputs.dest }}"
+          git add -f "$DEST"
           if git diff --cached --quiet; then
             echo "No new files to commit."
           else
-            git commit -m "Archive artifacts from run ${{ inputs.run_id }}"
+            git commit -m "Archive artifacts from run $RUN_ID"
             git push
           fi
