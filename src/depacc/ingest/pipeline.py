@@ -54,20 +54,34 @@ def run_ingest(cfg: dict, city: str, root: Path) -> None:
         print(f"cells: {len(cells)} populated, "
               f"{cells.population.sum() / 1e6:.2f}M people")
 
-    pbfs = fetch_pbfs(cfg, root)
-    network_pbf = merge_pbfs(
-        pbfs, root / cfg["output"]["raw_root"] / "osm" / f"{city}_merged.osm.pbf"
-    )
-    (out / "network_pbf_path.txt").write_text(str(network_pbf))
-
     services = {**cfg.get("everyday_services", {}), **cfg.get("emergency_services", {})}
+    facilities_source = (cfg.get("sources", {}).get("facilities")
+                         or ("overpass" if cfg["routing"].get("engine") == "friction"
+                             else "pbf"))
     missing = [s for s in services
                if not (out / f"facilities_{s}.parquet").exists()]
-    if missing:
-        facilities = extract_facilities(pbfs, {s: services[s] for s in missing}, cfg, fua)
-        for service, fac in facilities.items():
-            fac.to_parquet(out / f"facilities_{service}.parquet")
-            print(f"facilities[{service}]: {len(fac)}")
+
+    if facilities_source == "overpass":
+        # Tier-1 fast path: facilities from small Overpass queries; no .pbf
+        # download at all (the friction engine needs no street network).
+        if missing:
+            from depacc.ingest.overpass import extract_facilities_overpass
+
+            facilities = extract_facilities_overpass(cfg, fua, root, city)
+            for service, fac in facilities.items():
+                fac.to_parquet(out / f"facilities_{service}.parquet")
+                print(f"facilities[{service}] (overpass): {len(fac)}")
+    else:
+        pbfs = fetch_pbfs(cfg, root)
+        network_pbf = merge_pbfs(
+            pbfs, root / cfg["output"]["raw_root"] / "osm" / f"{city}_merged.osm.pbf"
+        )
+        (out / "network_pbf_path.txt").write_text(str(network_pbf))
+        if missing:
+            facilities = extract_facilities(pbfs, {s: services[s] for s in missing}, cfg, fua)
+            for service, fac in facilities.items():
+                fac.to_parquet(out / f"facilities_{service}.parquet")
+                print(f"facilities[{service}]: {len(fac)}")
 
     if int(cfg["city"].get("tier", 1)) >= 2:
         feeds = fetch_gtfs(cfg, root, fua)

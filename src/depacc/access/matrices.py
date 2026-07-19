@@ -37,23 +37,38 @@ def run_access(cfg: dict, city: str, root: Path) -> None:
     max_time = float(cfg["routing"]["max_time_min"])
 
     synthetic = bool(cfg["city"].get("synthetic"))
+    engine = cfg["routing"].get("engine", "r5")
     network = None
+    fua = None
     for service in services:
         fac_path = out / f"facilities_{service}.parquet"
         if not fac_path.exists():
             print(f"WARNING: no facilities for '{service}'; skipping")
             continue
         facilities = pd.read_parquet(fac_path)
+        if facilities.empty:
+            print(f"WARNING: zero facilities for '{service}'; skipping")
+            continue
         for mode in modes:
             od_path = out / f"od_{service}_{mode}.parquet"
             if od_path.exists():
                 continue
             if synthetic:
                 od = _synthetic_matrix(cells, facilities, mode, max_time)
-            else:
+            elif engine == "friction":
+                import geopandas as gpd
+
+                from depacc.access.friction import friction_matrix
+
+                if fua is None:
+                    fua = gpd.read_parquet(out / "fua_boundary.parquet")
+                od = friction_matrix(cfg, cells, facilities, mode, fua, root, city)
+            elif engine == "r5":
                 if network is None:
                     network = _build_r5_network(cfg, city, out)
                 od = _r5_matrix(network, cells, facilities, mode, cfg)
+            else:
+                raise ValueError(f"Unknown routing engine '{engine}'")
             od.to_parquet(od_path)
             reach = od.origin.nunique()
             print(f"od[{service},{mode}]: {len(od)} pairs, "

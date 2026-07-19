@@ -58,8 +58,40 @@ depacc validate --city hamburg          # config sanity check
 depacc run --city hamburg               # full pipeline: ingest → access →
                                         # deprivation → divergence → equity → viz
 depacc run --city hamburg --stage access
+depacc make-city --fua-code SE001L1 --name Stockholm --country SE
+                                        # generate a Tier-1 fast-path config
+depacc cross                            # cross-city clustering + size gradient
 pytest                                  # unit tests (no downloads needed)
 ```
+
+## Running on GitHub (no local setup)
+
+Two dispatch workflows run everything on GitHub's runners; results come back
+as downloadable artifacts on the run page:
+
+- **Actions → "depacc — run one city"** — type a city id (`hamburg`,
+  `koeln`, `demo`); installs Python + JDK 21, caches raw downloads per city,
+  uploads `depacc-<city>` (surfaces, typology, equity tables, figures).
+- **Actions → "depacc — Tier-1 many-city batch"** — a JSON list of city ids
+  and/or `"FUA_CODE,Name,CC; …"` triplets for cities with no config yet
+  (generated on the fly). One parallel job per city on the fast path, then a
+  collect job merges every city into `cityplane.csv`, runs `depacc cross`,
+  and uploads `depacc-cross-city`.
+
+## Two routing engines (the many-city bypass)
+
+| | `r5` (Tier-2 reference) | `friction` (Tier-1 fast path) |
+|---|---|---|
+| Travel times | R5 street/transit routing | least-cost paths over Weiss et al. (2020) friction surfaces |
+| Modes | walk, car, transit | walk, car |
+| Facilities | .pbf + pyrosm | small Overpass API queries |
+| Downloads per city | 0.5–2 GB (.pbf, GTFS) | a **few MB** (WCS raster window + JSON) |
+| Needs Java | yes (JDK 21) | no |
+| Resolution | street-level | ~1 km, harmonised Europe-wide |
+
+Set `routing.engine: friction` + `sources.facilities: overpass` in a city
+config (or use `depacc make-city`, which does both). Tier-2 r5 runs
+cross-check whether the coarse engine changes city rankings (methods.md §7).
 
 No raw data is committed; everything under `data/` is reproduced by the ingest
 stage with cached downloads and JSON provenance sidecars (URL, SHA-256,
