@@ -76,14 +76,38 @@ def main(argv: list[str] | None = None) -> int:
                       help="config id/slug (default: name, lowercased)")
 
     cross = sub.add_parser(
-        "cross", help="cross-city cityvector clustering + size-gradient read "
-                      "over all cities in cityplane.csv")
+        "cross", help="cross-city cityvector clustering, PNAS-style scaling "
+                      "regressions + size-gradient read over cityplane.csv")
     cross.add_argument("--n-clusters", type=int, default=3)
     cross.add_argument(
         "--project-root", type=Path,
         default=Path(__file__).resolve().parents[2])
 
+    lf = sub.add_parser(
+        "list-fuas", help="list Functional Urban Areas (codes + names) from "
+                          "the Eurostat URAU layer, for choosing cities")
+    lf.add_argument("--country", action="append", default=None,
+                    help="two-letter code; repeatable (e.g. --country DE --country NL)")
+    lf.add_argument("--project-root", type=Path,
+                    default=Path(__file__).resolve().parents[2])
+
     args = parser.parse_args(argv)
+
+    if args.command == "list-fuas":
+        from depacc.ingest.fua_sample import list_fuas
+
+        fuas = list_fuas(load_config(), args.project_root)
+        if args.country:
+            fuas = fuas[fuas.country.isin([c.upper() for c in args.country])]
+        with_pop = fuas.dropna(subset=["population"]) if fuas.population.notna().any() else fuas
+        print(with_pop.sort_values(
+            ["country", "population" if fuas.population.notna().any() else "name"],
+            ascending=[True, False] if fuas.population.notna().any() else [True, True],
+        ).to_string(index=False))
+        print(f"\n{len(fuas)} FUAs. Use with: depacc make-city --fua-code CODE "
+              f"--name NAME --country CC, or the batch workflow's make_cities "
+              f"input: \"CODE,NAME,CC; ...\"")
+        return 0
 
     if args.command == "make-city":
         from depacc.config import CONFIG_DIR

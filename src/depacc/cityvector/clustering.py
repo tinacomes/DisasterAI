@@ -87,6 +87,27 @@ def run_cross_city(cfg: dict, root: Path, n_clusters: int = 3) -> None:
     else:
         print("NOTE: too few real cities for the size-gradient regression")
 
+    # PNAS-style scaling: per-outcome log-log gradients (pooled and, when
+    # several countries are present, with country fixed effects) plus the
+    # formal everyday-vs-emergency gradient-difference test.
+    from depacc.cityvector.scaling import regime_slope_difference, scaling_table
+
+    tables = [scaling_table(real)]
+    if real.country.nunique() > 1:
+        tables.append(scaling_table(real, country_fe=True))
+    scaling = pd.concat([t for t in tables if not t.empty], ignore_index=True) \
+        if any(not t.empty for t in tables) else pd.DataFrame()
+    if not scaling.empty:
+        scaling.to_csv(derived / "scaling.csv", index=False)
+        print(scaling.to_string(index=False))
+    diffs = pd.concat(
+        [regime_slope_difference(real, m) for m in ("gini", "mean")],
+        ignore_index=True)
+    if not diffs.empty:
+        diffs.to_csv(derived / "regime_slope_difference.csv", index=False)
+        print(diffs[["measure", "gradient_difference_emergency", "p",
+                     "interpretation"]].to_string(index=False))
+
     _plot_cross_city(real, derived)
 
 
