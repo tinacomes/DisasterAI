@@ -100,7 +100,7 @@ git clone <repo-url> && cd DisasterAI
 pip install -r requirements.txt
 ```
 
-Requires Python ≥ 3.11, Mesa ≥ 3.0, NumPy, NetworkX, Matplotlib, SciPy.
+Requires Python ≥ 3.11. `requirements.txt` pins the exact dependency versions the pipeline was verified against (Mesa, NumPy, NetworkX, Matplotlib, SciPy, seaborn); newer versions will likely work.
 
 ## Running Experiments
 
