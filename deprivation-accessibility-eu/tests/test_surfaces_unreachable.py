@@ -104,6 +104,19 @@ def test_unreachable_capped_at_max_time():
     assert surf.loc[3, "deprivation"] > surf.loc[[0, 1, 2], "deprivation"].max()
 
 
+def test_effective_time_floored_at_zero():
+    """Many facilities seconds away must not drive t_eff (softmin) negative."""
+    cells = pd.DataFrame({"population": [10.0]}, index=[0])
+    od = pd.DataFrame(
+        [{"origin": 0, "dest": f"f{j}", "time": 0.2} for j in range(30)]
+    )
+    supply = pd.Series(1.0, index=[f"f{j}" for j in range(30)])
+    surf = everyday_surface(od, cells, supply, DLF, kappa=0.5, kernel=KERNEL,
+                            gamma=0.0, policy="exclude")
+    assert surf.loc[0, "t_eff"] == 0.0
+    assert surf.loc[0, "deprivation"] == pytest.approx(0.0)
+
+
 def test_unknown_policy_rejected():
     cells, od, supply = _setup()
     with pytest.raises(ValueError):

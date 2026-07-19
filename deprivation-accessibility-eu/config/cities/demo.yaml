@@ -1,0 +1,39 @@
+# ============================================================================
+# SYNTHETIC DEMO CITY — pipeline test fixture, NOT DATA, NOT A RESULT.
+#
+# Runs the full pipeline end-to-end with zero network access (CI, demos,
+# development): procedurally generated population/facilities and a
+# straight-line travel-time router. Every output is watermarked
+# synthetic=True and figures carry a "SYNTHETIC FIXTURE" overlay.
+#
+# The deprivation parameters below are ARBITRARY FIXTURE CONSTANTS chosen
+# only so the code path can execute. They are NOT literature values, carry
+# no meaning, and must never be copied into a real city configuration —
+# real runs keep the null placeholders in config/deprivation.yaml until
+# filled from the cited papers.
+# ============================================================================
+
+city:
+  id: "demo"
+  name: "Demoville"
+  country: "ZZ"
+  tier: 2
+  synthetic: true
+  synthetic_params:
+    seed: 7
+    n_side: 40      # 40 x 40 grid of 100 m cells
+
+routing:
+  modes: ["walk", "car", "transit"]
+
+deprivation:
+  everyday:
+    kind: "DLF"
+    form: "exponential"
+    params: { beta: 0.045, scale: 1.0 }   # FIXTURE CONSTANTS (see header)
+    source: "SYNTHETIC FIXTURE ONLY — arbitrary constants; not a citation; never use for analysis"
+  emergency:
+    kind: "DCF"
+    form: "box_cox"
+    params: { lam: 1.6, scale: 0.5, shift: 1.0 }   # FIXTURE CONSTANTS (see header)
+    source: "SYNTHETIC FIXTURE ONLY — arbitrary constants; not a citation; never use for analysis"

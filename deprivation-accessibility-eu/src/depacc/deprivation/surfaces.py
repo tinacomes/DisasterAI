@@ -111,6 +111,10 @@ def everyday_surface(
         od[time_col].to_numpy() * factor.reindex(od[dest_col]).to_numpy()
     )
     t_eff = grouped_softmin(inflated, kappa, group_col=origin_col, time_col="time")
+    # The substitutability bonus (softmin < min by up to ln(n)/kappa) can dip
+    # below zero when several facilities are a fraction of a minute away;
+    # effective time is physically floored at zero.
+    t_eff = t_eff.clip(lower=0.0)
     nearest = od.groupby(origin_col)[time_col].min()
 
     surface = cells.copy()
