@@ -1,0 +1,32 @@
+cff-version: 1.2.0
+message: >-
+  If you use this model, please cite it using the metadata below. A journal
+  paper describing the model and results is under review; this file will be
+  updated with the preferred citation (and DOI) once it is published.
+title: "DisasterAI: agent-based simulation of disaster response under varying AI alignment"
+type: software
+authors:
+  - family-names: Comes
+    given-names: Tina
+    email: t.comes@tudelft.nl
+    affiliation: "Delft University of Technology"
+repository-code: "https://github.com/tinacomes/DisasterAI"
+license: MIT
+version: 1.0.0
+date-released: "2026-07-19"
+keywords:
+  - agent-based modelling
+  - disaster response
+  - AI alignment
+  - echo chambers
+  - filter bubbles
+# Once the paper is accepted, uncomment and complete:
+# preferred-citation:
+#   type: article
+#   title: "<paper title>"
+#   authors:
+#     - family-names: Comes
+#       given-names: Tina
+#   journal: "<journal>"
+#   year: 2026
+#   doi: "<doi>"
