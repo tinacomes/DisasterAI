@@ -3,7 +3,7 @@ __pycache__/
 analysis_plots/
 agent_model_results/
 test_results/
-results/
 spatial_results/
 *.json
+!results/**/*.json
 .DS_Store

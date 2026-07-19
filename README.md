@@ -63,7 +63,7 @@ From the seed-paired baseline-vs-switched comparison ([run 29100134858](https://
 2. **A Goldilocks optimum exists only in the switched configuration**, and there it is robust: α\* ∈ [0.3, 0.6] across all six composite variants (primary 0.6, operational +MAE 0.4). The baseline has no interior bubble optimum (α\* = 1.0 for bubble-only composites).
 3. **The switched configuration is operationally more robust to a confirming AI**: significantly lower MAE and higher precision at essentially every α, and the α ≥ 0.9 relief collapse is buffered (unmet needs ~3.5 vs ~11; precision 0.50 vs 0.21).
 
-The PNG/CSV/MD files in the repository root are the committed snapshot of the **switched-configuration** sweep from that run (`summary_table.md` carries its α\* sensitivity block).
+The committed results from that run live in `results/` — the full sweep snapshot for **both** configurations plus the paired comparison tables and overlay figure. See `results/README.md` for provenance and the figure-by-figure inventory.
 
 ## Repository Structure
 
@@ -77,14 +77,21 @@ DisasterAI/
 │   ├── compare_configs.py        # Baseline-vs-switched comparison: tables + paired deltas + figure
 │   └── compare_epsilon.py        # Epsilon-decay comparison
 ├── .github/workflows/            # CI experiment pipelines (see table below)
+├── results/                      # Committed results (run 29100134858, 2026-07-10) + provenance README
+│   ├── switched-sweep/           #   Switched configuration: figures, summary tables, results JSON
+│   ├── baseline-sweep/           #   Baseline configuration: same file set
+│   └── comparison/               #   Paired per-seed delta tables + overlay figure
 ├── METHODS_PAPER.md / .tex       # Paper methods section (Markdown + LaTeX)
 ├── SUPPLEMENTARY.md / .tex       # Supplementary tables and design
-├── FINAL_MECHANICS_REVIEW.md     # Pre-submission mechanism audit (limitations inventory)
-├── REVIEW_PROTOCOL.md            # Review findings C1–C12 and fix log
-├── DESIGN_PROPOSAL_NETWORK_MOBILITY.md  # Design doc for the three mechanism switches
-├── *.png, summary_table.*, experiment_results.json  # Results snapshot (switched config, 2026-07-10)
-└── requirements.txt              # Python dependencies
+├── docs/development/             # Internal review/design docs — ⚠ remove before external submission
+├── CITATION.cff                  # Citation metadata
+└── requirements.txt              # Pinned Python dependencies
 ```
+
+> **Note for submission:** `docs/development/` contains internal working
+> documents (review protocol, mechanics audit, design proposal). Delete that
+> directory before sharing the repository externally; nothing in the pipeline
+> depends on it.
 
 ## Installation
 
@@ -93,7 +100,7 @@ git clone <repo-url> && cd DisasterAI
 pip install -r requirements.txt
 ```
 
-Requires Python ≥ 3.11, Mesa ≥ 3.0, NumPy, NetworkX, Matplotlib, SciPy.
+Requires Python ≥ 3.11. `requirements.txt` pins the exact dependency versions the pipeline was verified against (Mesa, NumPy, NetworkX, Matplotlib, SciPy, seaborn); newer versions will likely work.
 
 ## Running Experiments
 
@@ -108,25 +115,48 @@ Paper-scale sweeps run on GitHub Actions (parallel per-α workers; a serial loca
 | **Compare Epsilon Decay (Primary Sweep)** | Constant-ε baseline vs annealed exploration |
 | **Spatial Visualization (manual)** | Fixed-epicentre (15, 15) sweep for interpretable coverage maps |
 | **Run DisasterAI Experiment (full, manual)** | Full pipeline incl. factor sweeps |
+| **Archive Run Artifacts (manual)** | Commits a finished run's artifacts into `results/` so they survive artifact expiry |
 | **Smoke test (on push)** | Fast integrity check |
 
-Sweep artifacts include every figure plus `summary_table.csv` / `summary_table.md` (per-α raw metrics with SEs, normalised composites, α\* sensitivity) and `experiment_results.json` for replotting. Per-α JSON artifacts expire after 7 days, plots/tables after 30 — download or commit anything you need to keep.
+Sweep artifacts include every figure plus `summary_table.csv` / `summary_table.md` (per-α raw metrics with SEs, normalised composites, α\* sensitivity) and `experiment_results.json` for replotting. Per-α JSON artifacts expire after 7 days, plots/tables after 30 — archive anything you need to keep (see below).
 
 Local quick runs:
 
 ```bash
-# Single simulation
-python3 simulate.py --alpha 0.5 --ticks 200
+# Single-α batch of runs (writes aggregated JSON; default 100 ticks, 10 runs)
+python3 simulate.py --outfile out.json --alpha 0.5 --n_runs 3
 
-# Small local sweep (3 replications, ~15 min) — writes to test_results/
-python3 test_filter_bubbles.py
+# Small local sweep (writes figures + tables to test_results/)
+python3 test_filter_bubbles.py --n-runs 3
 
-# Regenerate figures from an existing results file
+# Regenerate figures from an existing results file, no re-simulation
 python3 test_filter_bubbles.py --plots-only
 
-# Compare two collected sweeps on raw metrics
-python3 tools/compare_configs.py <dir-with-plots-config-*/> <save-dir>
+# Compare two collected sweeps on raw metrics (dirs each holding an experiment_results.json)
+python3 tools/compare_configs.py results/ <save-dir>
 ```
+
+## Reproducing the Paper / Responding to Reviewers
+
+Everything runs from the GitHub **Actions tab** — no local setup needed:
+
+1. **Re-run the headline experiment** (e.g. with changed parameters a reviewer
+   asks for): dispatch *Compare Baseline vs Network/Mobility Switches*. The
+   defaults (20 runs × 200 ticks × 11 α × 2 configs) reproduce the committed
+   results; the `n_runs`/`ticks` inputs are the usual knobs. Takes ~40 min of
+   wall time on parallel workers.
+2. **Change a single sweep** (e.g. different ε decay, salience, or one
+   mechanism switch): dispatch *Run Primary Alignment Sweep only* — its inputs
+   expose ticks, replications, salience weight, ε decay, and the three
+   mechanism switches individually.
+3. **Restyle or fix a figure without re-simulating**: dispatch *Replot Primary
+   Sweep* (or *Replot Gap Sweep*) pointing at a previous run — or locally, run
+   `python3 test_filter_bubbles.py --plots-only --results-file
+   results/switched-sweep/experiment_results.json --save-dir <out>`.
+4. **Keep the outputs**: dispatch *Archive Run Artifacts* with the finished
+   run's ID (the number in the run's URL). It commits the artifacts into
+   `results/` on the branch you choose, so they survive the 7/30-day artifact
+   expiry and are versioned alongside the code.
 
 ## Interpreting Results
 
@@ -134,11 +164,11 @@ python3 tools/compare_configs.py <dir-with-plots-config-*/> <save-dir>
 
 **Spatial coverage maps** from randomised-epicentre sweeps average 20 different disaster locations and are not interpretable as maps; use the fixed-epicentre Spatial Visualization workflow for map figures. The near/far periphery *statistics* are unaffected (computed per run relative to each run's own epicentre).
 
-**Cross-configuration claims** must use raw metrics (paired per-seed deltas in `comparison_table.md`), never the within-sweep normalised composites.
+**Cross-configuration claims** must use raw metrics (paired per-seed deltas in `results/comparison/comparison_table.md`), never the within-sweep normalised composites.
 
 ## Citation
 
-If you use this model, please cite [paper citation to be added].
+Citation metadata is in `CITATION.cff` (GitHub's "Cite this repository" button uses it). The journal reference will be added there on publication.
 
 ## Licence
 
