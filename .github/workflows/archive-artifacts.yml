@@ -7,6 +7,11 @@ name: Archive Run Artifacts
 # URL and the branch the results should land on.
 
 on:
+  # TEMPORARY push trigger: one-shot archive of run 29100134858 on the
+  # publication-prep branch; removed once the results are committed.
+  push:
+    branches: [claude/repo-publication-ready-rvjms6]
+    paths: [".github/workflows/archive-artifacts.yml"]
   workflow_dispatch:
     inputs:
       run_id:
@@ -32,10 +37,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          run-id: ${{ inputs.run_id }}
+          run-id: ${{ inputs.run_id || '29100134858' }}
           github-token: ${{ github.token }}
-          pattern: ${{ inputs.pattern }}
-          path: ${{ inputs.dest }}
+          pattern: ${{ inputs.pattern || '{plots-config-baseline,config-comparison}' }}
+          path: ${{ inputs.dest || 'results' }}
       - name: Commit and push
         run: |
           git config user.name "github-actions[bot]"
