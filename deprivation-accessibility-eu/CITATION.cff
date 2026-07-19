@@ -1,0 +1,27 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "depacc: potential-deprivation accessibility equity across European cities"
+type: software
+authors:
+  - family-names: "Comes"
+    given-names: "Tina"
+    email: "t.comes@tudelft.nl"
+    affiliation: "Delft University of Technology"
+version: "0.1.0"
+date-released: "2026-07-19"
+license: MIT
+repository-code: "https://github.com/tinacomes/DisasterAI"
+abstract: >-
+  Reproducible, config-driven pipeline measuring infrastructure accessibility
+  across European cities through the lens of potential deprivation:
+  everyday-service access (gravity/2SFCA soft-minimum effective travel time,
+  deprivation level functions) contrasted with emergency capability
+  (nearest-facility travel time, convex deprivation cost functions), their
+  cell-level co-location typology, city-level divergence, and the
+  cross-sectional city-size gradient (space-for-time) read.
+keywords:
+  - accessibility
+  - deprivation cost functions
+  - spatial equity
+  - 2SFCA
+  - functional urban areas

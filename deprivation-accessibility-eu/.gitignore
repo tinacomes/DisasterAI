@@ -1,0 +1,32 @@
+# Raw and derived data are never committed; reproduce via `depacc run --stage ingest`
+# (see data/README.md for sources, licences and provenance).
+data/*
+!data/README.md
+
+# Heavy binaries
+*.pbf
+*.tif
+*.tiff
+*.zip
+*.gpkg
+*.parquet
+*.jar
+
+# Re-include JSON within this subproject (the repository root .gitignore
+# excludes *.json globally for the DisasterAI ABM; provenance sidecars and
+# exported results here are data-directory-only anyway, but keep docs JSON).
+!*.json
+
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+.venv/
+dist/
+build/
+.pytest_cache/
+.coverage
+
+# DVC internals that must not be committed
+.dvc/cache/
+.dvc/tmp/

@@ -1,0 +1,4 @@
+# DVC tracks heavy DERIVED artefacts (e.g. the per-city feature table) by
+# hash; raw data is reproduced by the ingest stage instead. Configure an
+# off-GitHub remote before the first `dvc push`, e.g.:
+#   dvc remote add -d storage s3://<bucket>/depacc   (or gdrive://, ssh://, ...)
