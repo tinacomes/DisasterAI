@@ -66,7 +66,22 @@ def main(argv: list[str] | None = None) -> int:
     val = sub.add_parser("validate", help="load + validate config for a city")
     val.add_argument("--city", required=True)
 
+    cross = sub.add_parser(
+        "cross", help="cross-city cityvector clustering + size-gradient read "
+                      "over all cities in cityplane.csv")
+    cross.add_argument("--n-clusters", type=int, default=3)
+    cross.add_argument(
+        "--project-root", type=Path,
+        default=Path(__file__).resolve().parents[2])
+
     args = parser.parse_args(argv)
+
+    if args.command == "cross":
+        from depacc.cityvector.clustering import run_cross_city
+
+        run_cross_city(load_config(), args.project_root, n_clusters=args.n_clusters)
+        return 0
+
     cfg = load_config(args.city)
 
     if args.command == "validate":
