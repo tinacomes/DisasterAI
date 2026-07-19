@@ -1,0 +1,49 @@
+name: Archive Run Artifacts
+
+# Downloads artifacts from a finished workflow run and commits them into the
+# repository (default: results/), one subdirectory per artifact. Use this to
+# preserve sweep outputs past the artifact retention window — e.g. after a
+# reviewer-requested re-run — by dispatching it with the run ID from the run's
+# URL and the branch the results should land on.
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "Workflow run ID to pull artifacts from (number in the run's URL)"
+        required: true
+      pattern:
+        description: "Artifact name glob (e.g. plots-config-*); {a,b} alternatives allowed"
+        required: false
+        default: "*"
+      dest:
+        description: "Destination directory in the repository"
+        required: false
+        default: "results"
+
+permissions:
+  contents: write
+
+jobs:
+  archive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ github.token }}
+          pattern: ${{ inputs.pattern }}
+          path: ${{ inputs.dest }}
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -f "${{ inputs.dest }}"
+          if git diff --cached --quiet; then
+            echo "No new files to commit."
+          else
+            git commit -m "Archive artifacts from run ${{ inputs.run_id }}"
+            git push
+          fi
