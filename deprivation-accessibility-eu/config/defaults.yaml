@@ -41,7 +41,14 @@ tiers:
     countries: ["DE", "NL", "FR", "UK", "SE", "NO", "DK", "FI"]
 
 routing:
-  engine: "r5"          # single engine for all modes -> harmonised matrices
+  # r5:       reference engine, all modes (walk/car/transit), needs .pbf +
+  #           JDK 21 (+GTFS for transit). Tier-2 default.
+  # friction: Tier-1 fast path — least-cost paths over the Weiss et al.
+  #           friction surfaces (walk/car only, ~1 km, a few MB per city via
+  #           WCS window download, no Java). Pair with
+  #           sources.facilities: overpass. Coarser but harmonised; Tier-2
+  #           r5 runs cross-check the rankings (methods.md §5, §7).
+  engine: "r5"
   departure:
     # Fixed representative departure for transit routing (Tier 2); walk/car
     # are time-independent in R5. Weekday morning, local time.
@@ -105,6 +112,17 @@ typology:
   # Bivariate everyday x emergency classification threshold: population-
   # weighted quantile of each surface (0.5 = weighted median split).
   quantile: 0.5
+
+friction:
+  # Weiss et al. (2020) friction surfaces, fetched as per-city WCS windows
+  # from the Malaria Atlas Project geoserver (CC-BY 4.0). Override `wcs` if
+  # the coverage ids change upstream (see access/friction.py).
+  pad_deg: 1.0        # margin around the FUA bounding box
+  wcs:
+    base: "https://data.malariaatlas.org/geoserver/Accessibility/ows"
+    coverages:
+      car: "Accessibility__202001_Global_Motorized_Friction_Surface"
+      walk: "Accessibility__202001_Global_Walking_Only_Friction_Surface"
 
 quality:
   # Restrict the Tier-1 sample to cities in countries whose OSM completeness

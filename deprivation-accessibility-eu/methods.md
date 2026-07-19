@@ -86,14 +86,24 @@ specifications for sensitivity analysis live in
 
 ## 5. Travel times
 
-Single routing engine (R5 via r5py, JDK 21) for all modes, so Tier-1 and
-Tier-2 matrices are methodologically identical: walk + car for every city
-(OSM); walk+transit added for Tier-2 cities with GTFS (departure window in
-`routing.departure`). Origins: centroids of populated GHS-POP 100 m cells
-within the FUA; destinations: OSM facilities per service
-(`config/services.yaml`, including capacity sources; uniform-capacity
-proxies are flagged). Optional robustness check against the Weiss et al.
-motorised friction surface (1 km).
+Two engines, selected per city config (`routing.engine`):
+
+- **r5 (reference, Tier 2):** R5 via r5py (JDK 21) for walk + car + transit
+  on OSM (.pbf) and GTFS; street-level resolution; departure window in
+  `routing.departure`.
+- **friction (Tier-1 fast path):** least-cost paths (Dijkstra on the
+  8-connected pixel graph, latitude-corrected metric distances) over the
+  Weiss et al. (2020) 30-arc-second friction surfaces — motorised for car,
+  walking-only for walk — fetched as per-city WCS windows. Facilities come
+  from Overpass API queries (polygon features reduced to centre points; no
+  min-area filter — immaterial at ~1 km resolution). This scales the
+  continental sample without per-city bulk downloads; it is coarser, so
+  Tier-2 r5 runs cross-check whether ENGINE choice changes city rankings
+  (§7), exactly as the transit-vs-no-transit check does.
+
+Origins: centroids of populated GHS-POP 100 m cells within the FUA;
+destinations: OSM facilities per service (`config/services.yaml`, capacity
+sources flagged where proxied).
 
 ## 6. Equity statistics
 
