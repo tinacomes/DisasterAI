@@ -31,7 +31,17 @@ _SYNTH_ACCESS_OVERHEAD_MIN = {"walk": 0.0, "car": 3.0, "transit": 5.0}
 
 def run_access(cfg: dict, city: str, root: Path) -> None:
     out = derived_dir(cfg, city, root)
-    cells = pd.read_parquet(out / "cells.parquet")
+    cells_path = out / "cells.parquet"
+    if not cells_path.exists():
+        raise RuntimeError(
+            f"{cells_path} missing — the 'ingest' stage must run before "
+            f"'access'. Each GitHub run starts on a fresh machine; if you "
+            f"dispatched 'access' on its own, the per-city data/derived cache "
+            f"from the ingest run may not have been restored (it can expire or "
+            f"miss on the first staged run). Re-dispatch stage 'ingest' (or "
+            f"stage 'all') for '{city}', then 'access'."
+        )
+    cells = pd.read_parquet(cells_path)
     modes = cfg["routing"].get("modes") or cfg["tiers"]["tier1"]["modes"]
     services = list(cfg.get("everyday_services", {})) + list(cfg.get("emergency_services", {}))
     max_time = float(cfg["routing"]["max_time_min"])
