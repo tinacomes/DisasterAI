@@ -48,3 +48,14 @@ def test_size_gradient_recovers_planted_slope():
     assert row.slope_per_log10_pop == pytest.approx(0.05, abs=0.01)
     assert row.p < 0.01
     assert row.inference == "cross-sectional space-for-time"
+
+
+def test_run_cross_city_noop_on_empty_study(tmp_path, capsys):
+    """cross must exit cleanly (not crash) when no city summaries exist yet —
+    the ingest-only persist path that previously raised FileNotFoundError."""
+    from depacc.cityvector.clustering import run_cross_city
+    from depacc.config import load_config
+
+    (tmp_path / "data" / "derived").mkdir(parents=True)
+    run_cross_city(load_config(), tmp_path)  # must not raise
+    assert "no city summaries yet" in capsys.readouterr().out
