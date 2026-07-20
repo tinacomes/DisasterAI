@@ -39,6 +39,13 @@ def _combined_od(out: Path, service: str, modes: list[str]) -> pd.DataFrame | No
 def run_deprivation(cfg: dict, city: str, root: Path,
                     alternative: str | None = None) -> None:
     out = derived_dir(cfg, city, root)
+    if not (out / "cells.parquet").exists() or not list(out.glob("od_*.parquet")):
+        raise RuntimeError(
+            f"Missing ingest/access outputs in {out} — run stages 'ingest' "
+            f"and 'access' before 'deprivation' (each GitHub run is a fresh "
+            f"machine; the per-city data/derived cache carries them forward, "
+            f"but re-dispatch stage 'all' for '{city}' if it was evicted)."
+        )
     cells = pd.read_parquet(out / "cells.parquet").set_index("cell_id")
     surfaces = cells.copy()
     max_time = float(cfg["routing"]["max_time_min"])
