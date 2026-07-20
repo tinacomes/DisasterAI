@@ -1,0 +1,32 @@
+# ============================================================================
+# Köln — second Tier-2 deep-dive city (generalisation check for the
+# Hamburg-first pipeline; same national data sources, different FUA).
+# ============================================================================
+
+city:
+  id: "koeln"
+  name: "Köln"
+  country: "DE"
+  tier: 2
+  fua_code: "DE004L1"   # Eurostat Urban Audit FUA code (verify against URAU 2021)
+
+crs:
+  local: "EPSG:32632"   # UTM 32N
+
+sources:
+  osm_pbf:
+    url: "https://download.geofabrik.de/europe/germany/nordrhein-westfalen-latest.osm.pbf"
+    licence: "ODbL 1.0"
+  gtfs:
+    feeds:
+      - id: "gtfs_de_germany"
+        url: "https://download.gtfs.de/germany/free/latest.zip"
+        licence: "CC-BY 4.0 (gtfs.de aggregation of DELFI open data)"
+  ses:
+    provider: "zensus2022_de_100m"
+    layers: ["population", "age_structure", "household_size", "net_rent",
+             "ownership_rate", "vacancy_rate"]
+    licence: "dl-de/by-2-0"
+
+routing:
+  modes: ["walk", "car", "transit"]

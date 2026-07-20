@@ -1,0 +1,163 @@
+name: depacc — Tier-1 many-city batch
+
+# The many-city study on GitHub's runners, using the Tier-1 fast path:
+# facilities from small Overpass queries + travel times from per-city
+# friction-surface windows (a few MB per city, no .pbf, no GTFS, no Java).
+# One parallel job per city, then a collect job that merges all city rows,
+# runs the cross-city clustering + size-gradient read, and uploads the
+# combined results (artifact: depacc-cross-city).
+#
+# Trigger: GitHub → Actions → "depacc — Tier-1 many-city batch" → Run
+# workflow.
+#   cities:    JSON list of EXISTING config ids, e.g. ["hamburg_t1","lyon"]
+#   make_cities: optional; semicolon-separated "FUA_CODE,Name,CC" triplets
+#              for cities with no config yet — configs are generated on the
+#              fly with `depacc make-city`, e.g.
+#              "SE001L1,Stockholm,SE; DK001L1,Copenhagen,DK"
+# Requires config/deprivation.yaml parameters to be filled (methods.md §3).
+
+on:
+  workflow_dispatch:
+    inputs:
+      cities:
+        description: 'JSON list of existing city config ids (e.g. ["demo"])'
+        required: false
+        default: "[]"
+      make_cities:
+        description: 'Generate configs: "FUA_CODE,Name,CC; FUA_CODE,Name,CC; ..."'
+        required: false
+        default: ""
+
+env:
+  MPLBACKEND: Agg
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - name: Build city matrix (ids + generation specs)
+        id: plan
+        shell: python
+        run: |
+          import json, os
+          cities = json.loads('''${{ inputs.cities }}''' or "[]")
+          entries = [{"city": c, "spec": ""} for c in cities]
+          make = '''${{ inputs.make_cities }}'''.strip()
+          if make:
+              for triplet in make.split(";"):
+                  code, name, cc = [p.strip() for p in triplet.split(",")]
+                  slug = "".join(ch for ch in name.lower().replace(" ", "_")
+                                 if ch.isalnum() or ch == "_")
+                  entries.append({"city": slug, "spec": f"{code},{name},{cc}"})
+          if not entries:
+              raise SystemExit("No cities given")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as fh:
+              fh.write("matrix=" + json.dumps({"include": entries}) + "\n")
+
+  city:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      max-parallel: 5   # be polite to the Overpass + WCS servers
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    defaults:
+      run:
+        working-directory: deprivation-accessibility-eu
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+      - name: Install depacc (geo + stats + viz; no Java needed)
+        run: pip install -e ".[geo,stats,viz,dev]"
+      - name: Restore raw-data cache
+        uses: actions/cache@v4
+        with:
+          path: deprivation-accessibility-eu/data/raw
+          key: depacc-raw-${{ matrix.city }}-t1
+          restore-keys: depacc-raw-
+      - name: Generate config if needed
+        if: matrix.spec != ''
+        run: |
+          IFS=',' read -r CODE NAME CC <<< "${{ matrix.spec }}"
+          depacc make-city --fua-code "$CODE" --name "$NAME" --country "$CC" \
+            --city-id "${{ matrix.city }}"
+      - name: Run pipeline (Tier-1 fast path)
+        run: depacc run --city "${{ matrix.city }}"
+      - name: Upload city results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: depacc-t1-${{ matrix.city }}
+          path: |
+            deprivation-accessibility-eu/data/derived/${{ matrix.city }}
+            deprivation-accessibility-eu/data/derived/cityplane.csv
+          if-no-files-found: warn
+          retention-days: 90
+
+  collect:
+    needs: city
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: deprivation-accessibility-eu
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+      - name: Install depacc
+        run: pip install -e ".[stats,viz,dev]"
+      - name: Download all city artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: depacc-t1-*
+          path: downloaded
+      - name: Merge city outputs + cityplane rows
+        shell: python
+        run: |
+          import pandas as pd, shutil
+          from pathlib import Path
+          derived = Path("data/derived"); derived.mkdir(parents=True, exist_ok=True)
+          planes = []
+          for art in sorted(Path("../downloaded").glob("depacc-t1-*")):
+              base = art / "deprivation-accessibility-eu" / "data" / "derived"
+              if not base.exists():
+                  base = art  # layout depends on upload rooting
+              for item in base.iterdir():
+                  if item.name == "cityplane.csv":
+                      planes.append(pd.read_csv(item))
+                  elif item.is_dir():
+                      shutil.copytree(item, derived / item.name, dirs_exist_ok=True)
+          if planes:
+              plane = (pd.concat(planes, ignore_index=True)
+                         .drop_duplicates(subset="city", keep="last")
+                         .sort_values("population", ascending=False))
+              plane.to_csv(derived / "cityplane.csv", index=False)
+              print(plane[["city", "population", "gini_everyday",
+                           "gini_emergency", "hh_pop_share"]].to_string(index=False))
+      - name: Cross-city clustering + size gradient
+        run: depacc cross
+      - name: Upload combined cross-city results
+        uses: actions/upload-artifact@v4
+        with:
+          name: depacc-cross-city
+          path: |
+            deprivation-accessibility-eu/data/derived/cityplane.csv
+            deprivation-accessibility-eu/data/derived/cityvector*.csv
+            deprivation-accessibility-eu/data/derived/size_gradient.csv
+            deprivation-accessibility-eu/data/derived/figures
+          if-no-files-found: warn
+          retention-days: 90
