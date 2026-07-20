@@ -69,7 +69,7 @@ def main(argv: list[str] | None = None) -> int:
     make = sub.add_parser(
         "make-city", help="generate a minimal Tier-1 fast-path city config "
                           "(friction engine + Overpass facilities)")
-    make.add_argument("--fua-code", required=True, help="URAU FUA code, e.g. SE001L1")
+    make.add_argument("--fua-code", required=True, help="URAU 2021 FUA code (ends in F, e.g. DE002F); find codes with `depacc list-fuas`")
     make.add_argument("--name", required=True)
     make.add_argument("--country", required=True, help="two-letter code, e.g. SE")
     make.add_argument("--city-id", default=None,
@@ -96,17 +96,23 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "list-fuas":
         from depacc.ingest.fua_sample import list_fuas
 
-        fuas = list_fuas(load_config(), args.project_root)
+        cfg = load_config()
+        fuas = list_fuas(cfg, args.project_root)
         if args.country:
             fuas = fuas[fuas.country.isin([c.upper() for c in args.country])]
-        with_pop = fuas.dropna(subset=["population"]) if fuas.population.notna().any() else fuas
-        print(with_pop.sort_values(
-            ["country", "population" if fuas.population.notna().any() else "name"],
-            ascending=[True, False] if fuas.population.notna().any() else [True, True],
-        ).to_string(index=False))
-        print(f"\n{len(fuas)} FUAs. Use with: depacc make-city --fua-code CODE "
-              f"--name NAME --country CC, or the batch workflow's make_cities "
-              f"input: \"CODE,NAME,CC; ...\"")
+        has_pop = fuas.population.notna().any()
+        fuas = fuas.sort_values(
+            ["country", "population" if has_pop else "name"],
+            ascending=[True, not has_pop],
+        )
+        out_csv = args.project_root / cfg["output"]["root"] / "fua_list.csv"
+        out_csv.parent.mkdir(parents=True, exist_ok=True)
+        fuas.to_csv(out_csv, index=False)
+        print(fuas.to_string(index=False))
+        print(f"\n{len(fuas)} FUAs (also written to {out_csv}).\n"
+              f"Use a code with: depacc make-city --fua-code CODE --name NAME "
+              f"--country CC, or the batch workflow's make_cities input: "
+              f"\"CODE,NAME,CC; ...\"")
         return 0
 
     if args.command == "make-city":

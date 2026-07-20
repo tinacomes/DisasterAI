@@ -58,7 +58,7 @@ depacc validate --city hamburg          # config sanity check
 depacc run --city hamburg               # full pipeline: ingest → access →
                                         # deprivation → divergence → equity → viz
 depacc run --city hamburg --stage access
-depacc make-city --fua-code SE001L1 --name Stockholm --country SE
+depacc make-city --fua-code DE002F --name Hamburg --country DE   # codes from `depacc list-fuas`
                                         # generate a Tier-1 fast-path config
 depacc cross                            # cross-city clustering + size gradient
 pytest                                  # unit tests (no downloads needed)

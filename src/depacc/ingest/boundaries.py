@@ -36,13 +36,28 @@ def fetch_fua_boundary(cfg: dict, root: Path):
         raise RuntimeError(
             f"URAU layer has no recognised code column; columns: {list(fuas.columns)}"
         )
+    name_col = next(
+        (c for c in ("URAU_NAME", "urau_name", "FUA_NAME") if c in fuas.columns), None
+    )
     sel = fuas[fuas[code_col] == code]
     if sel.empty:
+        same_country = fuas[fuas[code_col].astype(str).str[:2] == str(code)[:2]]
         near = sorted(
-            c for c in fuas[code_col].astype(str) if c[:4] == str(code)[:4]
-        )[:10]
+            f"{r[code_col]} ({r[name_col]})" if name_col else str(r[code_col])
+            for _, r in same_country.iterrows()
+        )[:30]
         raise RuntimeError(
-            f"FUA code {code!r} not found in URAU 2021 layer; "
-            f"codes with the same country/city prefix: {near}"
+            f"FUA code {code!r} not found in URAU 2021 layer. "
+            f"Same-country codes: {near}. "
+            f"Full list: `depacc list-fuas` or the 'depacc — list FUAs' workflow."
         )
+    if name_col:
+        fua_name = str(sel.iloc[0][name_col])
+        expected = str(cfg["city"].get("name", ""))
+        if expected and expected.lower()[:4] not in fua_name.lower():
+            print(f"WARNING: config city.name '{expected}' does not match the "
+                  f"selected FUA's name '{fua_name}' ({code}) — check the "
+                  f"fua_code against `depacc list-fuas`.")
+        else:
+            print(f"FUA {code}: {fua_name}")
     return sel.to_crs(cfg["crs"]["analysis"]).reset_index(drop=True)
