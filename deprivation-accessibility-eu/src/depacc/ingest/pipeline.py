@@ -72,13 +72,23 @@ def run_ingest(cfg: dict, city: str, root: Path) -> None:
                 fac.to_parquet(out / f"facilities_{service}.parquet")
                 print(f"facilities[{service}] (overpass): {len(fac)}")
     else:
+        from depacc.ingest.osm import clip_pbf
+
         pbfs = fetch_pbfs(cfg, root)
+        pad = 0.1
+        minx, miny, maxx, maxy = fua.to_crs("EPSG:4326").total_bounds
+        bbox = (minx - pad, miny - pad, maxx + pad, maxy + pad)
+        raw_osm = root / cfg["output"]["raw_root"] / "osm"
+        clipped = [
+            clip_pbf(p, bbox, raw_osm / f"{p.name.removesuffix('.osm.pbf')}_{city}_clip.osm.pbf")
+            for p in pbfs
+        ]
         network_pbf = merge_pbfs(
-            pbfs, root / cfg["output"]["raw_root"] / "osm" / f"{city}_merged.osm.pbf"
+            clipped, raw_osm / f"{city}_merged.osm.pbf"
         )
         (out / "network_pbf_path.txt").write_text(str(network_pbf))
         if missing:
-            facilities = extract_facilities(pbfs, {s: services[s] for s in missing}, cfg, fua)
+            facilities = extract_facilities(clipped, {s: services[s] for s in missing}, cfg, fua)
             for service, fac in facilities.items():
                 fac.to_parquet(out / f"facilities_{service}.parquet")
                 print(f"facilities[{service}]: {len(fac)}")
