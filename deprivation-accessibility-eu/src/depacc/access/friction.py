@@ -124,7 +124,8 @@ def friction_matrix(cfg: dict, cells: pd.DataFrame, facilities: pd.DataFrame,
     if mode not in ("walk", "car"):
         raise ValueError(f"friction engine supports walk/car, not '{mode}' "
                          "(transit needs the r5 engine / Tier 2)")
-    max_time = float(cfg["routing"]["max_time_min"])
+    by_mode = cfg["routing"].get("max_time_min_by_mode") or {}
+    max_time = float(by_mode.get(mode) or cfg["routing"]["max_time_min"])
     tif = fetch_friction_window(cfg, mode, fua, root, city)
     with rasterio.open(tif) as src:
         friction = src.read(1).astype(float)

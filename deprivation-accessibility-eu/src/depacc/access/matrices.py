@@ -44,7 +44,7 @@ def run_access(cfg: dict, city: str, root: Path) -> None:
     cells = pd.read_parquet(cells_path)
     modes = cfg["routing"].get("modes") or cfg["tiers"]["tier1"]["modes"]
     services = list(cfg.get("everyday_services", {})) + list(cfg.get("emergency_services", {}))
-    max_time = float(cfg["routing"]["max_time_min"])
+    k = int(cfg["routing"].get("k_nearest", 30))
 
     synthetic = bool(cfg["city"].get("synthetic"))
     engine = cfg["routing"].get("engine", "r5")
@@ -63,8 +63,10 @@ def run_access(cfg: dict, city: str, root: Path) -> None:
             od_path = out / f"od_{service}_{mode}.parquet"
             if od_path.exists():
                 continue
+            mode_max_time = float(_mode_cutoff_min(cfg, mode))
             if synthetic:
-                od = _synthetic_matrix(cells, facilities, mode, max_time)
+                od = keep_k_nearest(
+                    _synthetic_matrix(cells, facilities, mode, mode_max_time), k)
             elif engine == "friction":
                 import geopandas as gpd
 
@@ -72,11 +74,12 @@ def run_access(cfg: dict, city: str, root: Path) -> None:
 
                 if fua is None:
                     fua = gpd.read_parquet(out / "fua_boundary.parquet")
-                od = friction_matrix(cfg, cells, facilities, mode, fua, root, city)
+                od = keep_k_nearest(
+                    friction_matrix(cfg, cells, facilities, mode, fua, root, city), k)
             elif engine == "r5":
                 if network is None:
                     network = _build_r5_network(cfg, city, out)
-                od = _r5_matrix(network, cells, facilities, mode, cfg)
+                od = _r5_matrix(network, cells, facilities, mode, cfg)  # trims per chunk
             else:
                 raise ValueError(f"Unknown routing engine '{engine}'")
             od.to_parquet(od_path)
@@ -112,6 +115,22 @@ def _build_r5_network(cfg: dict, city: str, out: Path):
     return r5py.TransportNetwork(str(pbf), gtfs)
 
 
+def _mode_cutoff_min(cfg: dict, mode: str) -> int:
+    by_mode = cfg["routing"].get("max_time_min_by_mode") or {}
+    return int(by_mode.get(mode) or cfg["routing"]["max_time_min"])
+
+
+def keep_k_nearest(od: pd.DataFrame, k: int) -> pd.DataFrame:
+    """Keep the k nearest destinations per origin (bounds output size; far
+    facilities are negligible for soft-min / nearest measures)."""
+    if od.empty or k <= 0:
+        return od
+    return (od.sort_values("time")
+              .groupby("origin", sort=False)
+              .head(k)
+              .reset_index(drop=True))
+
+
 def _r5_matrix(network, cells: pd.DataFrame, facilities: pd.DataFrame,
                mode: str, cfg: dict) -> pd.DataFrame:
     import datetime
@@ -128,29 +147,49 @@ def _r5_matrix(network, cells: pd.DataFrame, facilities: pd.DataFrame,
     # Next occurrence of the configured weekday must fall inside the GTFS
     # validity window; r5py warns if not. Date is resolved at run time.
     departure = _next_weekday(dep["weekday"], dep["time_window_start"])
+    max_time = datetime.timedelta(minutes=_mode_cutoff_min(cfg, mode))
+    window = datetime.timedelta(
+        minutes=int(cfg["routing"]["departure"]["time_window_minutes"]))
+    walk_speed = float(cfg["routing"]["walk_speed_kmh"])
+    chunk = int(cfg["routing"].get("origin_chunk", 5000))
+    k = int(cfg["routing"].get("k_nearest", 30))
 
-    origins = gpd.GeoDataFrame(
-        {"id": cells.cell_id},
-        geometry=gpd.points_from_xy(cells.lon, cells.lat), crs="EPSG:4326",
-    )
     destinations = gpd.GeoDataFrame(
         {"id": facilities.dest_id},
         geometry=gpd.points_from_xy(facilities.lon, facilities.lat), crs="EPSG:4326",
     )
-    computer = r5py.TravelTimeMatrixComputer(
-        network,
-        origins=origins,
-        destinations=destinations,
-        transport_modes=r5_modes,
-        departure=departure,
-        departure_time_window=datetime.timedelta(
-            minutes=int(cfg["routing"]["departure"]["time_window_minutes"])),
-        max_time=datetime.timedelta(minutes=int(cfg["routing"]["max_time_min"])),
-        speed_walking=float(cfg["routing"]["walk_speed_kmh"]),
-    )
-    tt = computer.compute_travel_times()
-    tt = tt.rename(columns={"from_id": "origin", "to_id": "dest", "travel_time": "time"})
-    return tt.dropna(subset=["time"])[["origin", "dest", "time"]]
+
+    # r5py >= 1.0 exposes TravelTimeMatrix (the instance IS the result);
+    # older versions used TravelTimeMatrixComputer(...).compute_travel_times().
+    use_new_api = hasattr(r5py, "TravelTimeMatrix")
+
+    def _compute(origins: gpd.GeoDataFrame) -> pd.DataFrame:
+        kwargs = dict(
+            origins=origins, destinations=destinations,
+            transport_modes=r5_modes, departure=departure,
+            departure_time_window=window, max_time=max_time,
+            speed_walking=walk_speed,
+        )
+        if use_new_api:
+            tt = pd.DataFrame(r5py.TravelTimeMatrix(network, **kwargs))
+        else:  # pragma: no cover - legacy r5py
+            tt = r5py.TravelTimeMatrixComputer(network, **kwargs).compute_travel_times()
+        return tt.rename(
+            columns={"from_id": "origin", "to_id": "dest", "travel_time": "time"}
+        ).dropna(subset=["time"])[["origin", "dest", "time"]]
+
+    # Batch origins so peak memory is one chunk's matrix, not 176k x n_dest.
+    parts = []
+    for start in range(0, len(cells), chunk):
+        sub = cells.iloc[start:start + chunk]
+        origins = gpd.GeoDataFrame(
+            {"id": sub.cell_id},
+            geometry=gpd.points_from_xy(sub.lon, sub.lat), crs="EPSG:4326",
+        )
+        parts.append(keep_k_nearest(_compute(origins), k))
+    if not parts:
+        return pd.DataFrame(columns=["origin", "dest", "time"])
+    return pd.concat(parts, ignore_index=True)
 
 
 def _next_weekday(weekday: str, hhmm: str):

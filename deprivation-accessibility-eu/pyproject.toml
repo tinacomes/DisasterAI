@@ -34,8 +34,9 @@ osm = [
     "osmium>=3.6",
 ]
 transit = [
-    # r5py requires a Java runtime (JDK 21). See README.
-    "r5py>=0.1.1",
+    # r5py requires a Java runtime (JDK 21). See README. >=1.0 exposes the
+    # TravelTimeMatrix API used by access/matrices.py.
+    "r5py>=1.0",
     "gtfs-kit>=6.0",
 ]
 stats = [
