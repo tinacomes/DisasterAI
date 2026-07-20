@@ -55,10 +55,25 @@ routing:
     weekday: "tuesday"
     time_window_start: "08:00"
     time_window_minutes: 60
-  max_time_min: 120      # travel-time cutoff; beyond this a pair is unreachable
+  max_time_min: 120      # absolute travel-time cutoff / fallback per mode
+  # Per-mode cutoffs (minutes) actually used to build the matrices. Set well
+  # beyond the 2SFCA catchment bandwidths and past DLF/DCF saturation, but
+  # tight enough to keep large-FUA matrices tractable. null -> max_time_min.
+  max_time_min_by_mode:
+    walk: 30
+    car: 60
+    transit: 75
   walk_speed_kmh: 4.8
   # Origins are centroids of populated GHS-POP 100m cells inside the FUA.
   min_cell_population: 1.0
+  # Scale controls for large FUAs (176k+ cells): compute travel times in
+  # origin batches to bound memory, and keep only the k nearest reachable
+  # facilities per cell and service. Far facilities are negligible for the
+  # soft-min and nearest-facility measures; k is set generously so the 2SFCA
+  # demand count is essentially complete within each catchment. Both are
+  # sensitivity-testable and apply to every routing engine.
+  origin_chunk: 5000
+  k_nearest: 30
 
 softmin:
   # Soft-minimum smoothing parameter kappa (per minute). Larger kappa -> closer
