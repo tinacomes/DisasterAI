@@ -32,6 +32,29 @@ def fetch_pbfs(cfg: dict, root: Path) -> list[Path]:
     ]
 
 
+def clip_pbf(pbf: Path, bbox4326: tuple[float, float, float, float], out: Path) -> Path:
+    """Clip an extract to the FUA bounding box with osmium-tool (streaming,
+    low memory) BEFORE any parsing — state-level extracts (e.g. the 1.3 GB
+    Niedersachsen file for Hamburg's commuting zone) otherwise exhaust RAM in
+    pyrosm/R5. Falls back to the unclipped file when osmium is unavailable."""
+    if out.exists():
+        return out
+    if shutil.which("osmium") is None:
+        print(f"WARNING: osmium-tool not found; parsing FULL extract "
+              f"{pbf.name} — install osmium-tool to avoid high memory use.",
+              flush=True)
+        return pbf
+    minx, miny, maxx, maxy = bbox4326
+    subprocess.run(
+        ["osmium", "extract", "-b", f"{minx},{miny},{maxx},{maxy}",
+         str(pbf), "-o", str(out), "--overwrite"],
+        check=True,
+    )
+    print(f"clipped {pbf.name}: {pbf.stat().st_size >> 20} MB -> "
+          f"{out.stat().st_size >> 20} MB", flush=True)
+    return out
+
+
 def merge_pbfs(pbfs: list[Path], out: Path) -> Path:
     """Merge extracts with osmium-tool when several cover the FUA. Falls back
     to the primary extract (with a warning) if osmium is unavailable."""
