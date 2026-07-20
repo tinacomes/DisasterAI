@@ -37,7 +37,7 @@ def test_load_defaults():
 
 def test_city_overlay_hamburg():
     cfg = load_config("hamburg")
-    assert cfg["city"]["fua_code"] == "DE002L1"
+    assert cfg["city"]["fua_code"] == "DE002F"
     assert cfg["crs"]["local"] == "EPSG:32632"
     assert cfg["crs"]["analysis"] == "EPSG:3035"  # global key survives merge
     assert cfg["routing"]["modes"] == ["walk", "car", "transit"]

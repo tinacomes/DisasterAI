@@ -8,8 +8,9 @@ city:
   country: "DE"
   tier: 2
   # Eurostat Urban Audit code of the Hamburg Functional Urban Area (URAU
-  # category FUA). Boundary fetched from GISCO URAU 2021.
-  fua_code: "DE002L1"
+  # 2021 FUA codes end in "F"). Boundary fetched from GISCO URAU 2021;
+  # ingest cross-checks the FUA name against city.name and warns on mismatch.
+  fua_code: "DE002F"
   # Local projected CRS for routing accuracy (UTM 32N); analysis outputs are
   # reprojected to the global analysis CRS (EPSG:3035).
 crs:
