@@ -78,6 +78,30 @@ as downloadable artifacts on the run page:
   collect job merges every city into `cityplane.csv`, runs `depacc cross`,
   and uploads `depacc-cross-city`.
 
+## Accumulating results across runs (the `depacc-results` branch)
+
+Every workflow run appends its per-city summaries to an orphan
+**`depacc-results`** branch (small CSVs only — no raw data), so separate
+runs build one growing cross-city dataset instead of each seeing only its own
+cities:
+
+```
+depacc-results
+├── cities/<city>/cityplane_row.csv      one-row city summary
+│                 typology_summary.csv    compounding population shares
+│                 equity_indices.csv      weighted mean / Gini / CI
+│                 equity_regressions.csv  density + SES gradients
+└── cross/        cityplane.csv, cityvector*, scaling.csv,
+                  regime_slope_difference.csv, size_gradient.csv, figures/
+```
+
+On each run the collect step (batch) or the single-city job imports every
+previously persisted city, runs `depacc cross` over the **union**, and pushes
+the refreshed `cross/` outputs back — a rebase-retry loop makes concurrent
+runs safe (`tools/persist_and_push.sh`). Synthetic fixtures (`demo`) are never
+persisted. To read the accumulated study, check out `depacc-results` or open
+`cross/` in it; the `depacc-cross-city` artifact on the batch run mirrors it.
+
 ## Two routing engines (the many-city bypass)
 
 | | `r5` (Tier-2 reference) | `friction` (Tier-1 fast path) |

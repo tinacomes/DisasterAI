@@ -36,6 +36,8 @@ jobs:
   run-city:
     runs-on: ubuntu-latest
     timeout-minutes: 300
+    permissions:
+      contents: write        # push this city's summary to depacc-results
     defaults:
       run:
         working-directory: deprivation-accessibility-eu
@@ -70,6 +72,14 @@ jobs:
 
       - name: Run pipeline
         run: depacc run --city "${{ inputs.city }}" --stage "${{ inputs.stage }}"
+
+      # Accumulate this city onto the depacc-results branch and refresh the
+      # cross-city table. Only meaningful once divergence has produced a city
+      # summary (full run or stage=divergence/equity/viz); the script no-ops
+      # otherwise, and synthetic fixtures are never persisted.
+      - name: Persist to depacc-results and refresh cross-city table
+        if: always() && inputs.city != 'demo'
+        run: bash tools/persist_and_push.sh
 
       - name: Upload results
         if: always()

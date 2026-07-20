@@ -110,6 +110,8 @@ jobs:
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    permissions:
+      contents: write        # push accumulated summaries to depacc-results
     defaults:
       run:
         working-directory: deprivation-accessibility-eu
@@ -126,31 +128,21 @@ jobs:
         with:
           pattern: depacc-t1-*
           path: downloaded
-      - name: Merge city outputs + cityplane rows
+      - name: Stage this run's cities into data/derived
         shell: python
         run: |
-          import pandas as pd, shutil
+          import shutil
           from pathlib import Path
           derived = Path("data/derived"); derived.mkdir(parents=True, exist_ok=True)
-          planes = []
           for art in sorted(Path("../downloaded").glob("depacc-t1-*")):
               base = art / "deprivation-accessibility-eu" / "data" / "derived"
               if not base.exists():
                   base = art  # layout depends on upload rooting
               for item in base.iterdir():
-                  if item.name == "cityplane.csv":
-                      planes.append(pd.read_csv(item))
-                  elif item.is_dir():
+                  if item.is_dir():
                       shutil.copytree(item, derived / item.name, dirs_exist_ok=True)
-          if planes:
-              plane = (pd.concat(planes, ignore_index=True)
-                         .drop_duplicates(subset="city", keep="last")
-                         .sort_values("population", ascending=False))
-              plane.to_csv(derived / "cityplane.csv", index=False)
-              print(plane[["city", "population", "gini_everyday",
-                           "gini_emergency", "hh_pop_share"]].to_string(index=False))
-      - name: Cross-city clustering + size gradient
-        run: depacc cross
+      - name: Persist to depacc-results, run cross over the union, push
+        run: bash tools/persist_and_push.sh
       - name: Upload combined cross-city results
         uses: actions/upload-artifact@v4
         with:
@@ -158,6 +150,8 @@ jobs:
           path: |
             deprivation-accessibility-eu/data/derived/cityplane.csv
             deprivation-accessibility-eu/data/derived/cityvector*.csv
+            deprivation-accessibility-eu/data/derived/scaling.csv
+            deprivation-accessibility-eu/data/derived/regime_slope_difference.csv
             deprivation-accessibility-eu/data/derived/size_gradient.csv
             deprivation-accessibility-eu/data/derived/figures
           if-no-files-found: warn
