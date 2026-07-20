@@ -16,6 +16,14 @@ DERIVED="$SUB/data/derived"
 RESULTS="$WORK/results-branch"
 BRANCH="depacc-results"
 
+# Nothing to accumulate unless this run produced at least one per-city
+# summary (written by the divergence stage). Ingest/access-only dispatches
+# skip persistence entirely.
+if ! ls "$DERIVED"/*/cityplane_row.csv >/dev/null 2>&1; then
+  echo "persist: this run produced no city summary (ingest/access-only?) — skipping"
+  exit 0
+fi
+
 git config --global user.name "github-actions[bot]" || true
 git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com" || true
 git config --global --add safe.directory "$WORK" || true

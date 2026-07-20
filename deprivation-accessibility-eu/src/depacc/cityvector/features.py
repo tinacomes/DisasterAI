@@ -29,7 +29,12 @@ FEATURES = [
 
 def build_city_vectors(cfg: dict, root: Path) -> pd.DataFrame:
     derived = root / cfg["output"]["root"]
-    plane = pd.read_csv(derived / "cityplane.csv")
+    plane_path = derived / "cityplane.csv"
+    if not plane_path.exists() or plane_path.stat().st_size == 0:
+        return pd.DataFrame()  # no cities computed yet — caller no-ops
+    plane = pd.read_csv(plane_path)
+    if plane.empty:
+        return pd.DataFrame()
     rows = []
     for _, r in plane.iterrows():
         row = r.to_dict()
