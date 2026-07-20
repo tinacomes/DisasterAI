@@ -13,7 +13,7 @@ name: depacc — Tier-1 many-city batch
 #   make_cities: optional; semicolon-separated "FUA_CODE,Name,CC" triplets
 #              for cities with no config yet — configs are generated on the
 #              fly with `depacc make-city`, e.g.
-#              "SE001L1,Stockholm,SE; DK001L1,Copenhagen,DK"
+#              "DE003F,München,DE; DE004F,Köln,DE" (codes from the "depacc — list FUAs" workflow)
 # Requires config/deprivation.yaml parameters to be filled (methods.md §3).
 
 on:

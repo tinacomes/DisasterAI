@@ -8,7 +8,8 @@ city:
   name: "Köln"
   country: "DE"
   tier: 2
-  fua_code: "DE004L1"   # Eurostat Urban Audit FUA code (verify against URAU 2021)
+  fua_code: "DE004F"   # URAU 2021 FUA code (ingest warns if the FUA name
+                       # does not match city.name — re-check with list-fuas)
 
 crs:
   local: "EPSG:32632"   # UTM 32N
