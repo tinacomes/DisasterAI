@@ -27,6 +27,9 @@ def run_divergence(cfg: dict, city: str, root: Path) -> None:
         print(f"  {cls}: {r.population_share:6.1%}  ({int(r.n_cells)} cells)")
 
     row = city_row(surfaces, summary, cfg, city)
+    # One-row per-city summary: the unit persisted to the depacc-results
+    # branch so separate (batch) runs accumulate into one cross-city table.
+    pd.DataFrame([row]).to_csv(out / "cityplane_row.csv", index=False)
     table = upsert_cityplane(row, root / cfg["output"]["root"] / "cityplane.csv")
     print(f"cityplane.csv: {len(table)} cities; {city}: "
           f"gini_ev={row['gini_everyday']:.3f} gini_em={row['gini_emergency']:.3f} "
