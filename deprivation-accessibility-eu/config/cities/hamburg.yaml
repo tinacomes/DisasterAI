@@ -49,5 +49,13 @@ sources:
     licence: "dl-de/by-2-0"
 
 routing:
-  # Tier-2 modes; departure settings inherited from defaults.yaml.
-  modes: ["walk", "car", "transit"]
+  # Fast path: least-cost paths over the Weiss et al. friction surfaces
+  # (walk + car), reusing the OSM facilities already ingested — no R5, no
+  # Java, minutes not hours. Tractable for this 176k-cell / 6135 km2 FUA.
+  #
+  # For the full Tier-2 transit deep-dive, switch back to:
+  #   engine: "r5"
+  #   modes: ["walk", "car", "transit"]
+  # (heavy at 176k cells — scope to the urban core or expect a long run).
+  engine: "friction"
+  modes: ["walk", "car"]
