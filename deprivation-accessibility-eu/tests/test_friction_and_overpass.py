@@ -67,3 +67,22 @@ def test_overpass_query_and_parse():
     assert len(fac) == 2
     assert fac.loc[0, "capacity"] == 450.0 and not fac.loc[0, "capacity_proxy"]
     assert fac.loc[1, "capacity"] == 1.0 and bool(fac.loc[1, "capacity_proxy"])
+
+
+def test_keep_k_nearest_bounds_and_selects():
+    """k-nearest keeps the k lowest-time destinations per origin."""
+    import pandas as pd
+    from depacc.access.matrices import keep_k_nearest
+
+    od = pd.DataFrame({
+        "origin": [0, 0, 0, 0, 1, 1],
+        "dest": ["a", "b", "c", "d", "e", "f"],
+        "time": [30.0, 10.0, 20.0, 40.0, 5.0, 15.0],
+    })
+    out = keep_k_nearest(od, 2)
+    o0 = set(out[out.origin == 0].dest)
+    assert o0 == {"b", "c"}                     # two nearest for origin 0
+    assert set(out[out.origin == 1].dest) == {"e", "f"}
+    assert len(out) == 4
+    # k <= 0 or empty is a no-op passthrough.
+    assert keep_k_nearest(od, 0) is od
