@@ -40,7 +40,10 @@ def test_city_overlay_hamburg():
     assert cfg["city"]["fua_code"] == "DE002F"
     assert cfg["crs"]["local"] == "EPSG:32632"
     assert cfg["crs"]["analysis"] == "EPSG:3035"  # global key survives merge
-    assert cfg["routing"]["modes"] == ["walk", "car", "transit"]
+    # Hamburg uses the friction fast path (walk/car) by default; the r5
+    # transit deep-dive is a documented config switch.
+    assert cfg["routing"]["engine"] == "friction"
+    assert cfg["routing"]["modes"] == ["walk", "car"]
     assert cfg["routing"]["max_time_min"] == 120  # inherited default
 
 

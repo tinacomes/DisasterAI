@@ -93,11 +93,18 @@ def run_ingest(cfg: dict, city: str, root: Path) -> None:
                 fac.to_parquet(out / f"facilities_{service}.parquet")
                 print(f"facilities[{service}]: {len(fac)}")
 
-    if int(cfg["city"].get("tier", 1)) >= 2:
+    modes = cfg["routing"].get("modes") or []
+    # GTFS is only needed for transit routing (r5). The friction fast path
+    # (walk/car) skips it entirely.
+    if "transit" in modes:
         feeds = fetch_gtfs(cfg, root, fua)
         (out / "gtfs_paths.txt").write_text("\n".join(map(str, feeds)))
         print(f"GTFS feeds: {[p.name for p in feeds]}")
 
+    # SES enrichment (Tier 2), only if download URLs are configured — avoids
+    # a wall of skip-warnings when they are not yet set.
+    ses_urls = (cfg.get("sources", {}).get("ses", {}) or {}).get("urls")
+    if int(cfg["city"].get("tier", 1)) >= 2 and ses_urls:
         layer_zips = fetch_ses_layers(cfg, root)
         if layer_zips:
             layers = {name: load_inspire_csv_zip(p) for name, p in layer_zips.items()}
