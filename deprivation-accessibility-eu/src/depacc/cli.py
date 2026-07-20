@@ -19,6 +19,34 @@ from depacc.config import load_config
 
 STAGES = ("ingest", "access", "deprivation", "divergence", "equity", "viz")
 
+# Marker output of each stage, used to decide whether it still needs running
+# when a later stage is dispatched on its own (e.g. on a fresh GitHub runner
+# whose per-city cache missed). This makes any single-stage dispatch
+# self-sufficient: prerequisites are (re)run automatically, and completed
+# ones are skipped.
+def _stage_done(stage: str, out: "Path") -> bool:
+    if stage == "ingest":
+        return (out / "cells.parquet").exists()
+    if stage == "access":
+        return any(out.glob("od_*.parquet"))
+    if stage == "deprivation":
+        return (out / "surfaces.parquet").exists()
+    if stage == "divergence":
+        return (out / "typology.parquet").exists()
+    if stage == "equity":
+        return (out / "equity_indices.csv").exists()
+    if stage == "viz":
+        return (out / "figures").exists()
+    return False
+
+
+def _stages_to_run(target: str, out: "Path") -> list[str]:
+    """Prerequisite stages whose outputs are missing, in order, then the
+    requested stage itself (always re-run)."""
+    order = list(STAGES)
+    prior = order[: order.index(target)]
+    return [s for s in prior if not _stage_done(s, out)] + [target]
+
 
 def _run_stage(stage: str, cfg: dict, city: str, project_root: Path) -> None:
     if stage == "ingest":
@@ -156,7 +184,14 @@ def main(argv: list[str] | None = None) -> int:
               f"({len(cfg)} top-level sections: {sorted(cfg)})")
         return 0
 
-    stages = STAGES if args.stage == "all" else (args.stage,)
+    if args.stage == "all":
+        stages = list(STAGES)
+    else:
+        out = args.project_root / cfg["output"]["root"] / args.city
+        stages = _stages_to_run(args.stage, out)
+        if stages != [args.stage]:
+            print(f"auto-running missing prerequisites before "
+                  f"'{args.stage}': {stages}", flush=True)
     for stage in stages:
         print(f"=== stage: {stage} ===", flush=True)
         _run_stage(stage, cfg, args.city, args.project_root)
