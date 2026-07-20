@@ -30,6 +30,7 @@ on:
 
 env:
   MPLBACKEND: Agg
+  PYTHONUNBUFFERED: "1"   # stream pipeline progress into the live log
 
 jobs:
   plan:

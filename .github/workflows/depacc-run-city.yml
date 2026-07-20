@@ -30,6 +30,7 @@ on:
 
 env:
   MPLBACKEND: Agg
+  PYTHONUNBUFFERED: "1"   # stream pipeline progress into the live log
 
 jobs:
   run-city:
@@ -50,6 +51,10 @@ jobs:
         with:
           distribution: "temurin"
           java-version: "21"
+
+      - name: Install osmium-tool (streams state-level OSM extracts down to
+              the FUA window so parsing stays within runner memory)
+        run: sudo apt-get update -q && sudo apt-get install -y -q osmium-tool
 
       - name: Install depacc (full stack)
         run: pip install -e ".[full,dev]"
