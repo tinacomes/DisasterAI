@@ -73,6 +73,11 @@ def run_cross_city(cfg: dict, root: Path, n_clusters: int = 3) -> None:
 
     derived = root / cfg["output"]["root"]
     vectors = build_city_vectors(cfg, root)
+    if vectors.empty:
+        print("NOTE: no city summaries yet (cityplane.csv absent/empty) — "
+              "cross-city analysis skipped. Run the full pipeline for at least "
+              "one city first.")
+        return
     real = vectors[~vectors.synthetic.astype(bool)] if "synthetic" in vectors else vectors
     if len(real) < len(vectors):
         print(f"NOTE: {len(vectors) - len(real)} synthetic fixture(s) excluded "
