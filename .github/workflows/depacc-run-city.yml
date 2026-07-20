@@ -70,6 +70,20 @@ jobs:
             depacc-raw-${{ inputs.city }}-
             depacc-raw-
 
+      # Carry the per-city derived outputs (cells, facilities, OD matrices,
+      # surfaces) BETWEEN separate stage dispatches. A fresh runner has no
+      # data/derived, so staging (e.g. dispatching 'access' after 'ingest')
+      # would otherwise lose the ingest outputs. The run_id in the key makes
+      # every run save a NEW cache; restore-keys pull the most recent prior
+      # one for this city, so staged runs resume incrementally.
+      - name: Restore per-city derived cache
+        uses: actions/cache@v4
+        with:
+          path: deprivation-accessibility-eu/data/derived/${{ inputs.city }}
+          key: depacc-derived-${{ inputs.city }}-${{ github.run_id }}
+          restore-keys: |
+            depacc-derived-${{ inputs.city }}-
+
       - name: Run pipeline
         run: depacc run --city "${{ inputs.city }}" --stage "${{ inputs.stage }}"
 
