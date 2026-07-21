@@ -148,7 +148,13 @@ friction:
   # Weiss et al. (2020) friction surfaces, fetched as per-city WCS windows
   # from the Malaria Atlas Project geoserver (CC-BY 4.0). Override `wcs` if
   # the coverage ids change upstream (see access/friction.py).
-  pad_deg: 1.0        # margin around the FUA bounding box
+  # Margin (degrees) around the FUA bbox: enough for detours around the
+  # boundary, small enough to keep the raster (and cost-distance memory)
+  # bounded. ~0.25 deg is ~28 km.
+  pad_deg: 0.25
+  # Facility sources per Dijkstra call — caps peak memory at
+  # (source_batch x n_pixels), never (n_facilities x n_pixels).
+  source_batch: 256
   wcs:
     base: "https://data.malariaatlas.org/geoserver/Accessibility/ows"
     coverages:
