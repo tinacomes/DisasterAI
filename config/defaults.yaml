@@ -154,7 +154,7 @@ friction:
   pad_deg: 0.25
   # Facility sources per Dijkstra call — caps peak memory at
   # (source_batch x n_pixels), never (n_facilities x n_pixels).
-  source_batch: 256
+  source_batch: 64
   wcs:
     base: "https://data.malariaatlas.org/geoserver/Accessibility/ows"
     coverages:

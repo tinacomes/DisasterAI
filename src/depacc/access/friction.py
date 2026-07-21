@@ -105,15 +105,19 @@ def _wcs_url(cfg: dict, mode: str, bounds_wgs: tuple[float, float, float, float]
 
 
 def fetch_friction_window(cfg: dict, mode: str, fua, root: Path, city: str) -> Path:
-    """Download (once) the city's friction-raster window for a mode."""
+    """Download (once) the city's friction-raster window for a mode.
+
+    The cache filename embeds the pad so a re-run with a smaller pad fetches a
+    fresh (smaller) window instead of reusing a stale large one."""
     from depacc.provenance import download
 
-    pad = float(cfg.get("friction", {}).get("pad_deg", 1.0))
+    pad = float(cfg.get("friction", {}).get("pad_deg", 0.25))
     minx, miny, maxx, maxy = fua.to_crs("EPSG:4326").total_bounds
     url = _wcs_url(cfg, mode, (minx - pad, miny - pad, maxx + pad, maxy + pad))
     raw = root / cfg["output"]["raw_root"] / "friction"
-    return download(url, raw / f"{city}_{mode}.tif", licence=FRICTION_LICENCE,
-                    note=f"Weiss et al. friction window, mode={mode}")
+    tag = f"{pad:.2f}".replace(".", "p")
+    return download(url, raw / f"{city}_{mode}_pad{tag}.tif", licence=FRICTION_LICENCE,
+                    note=f"Weiss et al. friction window, mode={mode}, pad={pad}")
 
 
 def _sparse_graph(friction: np.ndarray, dx_m: np.ndarray, dy_m: float):
@@ -141,7 +145,8 @@ def friction_matrix(cfg: dict, cells: pd.DataFrame, facilities: pd.DataFrame,
                          "(transit needs the r5 engine / Tier 2)")
     by_mode = cfg["routing"].get("max_time_min_by_mode") or {}
     max_time = float(by_mode.get(mode) or cfg["routing"]["max_time_min"])
-    batch = int(cfg.get("friction", {}).get("source_batch", 256))
+    batch = int(cfg.get("friction", {}).get("source_batch", 64))
+    k = int(cfg["routing"].get("k_nearest", 30))
     tif = fetch_friction_window(cfg, mode, fua, root, city)
     with rasterio.open(tif) as src:
         friction = src.read(1).astype(float)
@@ -154,6 +159,8 @@ def friction_matrix(cfg: dict, cells: pd.DataFrame, facilities: pd.DataFrame,
                              for r_ in range(height)])
         dx_m = np.abs(transform.a) * EARTH_M_PER_DEG * np.cos(np.radians(lat_rows))
         dy_m = abs(transform.e) * EARTH_M_PER_DEG
+    print(f"  friction[{mode}]: raster {height}x{width} = {height * width // 1000}k "
+          f"pixels, {len(facilities)} facilities, batch={batch}", flush=True)
 
     def flat_idx(lons, lats) -> np.ndarray:
         rows, cols = rasterio.transform.rowcol(transform, np.asarray(lons),
@@ -168,6 +175,9 @@ def friction_matrix(cfg: dict, cells: pd.DataFrame, facilities: pd.DataFrame,
     cell_ids = cells.cell_id.to_numpy()
     dest_ids = facilities.dest_id.to_numpy()
 
+    from depacc.access.matrices import keep_k_nearest
+
+    running = pd.DataFrame(columns=["origin", "dest", "time"])
     origins, dests, times = [], [], []
     for start in range(0, len(src_flat), batch):
         idx = src_flat[start:start + batch]
@@ -180,10 +190,15 @@ def friction_matrix(cfg: dict, cells: pd.DataFrame, facilities: pd.DataFrame,
                 dests.append(np.full(int(ok.sum()), dest))
                 times.append(t[ok])
         del dist
-    if not origins:
-        return pd.DataFrame(columns=["origin", "dest", "time"])
-    return pd.DataFrame({
-        "origin": np.concatenate(origins),
-        "dest": np.concatenate(dests),
-        "time": np.concatenate(times),
-    })
+        # Compact to the k nearest per origin after each batch so the
+        # accumulated OD never grows beyond ~k x n_cells, regardless of how
+        # many facilities the service has.
+        if origins:
+            batch_od = pd.DataFrame({
+                "origin": np.concatenate(origins),
+                "dest": np.concatenate(dests),
+                "time": np.concatenate(times),
+            })
+            running = keep_k_nearest(pd.concat([running, batch_od], ignore_index=True), k)
+            origins, dests, times = [], [], []
+    return running.reset_index(drop=True)
