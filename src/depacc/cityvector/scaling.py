@@ -30,7 +30,7 @@ INFERENCE = "cross-sectional space-for-time"
 DEFAULT_OUTCOMES = (
     "mean_everyday", "mean_emergency",
     "gini_everyday", "gini_emergency",
-    "hh_pop_share",
+    "compounding_pop_share_50",
 )
 
 
