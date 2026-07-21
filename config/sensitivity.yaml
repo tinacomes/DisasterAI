@@ -1,0 +1,35 @@
+# ============================================================================
+# Robustness sweep grid. This is a STRUCTURED ROBUSTNESS CHECK over a
+# defensible parameter envelope — NOT a probabilistic uncertainty
+# quantification / posterior. Only STANDARDISED, rank-based targets are
+# tracked across the sweep (Ginis, typology shares, city rankings, cluster
+# membership, divergence_gap); raw deprivation magnitudes are never compared.
+# ============================================================================
+
+sensitivity:
+  # LAYER 1 — curvature sweep (computed from saved effective/nearest times;
+  # no re-routing). Each list is swept with the other regime at baseline.
+  everyday:
+    k: [0.1, 0.2, 0.3]      # logistic steepness (per minute)
+    t0: [10, 15, 20]        # logistic inflection (minutes)
+  emergency:
+    lam: [1.4, 1.8, 2.2]    # Box-Cox exponent
+
+  # LAYER 2 — functional-form swap. Requires concrete params for the
+  # alternate forms (we do not fabricate calibrations); provide them here to
+  # activate. Empty -> form-swap layer is skipped with a note.
+  form_swap:
+    everyday: []   # e.g. [{form: exponential, params: {beta: .., scale: ..}}]
+    emergency: []  # e.g. [{form: exponential, params: {beta: .., scale: ..}}]
+
+  # LAYER 3 — accessibility axis. Changing supply (nearest vs 2SFCA) or mode
+  # (walk vs walk+transit) changes the TRAVEL TIMES, so it requires re-running
+  # the access + deprivation stages per variant (heavier). Listed here as the
+  # comparison axis; the harness reports deprivation-calibration sensitivity
+  # now, and accessibility sensitivity when those variant runs are supplied.
+  accessibility:
+    supply: [nearest, 2sfca]
+    mode: [walk, walk_transit]
+
+  # typology threshold used for the stable-target typology shares + flip-cells.
+  threshold: 0.5

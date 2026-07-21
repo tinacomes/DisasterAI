@@ -28,6 +28,7 @@ geo = [
     "rasterio>=1.3",
     "shapely>=2.0",
     "pyproj>=3.6",
+    "scipy>=1.11",   # friction cost-distance + sensitivity rank stats
 ]
 osm = [
     "pyrosm>=0.6.2",
