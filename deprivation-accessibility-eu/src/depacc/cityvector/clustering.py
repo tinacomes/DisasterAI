@@ -1,10 +1,9 @@
-"""Cross-city clustering and the size-gradient (space-for-time) read.
+"""Cross-city clustering (guarded) and the size-gradient trajectory read.
 
-k-means and Ward hierarchical clustering on standardised city feature
-vectors, plus OLS of the everyday-emergency divergence measures on
-log10(FUA population). All inference is cross-sectional: the size gradient
-is read space-for-time, never as observed temporal change (stated on every
-output).
+Clustering accepts ONLY a ScaledFeatures token, so a raw cross-city matrix
+cannot reach k-means/agglomerative through the signature. k is chosen by
+silhouette; a bootstrap over cities reports label stability (adjusted Rand).
+All inference is cross-sectional space-for-time.
 """
 
 from __future__ import annotations
@@ -14,43 +13,75 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from depacc.cityvector.features import FEATURES
+from depacc.cityvector.scaling_features import ScaledFeatures, scale_features
 
-MIN_CITIES = 5  # below this, clustering is meaningless; only the table is written
+MIN_CITIES = 5
 
 
-def cluster_cities(vectors: pd.DataFrame, n_clusters: int = 3) -> pd.DataFrame:
+def _require_scaled(scaled) -> None:
+    if not isinstance(scaled, ScaledFeatures):
+        raise TypeError(
+            "clustering requires a ScaledFeatures token from scale_features(); "
+            "a raw/unscaled matrix must not reach the clustering functions"
+        )
+
+
+def choose_k_and_cluster(scaled: ScaledFeatures, k_range=(2, 6),
+                         bootstrap: int = 50, random_state: int = 0) -> dict:
+    """k-means (k by silhouette) + agglomerative on the scaled matrix, with a
+    bootstrap stability (ARI) check. Returns labels + diagnostics."""
+    _require_scaled(scaled)
     from sklearn.cluster import AgglomerativeClustering, KMeans
-    from sklearn.preprocessing import StandardScaler
+    from sklearn.metrics import adjusted_rand_score, silhouette_score
 
-    feats = [f for f in FEATURES if f in vectors.columns]
-    x = vectors[feats].astype(float)
-    keep = x.notna().all(axis=1)
-    if keep.sum() < max(MIN_CITIES, n_clusters):
-        print(f"NOTE: only {int(keep.sum())} complete city vectors; "
-              f"clustering skipped (needs >= {max(MIN_CITIES, n_clusters)})")
-        vectors["cluster_kmeans"] = pd.NA
-        vectors["cluster_ward"] = pd.NA
-        return vectors
-    z = StandardScaler().fit_transform(x[keep])
-    vectors.loc[keep, "cluster_kmeans"] = (
-        KMeans(n_clusters=n_clusters, n_init=10, random_state=0).fit_predict(z)
-    )
-    vectors.loc[keep, "cluster_ward"] = (
-        AgglomerativeClustering(n_clusters=n_clusters, linkage="ward").fit_predict(z)
-    )
-    return vectors
+    X = scaled.matrix
+    n = X.shape[0]
+    lo, hi = k_range
+    hi = min(hi, n - 1)
+    if n < MIN_CITIES or hi < lo:
+        return {"labels_kmeans": [np.nan] * n, "labels_ward": [np.nan] * n,
+                "k": None, "silhouette": None, "stability_ari": None,
+                "note": f"only {n} cities; clustering skipped (need >= {MIN_CITIES})"}
+
+    best_k, best_sil, best_labels = None, -1.0, None
+    for k in range(lo, hi + 1):
+        labels = KMeans(n_clusters=k, n_init=10, random_state=random_state).fit_predict(X)
+        sil = silhouette_score(X, labels) if len(set(labels)) > 1 else -1.0
+        if sil > best_sil:
+            best_k, best_sil, best_labels = k, sil, labels
+
+    ward = AgglomerativeClustering(n_clusters=best_k, linkage="ward").fit_predict(X)
+
+    # Bootstrap stability: recluster resampled cities, ARI vs full-sample labels.
+    rng = np.random.default_rng(random_state)
+    aris = []
+    for _ in range(bootstrap):
+        idx = rng.choice(n, size=n, replace=True)
+        uniq = np.unique(idx)
+        if len(uniq) < best_k + 1:
+            continue
+        bl = KMeans(n_clusters=best_k, n_init=5, random_state=random_state).fit_predict(X[uniq])
+        aris.append(adjusted_rand_score(best_labels[uniq], bl))
+    return {
+        "labels_kmeans": best_labels.tolist(),
+        "labels_ward": ward.tolist(),
+        "k": int(best_k),
+        "silhouette": float(best_sil),
+        "stability_ari": float(np.mean(aris)) if aris else None,
+    }
 
 
 def size_gradient(vectors: pd.DataFrame,
-                  outcomes: tuple[str, ...] = ("gini_divergence", "rank_corr",
-                                               "hh_pop_share")) -> pd.DataFrame:
-    """OLS of each divergence outcome on log10 population (HC1 errors).
-    Cross-sectional space-for-time trajectory read."""
+                  outcomes=("divergence_gap", "spearman_rho",
+                            "compounding_pop_share_50")) -> pd.DataFrame:
+    """OLS of each divergence outcome on log10 population (HC1). Cross-sectional
+    space-for-time trajectory read."""
     import statsmodels.api as sm
 
     rows = []
     for outcome in outcomes:
+        if outcome not in vectors.columns:
+            continue
         df = vectors[["log10_population", outcome]].dropna()
         if len(df) < 4:
             continue
@@ -68,33 +99,45 @@ def size_gradient(vectors: pd.DataFrame,
     return pd.DataFrame(rows)
 
 
-def run_cross_city(cfg: dict, root: Path, n_clusters: int = 3) -> None:
-    from depacc.cityvector.features import build_city_vectors
+def run_cross_city(cfg: dict, root: Path, n_clusters: int | None = None) -> None:
+    from depacc.cityvector.features import build_city_vectors, feature_columns
 
     derived = root / cfg["output"]["root"]
     vectors = build_city_vectors(cfg, root)
     if vectors.empty:
         print("NOTE: no city summaries yet (cityplane.csv absent/empty) — "
-              "cross-city analysis skipped. Run the full pipeline for at least "
-              "one city first.")
+              "cross-city analysis skipped.")
         return
-    real = vectors[~vectors.synthetic.astype(bool)] if "synthetic" in vectors else vectors
+    real = vectors[~vectors.get("synthetic", False).astype(bool)] \
+        if "synthetic" in vectors else vectors
     if len(real) < len(vectors):
-        print(f"NOTE: {len(vectors) - len(real)} synthetic fixture(s) excluded "
-              f"from cross-city statistics")
-    real = cluster_cities(real.copy(), n_clusters=n_clusters)
+        print(f"NOTE: {len(vectors) - len(real)} synthetic fixture(s) excluded")
+    real = real.reset_index(drop=True)
+
+    method = cfg.get("cityvector", {}).get("cross_city_scaler", "robust")
+    ccfg = cfg.get("cityvector", {}).get("clustering", {})
+    scaled = scale_features(real, feature_columns(cfg), method=method)
+    result = choose_k_and_cluster(
+        scaled,
+        k_range=tuple(ccfg.get("k_range", [2, 6])),
+        bootstrap=int(ccfg.get("bootstrap", 50)),
+        random_state=int(ccfg.get("random_state", 0)),
+    )
+    real["cluster_kmeans"] = result["labels_kmeans"]
+    real["cluster_ward"] = result["labels_ward"]
     real.to_csv(derived / "cityvector_clustered.csv", index=False)
+    if result.get("k"):
+        print(f"clusters: k={result['k']} silhouette={result['silhouette']:.3f} "
+              f"stability_ARI={result['stability_ari']}")
+    else:
+        print(result.get("note", "clustering skipped"))
 
     grad = size_gradient(real)
     if not grad.empty:
         grad.to_csv(derived / "size_gradient.csv", index=False)
         print(grad.to_string(index=False))
-    else:
-        print("NOTE: too few real cities for the size-gradient regression")
 
-    # PNAS-style scaling: per-outcome log-log gradients (pooled and, when
-    # several countries are present, with country fixed effects) plus the
-    # formal everyday-vs-emergency gradient-difference test.
+    # PNAS-style scaling regressions (existing module).
     from depacc.cityvector.scaling import regime_slope_difference, scaling_table
 
     tables = [scaling_table(real)]
@@ -104,14 +147,10 @@ def run_cross_city(cfg: dict, root: Path, n_clusters: int = 3) -> None:
         if any(not t.empty for t in tables) else pd.DataFrame()
     if not scaling.empty:
         scaling.to_csv(derived / "scaling.csv", index=False)
-        print(scaling.to_string(index=False))
-    diffs = pd.concat(
-        [regime_slope_difference(real, m) for m in ("gini", "mean")],
-        ignore_index=True)
+    diffs = pd.concat([regime_slope_difference(real, m) for m in ("gini", "mean")],
+                      ignore_index=True)
     if not diffs.empty:
         diffs.to_csv(derived / "regime_slope_difference.csv", index=False)
-        print(diffs[["measure", "gradient_difference_emergency", "p",
-                     "interpretation"]].to_string(index=False))
 
     _plot_cross_city(real, derived)
 
@@ -125,30 +164,46 @@ def _plot_cross_city(vectors: pd.DataFrame, derived: Path) -> None:
 
     figdir = derived / "figures"
     figdir.mkdir(parents=True, exist_ok=True)
-    # Categorical cluster colors: fixed assignment order (skill-validated set).
-    cluster_colors = ["#5ac8c8", "#be64ac", "#3b4994", "#e0a04e"]
-    fig, ax = plt.subplots(figsize=(7, 5.5))
-    have_clusters = vectors["cluster_kmeans"].notna().any()
-    for i, (_, r) in enumerate(vectors.iterrows()):
-        color = (cluster_colors[int(r.cluster_kmeans) % len(cluster_colors)]
-                 if have_clusters and pd.notna(r.cluster_kmeans) else "#3b4994")
-        ax.scatter(r.log10_population, r.gini_divergence, c=color, s=40,
-                   linewidths=0)
-        ax.annotate(r["name"], (r.log10_population, r.gini_divergence),
-                    textcoords="offset points", xytext=(6, 4), fontsize=8,
-                    color="0.25")
-    ax.axhline(0, color="0.75", linewidth=1, linestyle="--")
-    ax.set_xlabel("log10 FUA population")
-    ax.set_ylabel("Gini(emergency) − Gini(everyday)")
-    ax.set_title("Everyday-emergency divergence along the city-size gradient\n"
-                 "(cross-sectional space-for-time reading"
-                 + ("; color = k-means cluster)" if have_clusters else ")"),
-                 fontsize=10)
-    for side in ("top", "right"):
-        ax.spines[side].set_visible(False)
-    ax.grid(True, linewidth=0.4, alpha=0.35)
-    ax.set_axisbelow(True)
-    fig.tight_layout()
-    fig.savefig(figdir / "size_gradient.png", dpi=180, bbox_inches="tight")
+    cluster_colors = ["#5ac8c8", "#be64ac", "#3b4994", "#e0a04e", "#7a9e3a"]
+    have = "cluster_kmeans" in vectors and vectors["cluster_kmeans"].notna().any()
+
+    # everyday-vs-emergency inequity plane, coloured by cluster.
+    fig, ax = plt.subplots(figsize=(6.5, 6))
+    lim = max(vectors.gini_everyday.max(), vectors.gini_emergency.max()) * 1.15 + 1e-9
+    ax.plot([0, lim], [0, lim], color="0.75", lw=1, ls="--", zorder=1)
+    for _, r in vectors.iterrows():
+        c = (cluster_colors[int(r.cluster_kmeans) % len(cluster_colors)]
+             if have and pd.notna(r.cluster_kmeans) else "#3b4994")
+        ax.scatter(r.gini_everyday, r.gini_emergency, c=c, s=45, linewidths=0, zorder=2)
+        ax.annotate(r["name"], (r.gini_everyday, r.gini_emergency),
+                    textcoords="offset points", xytext=(5, 3), fontsize=8, color="0.25")
+    ax.set_xlabel("Gini of everyday deprivation")
+    ax.set_ylabel("Gini of emergency deprivation")
+    ax.set_title("Everyday-vs-emergency inequity plane"
+                 + (" (colour = cluster)" if have else ""), fontsize=10)
+    ax.set_xlim(0, lim); ax.set_ylim(0, lim)
+    for s in ("top", "right"):
+        ax.spines[s].set_visible(False)
+    ax.grid(True, lw=0.4, alpha=0.35); ax.set_axisbelow(True)
+    fig.tight_layout(); fig.savefig(figdir / "cityplane.png", dpi=180, bbox_inches="tight")
     plt.close(fig)
-    print(f"cross-city figure: {figdir / 'size_gradient.png'}")
+
+    # divergence_gap vs city size (space-for-time trajectory).
+    fig, ax = plt.subplots(figsize=(7, 5.5))
+    for _, r in vectors.iterrows():
+        c = (cluster_colors[int(r.cluster_kmeans) % len(cluster_colors)]
+             if have and pd.notna(r.cluster_kmeans) else "#3b4994")
+        ax.scatter(r.log10_population, r.divergence_gap, c=c, s=40, linewidths=0)
+        ax.annotate(r["name"], (r.log10_population, r.divergence_gap),
+                    textcoords="offset points", xytext=(5, 3), fontsize=8, color="0.25")
+    ax.axhline(0, color="0.75", lw=1, ls="--")
+    ax.set_xlabel("log10 FUA population")
+    ax.set_ylabel("divergence gap (Gini emergency − everyday)")
+    ax.set_title("Everyday-emergency divergence along the size gradient\n"
+                 "(cross-sectional space-for-time)", fontsize=10)
+    for s in ("top", "right"):
+        ax.spines[s].set_visible(False)
+    ax.grid(True, lw=0.4, alpha=0.35); ax.set_axisbelow(True)
+    fig.tight_layout(); fig.savefig(figdir / "size_gradient.png", dpi=180, bbox_inches="tight")
+    plt.close(fig)
+    print(f"cross-city figures: {figdir}")

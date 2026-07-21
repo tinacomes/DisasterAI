@@ -22,7 +22,7 @@ def _vectors(n=60, seed=3, b_ev=0.10, b_em=0.25):
         "gini_emergency": np.exp(-2.5 + b_em * ln_pop + rng.normal(0, 0.02, n)),
         "mean_everyday": np.exp(0.5 + 0.05 * ln_pop + rng.normal(0, 0.02, n)),
         "mean_emergency": np.exp(1.0 + 0.05 * ln_pop + rng.normal(0, 0.02, n)),
-        "hh_pop_share": rng.uniform(0.1, 0.4, n),
+        "compounding_pop_share_50": rng.uniform(0.1, 0.4, n),
     })
 
 
@@ -43,9 +43,9 @@ def test_country_fixed_effects_variant():
 
 def test_level_spec_for_nonpositive_outcomes():
     v = _vectors()
-    v.loc[0, "hh_pop_share"] = 0.0  # a zero share forces the level-log spec
+    v.loc[0, "compounding_pop_share_50"] = 0.0  # a zero share forces the level-log spec
     table = scaling_table(v)
-    assert table[table.outcome == "hh_pop_share"].iloc[0].spec.startswith("level-log")
+    assert table[table.outcome == "compounding_pop_share_50"].iloc[0].spec.startswith("level-log")
 
 
 def test_regime_slope_difference_detects_divergence():

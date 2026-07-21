@@ -15,10 +15,14 @@ import pandas as pd
 
 def gradient_regression(surfaces: pd.DataFrame, outcome: str,
                         ses_cols: list[str]) -> pd.DataFrame:
-    """WLS of ``outcome`` on standardised SES covariates, weights=population.
+    """Population-weighted OLS of a WITHIN-CITY-STANDARDISED outcome on
+    standardised SES covariates.
 
-    Returns a tidy frame: term, coef, se, t, p, n. Covariates are z-scored so
-    coefficients are comparable within a city.
+    Both the deprivation outcome and the covariates are z-scored within the
+    city (population-weighted for the outcome), so the coefficients are fully
+    standardised (SD-per-SD) — dimensionless, comparable across cities, and
+    INVARIANT to the deprivation-function scale. Returns term, coef, se, t, p,
+    n, r2.
     """
     import statsmodels.api as sm
 
@@ -29,9 +33,16 @@ def gradient_regression(surfaces: pd.DataFrame, outcome: str,
         raise ValueError(
             f"Too few complete cells ({len(df)}) for regression on {ses_cols}"
         )
+    # Population-weighted standardisation of the deprivation outcome -> the
+    # slope is in outcome-SD units and scale-free.
+    w = df["population"].to_numpy()
+    y = df[outcome].to_numpy()
+    mu = np.average(y, weights=w)
+    sd = np.sqrt(np.average((y - mu) ** 2, weights=w))
+    y_std = (y - mu) / sd if sd > 0 else np.zeros_like(y)
     X = df[ses_cols].apply(lambda c: (c - c.mean()) / c.std(ddof=0))
     X = sm.add_constant(X)
-    model = sm.WLS(df[outcome], X, weights=df.population)
+    model = sm.WLS(y_std, X, weights=w)
     fit = model.fit(cov_type="HC1")
     return pd.DataFrame({
         "term": fit.params.index,
