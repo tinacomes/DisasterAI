@@ -111,6 +111,14 @@ def main(argv: list[str] | None = None) -> int:
         "--project-root", type=Path,
         default=Path(__file__).resolve().parents[2])
 
+    sens = sub.add_parser(
+        "sensitivity", help="robustness sweep (curvature/form) over the stable "
+                            "rank targets for all cities in cityplane.csv")
+    sens.add_argument("--grid", type=Path, default=None,
+                      help="sweep grid YAML (default: config/sensitivity.yaml)")
+    sens.add_argument("--project-root", type=Path,
+                      default=Path(__file__).resolve().parents[2])
+
     lf = sub.add_parser(
         "list-fuas", help="list Functional Urban Areas (codes + names) from "
                           "the Eurostat URAU layer, for choosing cities")
@@ -175,6 +183,17 @@ def main(argv: list[str] | None = None) -> int:
         from depacc.cityvector.clustering import run_cross_city
 
         run_cross_city(load_config(), args.project_root, n_clusters=args.n_clusters)
+        return 0
+
+    if args.command == "sensitivity":
+        import yaml
+
+        from depacc.config import CONFIG_DIR
+        from depacc.sensitivity import run_sensitivity
+
+        grid_path = args.grid or (CONFIG_DIR / "sensitivity.yaml")
+        grid = (yaml.safe_load(open(grid_path)) or {}).get("sensitivity", {})
+        run_sensitivity(load_config(), grid, args.project_root)
         return 0
 
     cfg = load_config(args.city)
