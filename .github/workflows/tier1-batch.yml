@@ -1,0 +1,148 @@
+name: Tier-1 many-city batch
+
+# The many-city study on GitHub's runners, using the Tier-1 fast path:
+# facilities from small Overpass queries + travel times from per-city
+# friction-surface windows (a few MB per city, no .pbf, no GTFS, no Java).
+# One parallel job per city, then a collect job that merges all city rows,
+# runs the cross-city clustering + size-gradient read, and uploads the
+# combined results (artifact: depacc-cross-city).
+#
+# Trigger: GitHub → Actions → "Tier-1 many-city batch" → Run workflow.
+#   cities:    JSON list of EXISTING config ids, e.g. ["hamburg_t1","lyon"]
+#   make_cities: optional; semicolon-separated "FUA_CODE,Name,CC" triplets
+#              for cities with no config yet — configs are generated on the
+#              fly with `depacc make-city`, e.g.
+#              "DE003F,München,DE; DE004F,Köln,DE" (codes from the "list FUAs" workflow)
+# Requires config/deprivation.yaml parameters to be filled (methods.md §3).
+
+on:
+  workflow_dispatch:
+    inputs:
+      cities:
+        description: 'JSON list of existing city config ids (e.g. ["demo"])'
+        required: false
+        default: "[]"
+      make_cities:
+        description: 'Generate configs: "FUA_CODE,Name,CC; FUA_CODE,Name,CC; ..."'
+        required: false
+        default: ""
+
+env:
+  MPLBACKEND: Agg
+  PYTHONUNBUFFERED: "1"   # stream pipeline progress into the live log
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - name: Build city matrix (ids + generation specs)
+        id: plan
+        shell: python
+        run: |
+          import json, os
+          cities = json.loads('''${{ inputs.cities }}''' or "[]")
+          entries = [{"city": c, "spec": ""} for c in cities]
+          make = '''${{ inputs.make_cities }}'''.strip()
+          if make:
+              for triplet in make.split(";"):
+                  code, name, cc = [p.strip() for p in triplet.split(",")]
+                  slug = "".join(ch for ch in name.lower().replace(" ", "_")
+                                 if ch.isalnum() or ch == "_")
+                  entries.append({"city": slug, "spec": f"{code},{name},{cc}"})
+          if not entries:
+              raise SystemExit("No cities given")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as fh:
+              fh.write("matrix=" + json.dumps({"include": entries}) + "\n")
+
+  city:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      max-parallel: 5   # be polite to the Overpass + WCS servers
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+      - name: Install depacc (geo + stats + viz; no Java needed)
+        run: pip install -e ".[geo,stats,viz,dev]"
+      - name: Restore raw-data cache
+        uses: actions/cache@v4
+        with:
+          path: data/raw
+          key: depacc-raw-${{ matrix.city }}-t1
+          restore-keys: depacc-raw-
+      - name: Generate config if needed
+        if: matrix.spec != ''
+        run: |
+          IFS=',' read -r CODE NAME CC <<< "${{ matrix.spec }}"
+          depacc make-city --fua-code "$CODE" --name "$NAME" --country "$CC" \
+            --city-id "${{ matrix.city }}"
+      - name: Run pipeline (Tier-1 fast path)
+        run: depacc run --city "${{ matrix.city }}"
+      - name: Upload city results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: depacc-t1-${{ matrix.city }}
+          path: |
+            data/derived/${{ matrix.city }}
+            data/derived/cityplane.csv
+          if-no-files-found: warn
+          retention-days: 90
+
+  collect:
+    needs: city
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write        # push accumulated summaries to depacc-results
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+      - name: Install depacc
+        run: pip install -e ".[stats,viz,dev]"
+      - name: Download all city artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: depacc-t1-*
+          path: downloaded
+      - name: Stage this run's cities into data/derived
+        shell: python
+        run: |
+          import shutil
+          from pathlib import Path
+          derived = Path("data/derived"); derived.mkdir(parents=True, exist_ok=True)
+          for art in sorted(Path("downloaded").glob("depacc-t1-*")):
+              for item in art.iterdir():
+                  if item.is_dir():
+                      shutil.copytree(item, derived / item.name, dirs_exist_ok=True)
+      - name: Persist to depacc-results, run cross over the union, push
+        run: bash tools/persist_and_push.sh
+      - name: Upload combined cross-city results
+        uses: actions/upload-artifact@v4
+        with:
+          name: depacc-cross-city
+          path: |
+            data/derived/cityplane.csv
+            data/derived/cityvector*.csv
+            data/derived/scaling.csv
+            data/derived/regime_slope_difference.csv
+            data/derived/size_gradient.csv
+            data/derived/figures
+          if-no-files-found: warn
+          retention-days: 90

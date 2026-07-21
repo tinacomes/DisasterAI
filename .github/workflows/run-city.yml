@@ -1,0 +1,104 @@
+name: run one city
+
+# Runs the full depacc pipeline for one configured city ON GITHUB'S RUNNERS —
+# nothing to download or install locally.
+#
+# Trigger: GitHub → Actions → "run one city" → Run workflow, type the city id
+# (a file in config/cities/, e.g. hamburg, koeln, demo). Results (surfaces,
+# typology, equity tables, figures) are uploaded as a build artifact named
+# depacc-<city>; download them from the run page. Raw downloads are cached
+# between runs per city.
+#
+# Notes:
+# - Tier-2 r5 cities (hamburg, koeln) need the big inputs (state .pbf, GTFS):
+#   allow 1-3 h on the first, uncached run.
+# - Tier-1 fast-path cities (friction engine + Overpass) run in minutes.
+# - The deprivation stage stops with a clear error until the literature
+#   parameters in config/deprivation.yaml are filled in (see methods.md §3);
+#   use stage=ingest or access to prepare data before that.
+
+on:
+  workflow_dispatch:
+    inputs:
+      city:
+        description: "City id (config/cities/<id>.yaml)"
+        required: true
+      stage:
+        description: "Pipeline stage (all | ingest | access | deprivation | divergence | equity | viz)"
+        required: false
+        default: "all"
+
+env:
+  MPLBACKEND: Agg
+  PYTHONUNBUFFERED: "1"   # stream pipeline progress into the live log
+
+jobs:
+  run-city:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    permissions:
+      contents: write        # push this city's summary to depacc-results
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "21"
+
+      - name: Install osmium-tool (streams state-level OSM extracts down to
+              the FUA window so parsing stays within runner memory)
+        run: sudo apt-get update -q && sudo apt-get install -y -q osmium-tool
+
+      - name: Install depacc (full stack)
+        run: pip install -e ".[full,dev]"
+
+      - name: Restore raw-data cache
+        uses: actions/cache@v4
+        with:
+          path: data/raw
+          key: depacc-raw-${{ inputs.city }}-${{ hashFiles('config/cities/*.yaml') }}
+          restore-keys: |
+            depacc-raw-${{ inputs.city }}-
+            depacc-raw-
+
+      # Carry the per-city derived outputs (cells, facilities, OD matrices,
+      # surfaces) BETWEEN separate stage dispatches. A fresh runner has no
+      # data/derived, so staging (e.g. dispatching 'access' after 'ingest')
+      # would otherwise lose the ingest outputs. The run_id in the key makes
+      # every run save a NEW cache; restore-keys pull the most recent prior
+      # one for this city, so staged runs resume incrementally.
+      - name: Restore per-city derived cache
+        uses: actions/cache@v4
+        with:
+          path: data/derived/${{ inputs.city }}
+          key: depacc-derived-${{ inputs.city }}-${{ github.run_id }}
+          restore-keys: |
+            depacc-derived-${{ inputs.city }}-
+
+      - name: Run pipeline
+        run: depacc run --city "${{ inputs.city }}" --stage "${{ inputs.stage }}"
+
+      # Accumulate this city onto the depacc-results branch and refresh the
+      # cross-city table. Only meaningful once divergence has produced a city
+      # summary (full run or stage=divergence/equity/viz); the script no-ops
+      # otherwise, and synthetic fixtures are never persisted.
+      - name: Persist to depacc-results and refresh cross-city table
+        if: always() && inputs.city != 'demo'
+        run: bash tools/persist_and_push.sh
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: depacc-${{ inputs.city }}
+          path: |
+            data/derived/${{ inputs.city }}
+            data/derived/cityplane.csv
+          if-no-files-found: warn
+          retention-days: 90

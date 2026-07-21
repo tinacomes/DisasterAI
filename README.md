@@ -44,7 +44,6 @@ The **central output** is the *relationship* between the two surfaces:
 ## Install
 
 ```bash
-cd deprivation-accessibility-eu
 uv venv .venv && uv pip install -p .venv/bin/python -e ".[dev]"     # core + tests
 uv pip install -p .venv/bin/python -e ".[full]"                     # full geospatial/routing stack
 ```
@@ -143,19 +142,14 @@ docs/              static results site
 
 ## Note on hosting
 
-This project currently lives as a self-contained subproject on a development
-branch of `tinacomes/DisasterAI` (session constraint). To extract it into its
-own repository with history:
+This is a standalone repository, extracted with full commit history from the
+subproject where it was originally developed (a development branch of
+`tinacomes/DisasterAI`) via `git subtree split`.
 
-```bash
-git subtree split --prefix=deprivation-accessibility-eu -b depacc-standalone
-# then push that branch to a new empty repo, e.g. deprivation-accessibility-eu
-```
-
-After the split: enable GitHub Pages from `docs/`, connect the repository to
-Zenodo via the GitHub–Zenodo integration before tagging the first release
-(this yields a DOI; `CITATION.cff` is already in place), and configure a DVC
-remote for the heavy derived artefacts (`dvc remote add -d <name> <url>`).
+To finish repository setup: enable GitHub Pages from `docs/`, connect the
+repository to Zenodo via the GitHub–Zenodo integration before tagging the first
+release (this yields a DOI; `CITATION.cff` is already in place), and configure a
+DVC remote for the heavy derived artefacts (`dvc remote add -d <name> <url>`).
 
 ## Licence
 

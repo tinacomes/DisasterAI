@@ -10,7 +10,7 @@ authors:
 version: "0.1.0"
 date-released: "2026-07-19"
 license: MIT
-repository-code: "https://github.com/tinacomes/DisasterAI"
+repository-code: "https://github.com/tinacomes/deprivation-accessibility-eu"
 abstract: >-
   Reproducible, config-driven pipeline measuring infrastructure accessibility
   across European cities through the lens of potential deprivation:

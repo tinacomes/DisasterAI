@@ -12,6 +12,7 @@ set -euo pipefail
 
 WORK="${GITHUB_WORKSPACE:-$(git rev-parse --show-toplevel)}"
 SUB="$WORK/deprivation-accessibility-eu"
+[ -d "$SUB" ] || SUB="$WORK"   # standalone repo: subproject IS the root
 DERIVED="$SUB/data/derived"
 RESULTS="$WORK/results-branch"
 BRANCH="depacc-results"

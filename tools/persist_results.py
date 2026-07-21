@@ -120,8 +120,8 @@ def cmd_export(results: Path, derived: Path) -> None:
         readme.write_text(
             "# depacc results (auto-generated)\n\n"
             "Small per-city summaries + cross-city outputs accumulated by the "
-            "depacc workflows (see deprivation-accessibility-eu/tools/"
-            "persist_results.py on main). Raw data and cell-level surfaces "
+            "depacc workflows (see tools/persist_results.py on main). "
+            "Raw data and cell-level surfaces "
             "are reproducible via the pipeline and are never committed here.\n"
         )
     print(f"exported {exported} cities + cross outputs to {results}")

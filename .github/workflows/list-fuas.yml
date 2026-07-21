@@ -1,0 +1,42 @@
+name: list FUAs
+
+# Prints the full Eurostat URAU 2021 Functional Urban Area list (code, name,
+# country) into the job log and uploads it as a CSV artifact (fua-list), so
+# you can pick city codes for `make_cities` in the Tier-1 batch workflow
+# without installing anything.
+#
+# Trigger: GitHub → Actions → "list FUAs" → Run workflow.
+# Optional input `countries`: space-separated two-letter codes (e.g. "DE NL
+# FR") to filter; leave empty for all of Europe.
+
+on:
+  workflow_dispatch:
+    inputs:
+      countries:
+        description: 'Filter: space-separated country codes (e.g. "DE NL FR"); empty = all'
+        required: false
+        default: ""
+
+jobs:
+  list-fuas:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+      - name: Install depacc (geo extra for the boundary layer)
+        run: pip install -e ".[geo]"
+      - name: List FUAs
+        run: |
+          ARGS=""
+          for c in ${{ inputs.countries }}; do ARGS="$ARGS --country $c"; done
+          depacc list-fuas $ARGS
+      - name: Upload FUA list
+        uses: actions/upload-artifact@v4
+        with:
+          name: fua-list
+          path: data/derived/fua_list.csv
+          retention-days: 90

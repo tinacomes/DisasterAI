@@ -1,0 +1,22 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install package + test deps (stats extra enables the
+              regression/clustering tests)
+        run: pip install -e ".[dev,stats]"
+      - name: Run unit tests
+        run: pytest --cov=depacc --cov-report=term-missing
+      - name: Validate shipped configs load
+        run: depacc validate --city hamburg
