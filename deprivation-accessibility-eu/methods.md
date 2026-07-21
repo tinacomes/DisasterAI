@@ -105,6 +105,27 @@ Cantillo, Serrano, Macea, Holguín-Veras (2018); Delgado-Lindeman et al.
 (2019); anchored in the deprivation-cost-function programme of Holguín-Veras
 et al. (2013).
 
+## 3a. Cross-regime standardisation (mandatory)
+
+The everyday (bounded logistic DLF) and emergency (unbounded Box-Cox DCF)
+surfaces are on incomparable scales. Raw magnitudes are **never** summed,
+differenced, co-plotted on a shared axis, or clustered together. The
+`standardize/` module is the single choke point: a `RegimeSurface` carries its
+`scale_state` and only population-weighted transforms produce comparable
+values —
+
+- `to_percentile`: the population-weighted empirical CDF (values in [0,1],
+  invariant to any strictly increasing rescaling — this tames the unbounded
+  emergency tail). Used for the typology and all co-location statistics.
+- `to_zscore`: population-weighted z-score, used only for feature vectors.
+
+Hard guards (`require_standardised`, `require_same_standardised`,
+`require_percentile`) reject raw surfaces at every cross-regime entry point;
+there is no bypass flag. Within-regime statistics (each regime's Gini) are
+computed on raw values — that is a within-regime, scale-invariant statistic,
+never a cross-regime comparison. All aggregation is population-weighted;
+empty/unreachable cells are excluded from weights.
+
 ## 4. Divergence outputs (the central result)
 
 1. **Cell-level co-location:** bivariate typology at population-weighted
@@ -153,6 +174,26 @@ quality metrics); completeness table produced by `quality/`; the Tier-1
 sample can be restricted to cities above `quality.completeness_threshold`.
 For Tier 2 we test whether adding transit changes city *rankings* and
 clustering, not just levels.
+
+## 7a. Robustness harness (structured, not probabilistic)
+
+`sensitivity/` recomputes only the **standardised / rank-based** targets
+(within-regime Ginis, typology shares, city rankings, cluster membership,
+`divergence_gap`) across a defensible parameter envelope
+(`config/sensitivity.yaml`); raw deprivation magnitudes are never tracked.
+Layers: (1) curvature sweep and (2) functional-form swap — both evaluated on
+the saved deprivation-free travel times (`t_regime_*`), so no re-routing;
+(3) the accessibility axis (supply: nearest vs 2SFCA; mode: walk vs
+walk+transit), which changes the travel times and is the comparison against
+which deprivation-calibration sensitivity is judged; (4) flip-cells — cells
+whose typology class changes across the sweep, reported as a stable-vs-
+sensitive population share and mapped. Reported as rank-agreement
+(Spearman/Kendall of city orderings) and cluster agreement (adjusted Rand)
+versus baseline.
+
+**Framing:** this is a *structured robustness check over a defensible
+parameter envelope*, NOT a probabilistic uncertainty quantification — it is
+not presented as a posterior.
 
 ## 8. Reproducibility
 

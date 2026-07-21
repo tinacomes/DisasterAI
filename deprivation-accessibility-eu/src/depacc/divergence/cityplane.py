@@ -1,12 +1,11 @@
-"""City-level divergence: each city as a point in the everyday-vs-emergency
-plane, plus co-location statistics.
+"""City-level divergence row: the everyday-vs-emergency plane plus scale-free
+co-location scalars.
 
-The plane's default axes are the population-weighted Ginis of the two
-deprivation surfaces; population-weighted mean levels, the HH (compounding)
-population share, and a weighted rank correlation between the surfaces are
-carried along. Rows accumulate in data/derived/cityplane.csv across cities —
-the input to cityvector/ clustering and the size-gradient (space-for-time)
-read.
+Ginis are computed on the RAW within-regime values (Gini is scale-invariant,
+and this is a within-regime statistic, never a cross-regime comparison). The
+plane axes are (gini_everyday, gini_emergency); off-diagonal spread =
+divergence. Everything else (Spearman, Jaccard, compounding share) comes from
+the percentile surfaces.
 """
 
 from __future__ import annotations
@@ -16,50 +15,61 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from depacc.divergence.colocation import (
+    compounding_pop_share,
+    jaccard_high,
+    weighted_spearman,
+)
 from depacc.equity.indices import weighted_gini, weighted_mean
+from depacc.standardize import RegimeSurface, to_percentile
 
 
-def weighted_rank_corr(a, b, w) -> float:
-    """Population-weighted Spearman-type correlation between two surfaces."""
-    a = np.asarray(a, float); b = np.asarray(b, float); w = np.asarray(w, float)
-    mask = ~np.isnan(a) & ~np.isnan(b) & (w > 0)
-    a, b, w = a[mask], b[mask], w[mask]
-    if a.size < 3:
-        return float("nan")
-    ra = pd.Series(a).rank().to_numpy()
-    rb = pd.Series(b).rank().to_numpy()
-    wm = w / w.sum()
-    ma, mb = np.sum(wm * ra), np.sum(wm * rb)
-    cov = np.sum(wm * (ra - ma) * (rb - mb))
-    sa = np.sqrt(np.sum(wm * (ra - ma) ** 2))
-    sb = np.sqrt(np.sum(wm * (rb - mb) ** 2))
-    return float(cov / (sa * sb)) if sa > 0 and sb > 0 else float("nan")
+def city_row(everyday_raw: RegimeSurface, emergency_raw: RegimeSurface,
+             cfg: dict, city: str, name: str, country: str, tier: int,
+             synthetic: bool, population_total: float) -> dict:
+    """Assemble the per-city summary from RAW regime surfaces (standardised
+    internally where cross-regime comparison is required)."""
+    thresholds = cfg.get("typology", {}).get("thresholds", [0.5, 0.75])
+    e_p = to_percentile(everyday_raw)
+    m_p = to_percentile(emergency_raw)
 
-
-def city_row(surfaces: pd.DataFrame, typology_summary: pd.DataFrame,
-             cfg: dict, city: str) -> dict:
-    pop = surfaces["population"]
-    ev = surfaces["deprivation_everyday"]
-    em = surfaces["deprivation_emergency"]
-    return {
-        "city": city,
-        "name": cfg["city"].get("name", city),
-        "country": cfg["city"].get("country", ""),
-        "tier": cfg["city"].get("tier", 1),
-        "synthetic": bool(cfg["city"].get("synthetic", False)),
-        "population": float(pop.sum()),
-        "mean_everyday": weighted_mean(ev, pop),
-        "mean_emergency": weighted_mean(em, pop),
-        "gini_everyday": weighted_gini(ev, pop),
-        "gini_emergency": weighted_gini(em, pop),
-        "gini_divergence": weighted_gini(em, pop) - weighted_gini(ev, pop),
-        "rank_corr": weighted_rank_corr(ev, em, pop),
-        "hh_pop_share": float(typology_summary.loc["HH", "population_share"]),
-        "unreachable_pop_share_everyday": float(
-            pop[surfaces["unreachable_everyday"]].sum() / pop.sum()),
-        "unreachable_pop_share_emergency": float(
-            pop[surfaces["unreachable_emergency"]].sum() / pop.sum()),
+    pop = everyday_raw.population
+    row = {
+        "city": city, "name": name, "country": country, "tier": tier,
+        "synthetic": bool(synthetic), "population": float(population_total),
+        # within-regime means (RAW; regime-internal, not compared across).
+        "mean_everyday": weighted_mean(everyday_raw.values, pop),
+        "mean_emergency": weighted_mean(emergency_raw.values, pop),
+        # the plane: within-regime Ginis (scale-invariant) + off-diagonal gap.
+        "gini_everyday": weighted_gini(everyday_raw.values, pop),
+        "gini_emergency": weighted_gini(emergency_raw.values, pop),
+        # tail-robust inequality for the unbounded emergency surface.
+        "p90_p50_ratio_emergency": _p90_p50(emergency_raw.values, pop),
+        # coupling (scale-free, from percentiles).
+        "spearman_rho": weighted_spearman(e_p, m_p),
     }
+    row["divergence_gap"] = row["gini_emergency"] - row["gini_everyday"]
+    for thr in thresholds:
+        key = f"{int(round(thr * 100)):02d}"
+        row[f"compounding_pop_share_{key}"] = compounding_pop_share(e_p, m_p, thr)
+        row[f"jaccard_high_{key}"] = jaccard_high(e_p, m_p, thr)
+    return row
+
+
+def _p90_p50(values, weights) -> float:
+    from depacc.divergence.typology import CLASSES  # noqa: F401  (keep import light)
+
+    v = np.asarray(values, float); w = np.asarray(weights, float)
+    mask = np.isfinite(v) & np.isfinite(w) & (w > 0)
+    if mask.sum() < 2:
+        return float("nan")
+    v, w = v[mask], w[mask]
+    order = np.argsort(v)
+    v, w = v[order], w[order]
+    cw = np.cumsum(w) / w.sum()
+    p50 = v[np.searchsorted(cw, 0.50)]
+    p90 = v[np.searchsorted(cw, 0.90)]
+    return float(p90 / p50) if p50 > 0 else float("nan")
 
 
 def upsert_cityplane(row: dict, table_path: Path) -> pd.DataFrame:

@@ -124,9 +124,25 @@ unreachable:
   policy: "cap_at_max_time"
 
 typology:
-  # Bivariate everyday x emergency classification threshold: population-
-  # weighted quantile of each surface (0.5 = weighted median split).
-  quantile: 0.5
+  # Bivariate everyday x emergency classification thresholds on the
+  # population-weighted PERCENTILE surfaces. 0.50 = median split; 0.75 =
+  # acute compounding. Both are computed and reported — not a single split.
+  thresholds: [0.5, 0.75]
+
+cityvector:
+  # LEVEL features (deprivation-function-FREE): population share whose
+  # regime travel time exceeds each policy threshold (minutes). Comparable
+  # across cities independent of any deprivation-function calibration.
+  access_thresholds_min:
+    everyday: [15, 30]
+    emergency: [30, 45, 60]
+  # Cross-city feature standardisation before clustering: "robust"
+  # (median / IQR; default — small, outlier-prone sample) or "zscore".
+  cross_city_scaler: "robust"
+  clustering:
+    k_range: [2, 6]      # candidate cluster counts; k chosen by silhouette
+    bootstrap: 50        # resamples for the stability (ARI) check
+    random_state: 0
 
 friction:
   # Weiss et al. (2020) friction surfaces, fetched as per-city WCS windows
