@@ -86,6 +86,11 @@ def run_deprivation(cfg: dict, city: str, root: Path,
             surfaces[f"t_nearest_{service}"] = surf["t_nearest"]
             surfaces[f"deprivation_{service}"] = surf["deprivation"]
             surfaces[f"unreachable_{service}"] = surf["unreachable"]
+            # regime-representative travel time per service: effective time
+            # (everyday) or nearest time (emergency) — feeds the deprivation-
+            # function-FREE level features in cityvector/.
+            surfaces[f"t_regime_{service}"] = (
+                surf["t_eff"] if regime == "everyday" else surf["t_nearest"])
             per_service.append(service)
             share = float(
                 surf.loc[surf.unreachable, "population"].sum() / surf.population.sum()
@@ -104,6 +109,11 @@ def run_deprivation(cfg: dict, city: str, root: Path,
         surfaces[f"unreachable_{regime}"] = surfaces[
             [f"unreachable_{s}" for s in per_service]
         ].any(axis=1)
+        # composite regime travel time = weighted mean over services of the
+        # regime-representative per-service times (deprivation-free level).
+        t_cols = [f"t_regime_{s}" for s in per_service]
+        surfaces[f"t_regime_{regime}"] = _weighted_row_mean(
+            surfaces[t_cols].to_numpy(dtype=float), w)
 
     surfaces["deprivation_kind_everyday"] = deprivation_spec(cfg, "everyday").get("kind")
     surfaces["deprivation_kind_emergency"] = deprivation_spec(cfg, "emergency").get("kind")

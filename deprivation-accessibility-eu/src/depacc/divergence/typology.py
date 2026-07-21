@@ -1,18 +1,16 @@
-"""Cell-level bivariate co-location typology (compounding deprivation).
+"""Cell-level bivariate co-location typology on PERCENTILE surfaces.
 
-Each populated cell is classified everyday-hi/lo x emergency-hi/lo against
-population-weighted quantile thresholds (default: weighted median) of the two
-deprivation surfaces within the city:
+The everyday and emergency surfaces are population-weighted percentiles (the
+weighted empirical CDF, see depacc.standardize) — never raw magnitudes, which
+are incomparable across the two regimes. A cell is "high" on a regime when its
+percentile is at or above the threshold (0.50 = pop-weighted median split;
+0.75 = acute compounding). Four classes:
 
-    HH  high everyday, high emergency  -> compounding deprivation
-    HL  high everyday, low  emergency
-    LH  low  everyday, high emergency
-    LL  low  everyday, low  emergency
+    LL  low both        HL  high everyday only
+    LH  high emergency  HH  compounding (high both)
 
-Outputs the per-cell class plus population-share summary. Cells flagged
-unreachable on either surface are kept and classified (their capped/excluded
-deprivation values speak for themselves under the configured policy), but the
-summary also reports their population share separately.
+Population-weighted class shares are reported; cells NaN on either surface are
+left unclassified and reported separately.
 """
 
 from __future__ import annotations
@@ -20,87 +18,58 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from depacc.standardize import RegimeSurface, require_percentile
+
 CLASSES = ("LL", "LH", "HL", "HH")
 
 
-def weighted_quantile(values, q: float, weights) -> float:
-    """Population-weighted quantile (inclusive cumulative-weight definition)."""
-    if not 0 <= q <= 1:
-        raise ValueError("q must be in [0, 1]")
-    v = np.asarray(values, dtype=float)
-    w = np.asarray(weights, dtype=float)
-    if v.shape != w.shape:
-        raise ValueError("values and weights must have the same shape")
-    mask = ~np.isnan(v) & ~np.isnan(w) & (w > 0)
-    if not mask.any():
-        return float("nan")
-    v, w = v[mask], w[mask]
-    order = np.argsort(v)
-    v, w = v[order], w[order]
-    cum = np.cumsum(w)
-    return float(v[np.searchsorted(cum, q * cum[-1], side="left")])
-
-
-def bivariate_typology(
-    df: pd.DataFrame,
-    everyday_col: str = "deprivation_everyday",
-    emergency_col: str = "deprivation_emergency",
-    pop_col: str = "population",
-    quantile: float = 0.5,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Classify cells into LL/LH/HL/HH and summarise population shares.
-
-    Returns ``(cells, summary)``: ``cells`` is ``df`` with added columns
-    ``typology`` (categorical, NaN where either surface is NaN) and the two
-    booleans ``everyday_high`` / ``emergency_high``; ``summary`` has one row
-    per class with population, population_share and cell counts. Population
-    shares are taken over classified cells and sum to 1 (tested); the share of
-    unclassifiable (NaN-surface) population is reported separately in
-    ``summary.attrs['unclassified_pop_share']``.
-    """
-    ev = df[everyday_col].to_numpy(dtype=float)
-    em = df[emergency_col].to_numpy(dtype=float)
-    pop = df[pop_col].to_numpy(dtype=float)
-
-    thr_ev = weighted_quantile(ev, quantile, pop)
-    thr_em = weighted_quantile(em, quantile, pop)
-
-    valid = ~np.isnan(ev) & ~np.isnan(em)
-    ev_high = ev > thr_ev
-    em_high = em > thr_em
+def classify(everyday_pct: np.ndarray, emergency_pct: np.ndarray,
+             threshold: float) -> np.ndarray:
+    """LL/LH/HL/HH label per cell from two percentile arrays; None where either
+    percentile is NaN."""
+    ev = np.asarray(everyday_pct, float)
+    em = np.asarray(emergency_pct, float)
+    valid = np.isfinite(ev) & np.isfinite(em)
+    ev_hi = ev >= threshold
+    em_hi = em >= threshold
     labels = np.where(
         valid,
-        np.where(
-            ev_high,
-            np.where(em_high, "HH", "HL"),
-            np.where(em_high, "LH", "LL"),
-        ),
+        np.where(ev_hi,
+                 np.where(em_hi, "HH", "HL"),
+                 np.where(em_hi, "LH", "LL")),
         None,
     )
+    return labels
 
-    cells = df.copy()
-    cells["everyday_high"] = np.where(valid, ev_high, np.nan)
-    cells["emergency_high"] = np.where(valid, em_high, np.nan)
-    cells["typology"] = pd.Categorical(labels, categories=list(CLASSES))
 
-    total_pop = float(np.nansum(np.where(valid, pop, 0.0)))
+def class_shares(labels: np.ndarray, population: np.ndarray) -> pd.DataFrame:
+    """Population-weighted share of each class (over classified cells; shares
+    sum to 1). Unclassified population share stored in ``.attrs``."""
+    pop = np.asarray(population, float)
+    classified = np.array([lab is not None for lab in labels])
+    total = float(np.nansum(np.where(classified, pop, 0.0)))
     rows = []
     for cls in CLASSES:
-        in_cls = (labels == cls)
+        in_cls = labels == cls
         cls_pop = float(np.nansum(np.where(in_cls, pop, 0.0)))
-        rows.append(
-            {
-                "typology": cls,
-                "n_cells": int(in_cls.sum()),
-                "population": cls_pop,
-                "population_share": cls_pop / total_pop if total_pop > 0 else np.nan,
-            }
-        )
+        rows.append({
+            "typology": cls,
+            "n_cells": int(in_cls.sum()),
+            "population": cls_pop,
+            "population_share": cls_pop / total if total > 0 else np.nan,
+        })
     summary = pd.DataFrame(rows).set_index("typology")
     all_pop = float(np.nansum(pop))
     summary.attrs["unclassified_pop_share"] = (
-        (all_pop - total_pop) / all_pop if all_pop > 0 else np.nan
-    )
-    summary.attrs["threshold_everyday"] = thr_ev
-    summary.attrs["threshold_emergency"] = thr_em
-    return cells, summary
+        (all_pop - total) / all_pop if all_pop > 0 else np.nan)
+    return summary
+
+
+def bivariate_typology(everyday: RegimeSurface, emergency: RegimeSurface,
+                       threshold: float = 0.5):
+    """Classify from two PERCENTILE RegimeSurfaces (guard-enforced). Returns
+    ``(labels, summary)``."""
+    require_percentile(everyday, emergency)
+    labels = classify(everyday.values, emergency.values, threshold)
+    summary = class_shares(labels, everyday.population)
+    return labels, summary

@@ -45,17 +45,22 @@ def test_negative_time_rejected():
         g(-1.0)
 
 
-def test_logistic_increasing_and_saturates():
-    """Everyday logistic: strictly increasing, bounded by Lmax, inflection t0."""
+def test_logistic_zero_anchored_by_default():
+    """Everyday logistic (zero-anchored): increasing, g(0)=0, saturates at Lmax."""
     g = DeprivationFunction(**LOG)
     t = np.linspace(0, 120, 481)
     y = g(t)
     assert np.all(np.diff(y) > 0), "logistic must strictly increase"
-    assert np.all(y < LOG["params"]["Lmax"] + 1e-9)      # bounded above
-    assert y[-1] == pytest.approx(1.0, abs=1e-3)          # saturates near Lmax
+    assert np.all(y < LOG["params"]["Lmax"] + 1e-9)     # bounded above
+    assert float(g(0.0)) == pytest.approx(0.0, abs=1e-12)  # zero-anchored
+    assert y[-1] == pytest.approx(1.0, abs=1e-3)           # saturates near Lmax
+
+
+def test_logistic_raw_variant_has_baseline_and_half_at_t0():
+    """Without zero-anchoring: raw logistic, g(15)=0.5, small g(0) baseline."""
+    g = DeprivationFunction(form="logistic", params=LOG["params"], zero_anchor=False)
     assert float(g(15.0)) == pytest.approx(0.5, abs=1e-6)  # inflection at t0
-    # Small positive baseline at t=0 (documented; not zero for the logistic).
-    assert 0 < float(g(0.0)) < 0.1
+    assert 0 < float(g(0.0)) < 0.1                          # baseline artifact
 
 
 @pytest.mark.parametrize(

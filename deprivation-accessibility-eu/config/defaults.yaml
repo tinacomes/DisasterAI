@@ -124,9 +124,10 @@ unreachable:
   policy: "cap_at_max_time"
 
 typology:
-  # Bivariate everyday x emergency classification threshold: population-
-  # weighted quantile of each surface (0.5 = weighted median split).
-  quantile: 0.5
+  # Bivariate everyday x emergency classification thresholds on the
+  # population-weighted PERCENTILE surfaces. 0.50 = median split; 0.75 =
+  # acute compounding. Both are computed and reported — not a single split.
+  thresholds: [0.5, 0.75]
 
 friction:
   # Weiss et al. (2020) friction surfaces, fetched as per-city WCS windows
