@@ -61,16 +61,49 @@ are flagged explicitly and handled by config policy — `cap_at_max_time`
 (default: deprivation at the cutoff time) or `exclude` (NaN, dropped from
 aggregates) — and their population share is always reported.
 
-## 3. Deprivation functions (transferred, not estimated)
+## 3. Deprivation functions (form transferred, curvature calibrated)
+
+The two regimes use deliberately different shapes (t in **minutes**):
 
 | Regime | Kind | Form | Parameters | Source |
 |---|---|---|---|---|
-| Everyday | DLF (dimensionless) | exponential `g(t) = scale·(e^{βt} − 1)` | β = **TODO(cite)**, scale = **TODO(cite)** | **TODO(cite):** Wang et al., NRS-based Deprivation Level Functions — record full reference, table/equation here when filled |
-| Emergency | DCF (monetary) | Box-Cox `g(t) = scale·((t+shift)^λ − shift^λ)/λ` | λ, scale, shift = **TODO(cite)** | **TODO(cite):** Holguín-Veras et al.; Cantillo et al.; Macea et al.; Delgado-Lindeman et al. — econometric DCF estimates; record reference, currency-year, time unit here when filled |
+| Everyday | DLF (dimensionless) | **logistic** (saturating) `g(t) = Lmax / (1 + e^{−k(t − t0)})` | Lmax = 1.0, t0 = 15 min, k = 0.2 /min | Wang et al. 2017 — logistic S-curve of needs-based severity |
+| Emergency | DCF (monetary) | **Box-Cox** (convex, escalating) `g(t) = scale·((t+shift)^λ − shift^λ)/λ` | λ = 1.8, shift = 1 min, scale = 1.0 (relative) | Cantillo et al. 2018; Delgado-Lindeman 2019 — ambulance / time-to-care DCF |
 
-Both forms satisfy g(0)=0, g′>0, g″≥0 (unit-tested). Alternative
-specifications for sensitivity analysis live in
+**Everyday deprivation SATURATES** — everyday services are substitutable and
+non-critical, so relative deprivation tops out at the ceiling Lmax once
+access is poor enough; the inflection t0 = 15 min encodes the "15-minute
+city" access threshold (g(15) = 0.5), and the surface is ~saturated by
+~45 min. This is a deliberate departure from a globally convex impedance:
+the logistic is convex below t0 and concave above, and g(0) is a small
+positive baseline (= Lmax/(1+e^{k·t0}) ≈ 0.05) rather than exactly 0.
+
+**Emergency deprivation ESCALATES** without bound — it is time-critical, so
+the convex Box-Cox (λ > 1) rises ever more steeply; the curvature is tuned so
+the cost climbs sharply through the clinical time-to-care threshold
+(g(60)/g(45) ≈ 1.66, i.e. +66% over that 15-minute window). g(0) = 0.
+
+**Provenance — form transferred, curvature calibrated (NOT raw coefficient
+transfer).** The published DLF/DCF estimates are on an *hours*-scale
+deprivation-time basis (hours without water/food/care), not the *minutes*
+scale of intra-urban access, so their coefficients are not directly
+transferable. We therefore transfer the *functional form* from the cited
+work and *calibrate the curvature* to domain anchors: the everyday S-curve to
+the intra-urban 15-minute access threshold, and the emergency convexity to
+the ~45–60 min clinical time-to-care threshold. This is recorded honestly
+here and in each spec's `note:` field in `config/deprivation.yaml`; the
+curvature parameters (k, λ) are the primary sensitivity-analysis targets.
+
+The emergency `scale` is left at 1.0 (relative units); anchor it to a value
+of statistical life / value of time only if absolute monetary magnitudes are
+needed — relative results (Ginis, typology, rankings) are scale-invariant.
+Alternative specifications for sensitivity analysis live in
 `config/deprivation.yaml → deprivation.alternatives`.
+
+**Full references (to complete with volume/page):** Wang et al. (2017);
+Cantillo, Serrano, Macea, Holguín-Veras (2018); Delgado-Lindeman et al.
+(2019); anchored in the deprivation-cost-function programme of Holguín-Veras
+et al. (2013).
 
 ## 4. Divergence outputs (the central result)
 

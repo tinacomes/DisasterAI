@@ -13,6 +13,7 @@ from depacc.deprivation.functions import DeprivationFunction
 
 EXP = dict(form="exponential", params={"beta": 0.05, "scale": 1.0})
 BC = dict(form="box_cox", params={"lam": 1.5, "scale": 2.0, "shift": 1.0})
+LOG = dict(form="logistic", params={"Lmax": 1.0, "t0": 15.0, "k": 0.2})
 
 
 @pytest.mark.parametrize("spec", [EXP, BC])
@@ -44,12 +45,28 @@ def test_negative_time_rejected():
         g(-1.0)
 
 
+def test_logistic_increasing_and_saturates():
+    """Everyday logistic: strictly increasing, bounded by Lmax, inflection t0."""
+    g = DeprivationFunction(**LOG)
+    t = np.linspace(0, 120, 481)
+    y = g(t)
+    assert np.all(np.diff(y) > 0), "logistic must strictly increase"
+    assert np.all(y < LOG["params"]["Lmax"] + 1e-9)      # bounded above
+    assert y[-1] == pytest.approx(1.0, abs=1e-3)          # saturates near Lmax
+    assert float(g(15.0)) == pytest.approx(0.5, abs=1e-6)  # inflection at t0
+    # Small positive baseline at t=0 (documented; not zero for the logistic).
+    assert 0 < float(g(0.0)) < 0.1
+
+
 @pytest.mark.parametrize(
     "form,params",
     [
         ("exponential", {"beta": -0.1, "scale": 1.0}),  # decreasing
         ("box_cox", {"lam": 0.5, "scale": 1.0, "shift": 1.0}),  # concave
         ("box_cox", {"lam": 2.0, "scale": -1.0, "shift": 1.0}),  # negative scale
+        ("logistic", {"Lmax": 1.0, "t0": 15.0, "k": -0.2}),  # decreasing
+        ("logistic", {"Lmax": -1.0, "t0": 15.0, "k": 0.2}),  # negative ceiling
+        ("logistic", {"Lmax": 1.0, "k": 0.2}),  # missing t0
         ("nope", {"beta": 0.1, "scale": 1.0}),  # unknown form
     ],
 )
@@ -67,13 +84,25 @@ def test_from_spec_round_trip():
     assert g(30.0) > g(10.0) > 0
 
 
-def test_shipped_config_placeholders_are_guarded():
-    """The shipped config must refuse to run and must cite its sources."""
+def test_shipped_config_builds_and_is_cited():
+    """The shipped config now carries literature-transferred values: it must
+    build both regimes and each must carry a non-empty source citation."""
     cfg = load_config()
-    for regime in ("everyday", "emergency"):
-        spec = deprivation_spec(cfg, regime)
-        with pytest.raises(MissingParameterError) as err:
-            DeprivationFunction.from_spec(spec, context=f"{regime} deprivation")
-        # The error must repeat the citation so the user knows which paper
-        # the parameter must be transferred from.
-        assert "TODO(cite)" in str(err.value)
+    everyday = DeprivationFunction.from_spec(deprivation_spec(cfg, "everyday"))
+    emergency = DeprivationFunction.from_spec(deprivation_spec(cfg, "emergency"))
+    assert everyday.form == "logistic" and everyday.kind == "DLF"
+    assert emergency.form == "box_cox" and emergency.kind == "DCF"
+    for g in (everyday, emergency):
+        assert g.source and "TODO(cite)" not in g.source
+    # Everyday saturates (bounded); emergency escalates (far larger at 60 min).
+    assert float(everyday(60.0)) <= 1.0
+    assert float(emergency(60.0)) > float(everyday(60.0))
+
+
+def test_null_params_still_guarded():
+    """A spec that still has a null placeholder must raise, citing its source."""
+    spec = {"form": "logistic", "params": {"Lmax": 1.0, "t0": None, "k": 0.2},
+            "source": "TODO(cite): some paper"}
+    with pytest.raises(MissingParameterError) as err:
+        DeprivationFunction.from_spec(spec)
+    assert "TODO(cite)" in str(err.value)

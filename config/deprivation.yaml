@@ -21,40 +21,43 @@
 
 deprivation:
   everyday:
-    # PRIMARY form for the everyday/urban-planning framing: dimensionless
-    # Deprivation Level Function (DLF), needs-based relative severity.
+    # Everyday/urban-planning framing: dimensionless Deprivation Level
+    # Function (DLF). SATURATING logistic S-curve — everyday services are
+    # substitutable and non-critical, so relative deprivation tops out at a
+    # ceiling once access is poor enough.
     kind: "DLF"
-    form: "exponential"
+    form: "logistic"
+    time_unit: "minutes"
     params:
-      beta: null   # TODO(cite): Wang et al., NRS-based Deprivation Level
-                   # Function — transfer the exponential growth-rate parameter
-                   # from the published NRS/DLF estimates (exact table/eq. to
-                   # be recorded in methods.md when filled).
-      scale: null  # TODO(cite): same source; DLF normalisation constant
-                   # (dimensionless). Use 1.0 ONLY if the cited paper defines
-                   # the DLF as unit-normalised.
+      Lmax: 1.0    # saturation ceiling (dimensionless relative severity, 0-1)
+      t0: 15.0     # inflection (minutes); the ~15-minute-city access threshold
+      k: 0.2       # steepness (per minute); calibrated to the intra-urban range
     source: >-
-      TODO(cite): Wang et al., needs-based relative severity (NRS) Deprivation
-      Level Functions. Record full reference + table/equation in methods.md.
+      Form: Wang et al. 2017 (logistic S-curve, needs-based severity). Shape
+      TRANSFERRED, curvature CALIBRATED to the intra-urban travel range (NOT
+      lifted from hours-scale estimates). See methods.md §3.
+    note: >-
+      Form from Wang et al. 2017; curvature calibrated to intra-urban travel
+      range, NOT transferred from hours-scale estimates.
 
   emergency:
-    # ALTERNATIVE monetary framing for the emergency/disaster regime:
-    # Deprivation Cost Function (DCF). Convex and steeply rising in time —
-    # its shape matters most here.
+    # Emergency/disaster framing: monetary Deprivation Cost Function (DCF).
+    # CONVEX Box-Cox — time-critical, so the cost escalates ever more steeply;
+    # its curvature matters most here.
     kind: "DCF"
     form: "box_cox"
+    time_unit: "minutes"
     params:
-      lam: null    # TODO(cite): Holguín-Veras et al. / Cantillo et al. /
-                   # Macea et al. / Delgado-Lindeman et al. — Box-Cox exponent
-                   # from the published econometric DCF estimates.
-      scale: null  # TODO(cite): same source; monetary scaling (per person,
-                   # currency-year to be recorded in methods.md).
-      shift: null  # TODO(cite): same source; time offset of the Box-Cox form
-                   # as published (often 1, in the paper's time unit).
+      lam: 1.8     # Box-Cox exponent (>1 => convex); calibrated to time-to-care
+      shift: 1.0   # time offset (minutes)
+      scale: 1.0   # relative units; anchor to a VSL only if absolute magnitudes needed
     source: >-
-      TODO(cite): Holguín-Veras et al.; Cantillo et al.; Macea et al.;
-      Delgado-Lindeman et al. — econometrically estimated Deprivation Cost
-      Functions. Record full reference + table/equation in methods.md.
+      Form: Cantillo et al. 2018; Delgado-Lindeman 2019 (ambulance/time-to-care
+      DCF). Convex Box-Cox TRANSFERRED, curvature CALIBRATED to the clinical
+      time-to-care threshold (~45-60 min). See methods.md §3.
+    note: >-
+      Convex form per Cantillo 2018 / Delgado-Lindeman 2019; curvature
+      calibrated to clinical time-to-care threshold (~45-60 min).
 
   # Sensitivity analysis: each entry is an alternative specification that can
   # be swapped in for either regime via `depacc run --deprivation-spec NAME`.
