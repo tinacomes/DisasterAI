@@ -51,14 +51,15 @@ def test_everyday_vs_emergency_differ(demo_run):
 def test_typology_and_cityplane(demo_run):
     cfg, root = demo_run
     out = root / cfg["output"]["root"] / "demo"
-    summary = pd.read_csv(out / "typology_summary.csv")
+    summary = pd.read_csv(out / "typology_summary_50.csv")
     assert summary.population_share.sum() == pytest.approx(1.0, abs=1e-9)
     plane = pd.read_csv(root / cfg["output"]["root"] / "cityplane.csv")
     row = plane[plane.city == "demo"].iloc[0]
     assert bool(row.synthetic) is True
     assert 0 <= row.gini_everyday <= 1
     assert 0 <= row.gini_emergency <= 1
-    assert 0 <= row.hh_pop_share <= 1
+    assert 0 <= row.compounding_pop_share_50 <= 1
+    assert 0 <= row.spearman_rho <= 1  # demo surfaces positively coupled
 
 
 def test_equity_stage(demo_run):

@@ -81,14 +81,15 @@ def run_viz(cfg: dict, city: str, root: Path) -> None:
         fig.savefig(figdir / f"deprivation_{regime}.png", dpi=180, bbox_inches="tight")
         plt.close(fig)
 
-    # --- 2. bivariate compounding map ---------------------------------------
+    # --- 2. bivariate compounding map (percentile median split) -------------
+    typ_col = "typology_50" if "typology_50" in typology.columns else "typology"
     fig, ax = plt.subplots(figsize=(7.5, 6.5))
     for cls, color in TYPOLOGY_COLORS.items():
-        sub = typology[typology.typology == cls]
+        sub = typology[typology[typ_col] == cls]
         ax.scatter(sub.x, sub.y, c=color, s=8, marker="s", linewidths=0,
                    label=f"{cls} — {TYPOLOGY_LABELS[cls]}")
     ax.set_title(f"{name}: everyday x emergency co-location "
-                 f"(pop-weighted median split)", fontsize=11)
+                 f"(pop-weighted median split of percentiles)", fontsize=11)
     ax.set_aspect("equal")
     ax.set_xticks([]); ax.set_yticks([])
     for s in ax.spines.values():
