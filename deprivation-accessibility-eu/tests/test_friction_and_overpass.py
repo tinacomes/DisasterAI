@@ -86,3 +86,25 @@ def test_keep_k_nearest_bounds_and_selects():
     assert len(out) == 4
     # k <= 0 or empty is a no-op passthrough.
     assert keep_k_nearest(od, 0) is od
+
+
+def test_overpass_sends_user_agent_and_rotates_mirrors(monkeypatch):
+    """406 on the first endpoint must fall through to a working mirror, and
+    every request must carry a non-default User-Agent (bare requests UA -> 406)."""
+    import depacc.ingest.overpass as ov
+
+    calls = []
+
+    class FakeResp:
+        def __init__(self, status): self.status_code = status
+        def json(self): return {"elements": []}
+
+    def fake_post(url, data=None, headers=None, timeout=None):
+        calls.append((url, headers.get("User-Agent") if headers else None))
+        return FakeResp(406 if "overpass-api.de" in url else 200)
+
+    monkeypatch.setattr(ov.requests, "post", fake_post)
+    resp, used = ov._post_overpass("q", ov.DEFAULT_MIRRORS)
+    assert used != ov.DEFAULT_MIRRORS[0]          # rotated past the 406 endpoint
+    assert all("depacc" in ua for _, ua in calls)  # UA always present
+    assert resp.status_code == 200

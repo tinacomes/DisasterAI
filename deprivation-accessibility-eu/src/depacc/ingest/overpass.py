@@ -22,6 +22,19 @@ import pandas as pd
 import requests
 
 DEFAULT_ENDPOINT = "https://overpass-api.de/api/interpreter"
+# Mirrors tried in order when the primary endpoint refuses (406/429/504/5xx).
+DEFAULT_MIRRORS = [
+    "https://overpass-api.de/api/interpreter",
+    "https://overpass.kumi.systems/api/interpreter",
+    "https://overpass.private.coffee/api/interpreter",
+    "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
+]
+# A descriptive User-Agent is REQUIRED: the public Overpass endpoints reject
+# the bare python-requests UA with 406 Not Acceptable.
+HTTP_HEADERS = {
+    "User-Agent": "depacc/0.1 (accessibility research; https://github.com/tinacomes/DisasterAI)",
+    "Accept": "application/json",
+}
 OSM_LICENCE = "ODbL 1.0 (© OpenStreetMap contributors, via Overpass API)"
 
 
@@ -71,32 +84,66 @@ def _parse_elements(elements: list[dict], spec: dict) -> pd.DataFrame:
     return df.drop_duplicates(subset=["osm_id"]).reset_index(drop=True)
 
 
+def _endpoints(cfg: dict) -> list[str]:
+    ov = cfg.get("sources", {}).get("overpass", {}) or {}
+    if ov.get("endpoints"):
+        return list(ov["endpoints"])
+    primary = ov.get("endpoint")
+    mirrors = list(DEFAULT_MIRRORS)
+    if primary and primary not in mirrors:
+        mirrors.insert(0, primary)
+    return mirrors
+
+
+def _post_overpass(query: str, endpoints: list[str], timeout: int = 300):
+    """POST the query, rotating through mirrors and backing off on transient
+    failures. Sends the required User-Agent header (bare requests UA -> 406)."""
+    last_err = None
+    for endpoint in endpoints:
+        for attempt in range(3):
+            try:
+                resp = requests.post(endpoint, data={"data": query},
+                                     headers=HTTP_HEADERS, timeout=timeout)
+            except requests.RequestException as err:  # network hiccup -> next try
+                last_err = err
+                time.sleep(5 * (attempt + 1))
+                continue
+            if resp.status_code == 200:
+                return resp, endpoint
+            # 429/504/5xx are transient; 400/406 mean this endpoint won't serve
+            # the request as formed — move to the next mirror.
+            last_err = requests.HTTPError(
+                f"{resp.status_code} from {endpoint}", response=resp)
+            if resp.status_code in (429, 502, 503, 504):
+                time.sleep(15 * (attempt + 1))
+            else:
+                break
+        print(f"WARNING: Overpass endpoint {endpoint} failed ({last_err}); "
+              f"trying next mirror", flush=True)
+    raise RuntimeError(f"All Overpass endpoints failed; last error: {last_err}")
+
+
 def fetch_service(service: str, spec: dict, bbox, cfg: dict, root: Path,
                   city: str) -> pd.DataFrame:
     """Query one service's facilities, cache the raw JSON with provenance."""
     from depacc.provenance import sha256_of, sidecar_path
 
-    endpoint = (cfg.get("sources", {}).get("overpass", {}) or {}).get(
-        "endpoint", DEFAULT_ENDPOINT)
+    endpoints = _endpoints(cfg)
     raw = root / cfg["output"]["raw_root"] / "overpass" / city
     raw.mkdir(parents=True, exist_ok=True)
     cache = raw / f"{service}.json"
 
     if not cache.exists():
+        used_endpoint = endpoints[0]
         for rules in ([spec["osm"]] + ([spec["fallback_osm"]] if spec.get("fallback_osm") else [])):
             query = build_query(rules, bbox)
-            for attempt in range(4):
-                resp = requests.post(endpoint, data={"data": query}, timeout=300)
-                if resp.status_code == 200:
-                    break
-                time.sleep(15 * (attempt + 1))  # polite backoff on 429/504
-            resp.raise_for_status()
+            resp, used_endpoint = _post_overpass(query, endpoints)
             payload = resp.json()
             if payload.get("elements"):
                 break
         cache.write_text(json.dumps(payload))
         sidecar = {
-            "url": endpoint, "query": query, "sha256": sha256_of(cache),
+            "url": used_endpoint, "query": query, "sha256": sha256_of(cache),
             "bytes": cache.stat().st_size, "licence": OSM_LICENCE,
             "retrieved_utc": pd.Timestamp.utcnow().isoformat(),
         }
