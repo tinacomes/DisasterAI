@@ -116,16 +116,32 @@ def fetch_friction_window(cfg: dict, mode: str, fua, root: Path, city: str) -> P
                     note=f"Weiss et al. friction window, mode={mode}")
 
 
+def _sparse_graph(friction: np.ndarray, dx_m: np.ndarray, dy_m: float):
+    """Build the 8-connected pixel graph once (reused across source batches)."""
+    from scipy.sparse import coo_matrix
+
+    n = friction.size
+    r, c, w = _edge_lists(friction.shape, friction, dx_m, dy_m)
+    return coo_matrix((w, (r, c)), shape=(n, n)).tocsr()
+
+
 def friction_matrix(cfg: dict, cells: pd.DataFrame, facilities: pd.DataFrame,
                     mode: str, fua, root: Path, city: str) -> pd.DataFrame:
-    """Long-format OD table (origin cell, facility, minutes) via cost distance."""
+    """Long-format OD table (origin cell, facility, minutes) via cost distance.
+
+    Facility sources are processed in BATCHES so peak memory is one batch's
+    (batch x n_pixels) distance block, never the full (n_facilities x n_pixels)
+    matrix. Distances are read at cell pixels and only reachable pairs kept.
+    """
     import rasterio
+    from scipy.sparse.csgraph import dijkstra
 
     if mode not in ("walk", "car"):
         raise ValueError(f"friction engine supports walk/car, not '{mode}' "
                          "(transit needs the r5 engine / Tier 2)")
     by_mode = cfg["routing"].get("max_time_min_by_mode") or {}
     max_time = float(by_mode.get(mode) or cfg["routing"]["max_time_min"])
+    batch = int(cfg.get("friction", {}).get("source_batch", 256))
     tif = fetch_friction_window(cfg, mode, fua, root, city)
     with rasterio.open(tif) as src:
         friction = src.read(1).astype(float)
@@ -133,29 +149,41 @@ def friction_matrix(cfg: dict, cells: pd.DataFrame, facilities: pd.DataFrame,
         if nodata is not None:
             friction[friction == nodata] = np.nan
         transform = src.transform
-        # per-row pixel width in metres (geographic raster)
+        height, width = src.height, src.width
         lat_rows = np.array([rasterio.transform.xy(transform, r_, 0)[1]
-                             for r_ in range(src.height)])
+                             for r_ in range(height)])
         dx_m = np.abs(transform.a) * EARTH_M_PER_DEG * np.cos(np.radians(lat_rows))
         dy_m = abs(transform.e) * EARTH_M_PER_DEG
 
-        def to_rc(lon, lat):
-            r_, c_ = src.index(lon, lat)
-            return int(np.clip(r_, 0, src.height - 1)), int(np.clip(c_, 0, src.width - 1))
+    def flat_idx(lons, lats) -> np.ndarray:
+        rows, cols = rasterio.transform.rowcol(transform, np.asarray(lons),
+                                               np.asarray(lats))
+        rows = np.clip(np.asarray(rows), 0, height - 1)
+        cols = np.clip(np.asarray(cols), 0, width - 1)
+        return rows * width + cols
 
-    fac_rc = [to_rc(lo, la) for lo, la in zip(facilities.lon, facilities.lat)]
-    times = cost_distance_times(friction, fac_rc, dx_m, dy_m, max_time)
+    graph = _sparse_graph(friction, dx_m, dy_m)
+    cell_flat = flat_idx(cells.lon.to_numpy(), cells.lat.to_numpy())
+    src_flat = flat_idx(facilities.lon.to_numpy(), facilities.lat.to_numpy())
+    cell_ids = cells.cell_id.to_numpy()
+    dest_ids = facilities.dest_id.to_numpy()
 
-    cell_rc = np.array([to_rc(lo, la) for lo, la in zip(cells.lon, cells.lat)])
-    frames = []
-    for k, dest in enumerate(facilities.dest_id):
-        t = times[k, cell_rc[:, 0], cell_rc[:, 1]]
-        ok = ~np.isnan(t)
-        frames.append(pd.DataFrame({
-            "origin": cells.cell_id.to_numpy()[ok],
-            "dest": dest,
-            "time": t[ok],
-        }))
-    od = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(
-        columns=["origin", "dest", "time"])
-    return od
+    origins, dests, times = [], [], []
+    for start in range(0, len(src_flat), batch):
+        idx = src_flat[start:start + batch]
+        dist = dijkstra(graph, directed=False, indices=idx, limit=max_time)
+        for bi, dest in enumerate(dest_ids[start:start + batch]):
+            t = dist[bi][cell_flat]         # (n_cells,) — no (batch x n_cells) block
+            ok = np.isfinite(t)
+            if ok.any():
+                origins.append(cell_ids[ok])
+                dests.append(np.full(int(ok.sum()), dest))
+                times.append(t[ok])
+        del dist
+    if not origins:
+        return pd.DataFrame(columns=["origin", "dest", "time"])
+    return pd.DataFrame({
+        "origin": np.concatenate(origins),
+        "dest": np.concatenate(dests),
+        "time": np.concatenate(times),
+    })
