@@ -51,6 +51,15 @@ from test_filter_bubbles import (
 
 _SETTING_COLORS = ['#1A3A6B', '#B45F06', '#117733', '#882255', '#44AA99']
 
+# Figure-legend display names, mapping the artifact-directory labels onto the
+# terminology used in the paper (baseline = control, switches = main model).
+# Table/CSV labels are left untouched so downstream tooling keys stay stable.
+_DISPLAY_LABELS = {
+    'baseline': 'control (global access)',
+    'switches': 'main model (network-bounded)',
+    'switched': 'main model (network-bounded)',
+}
+
 # (column header, metrics key for the mean, metrics key for the SE)
 RAW_METRICS = [
     ('SECI',      'seci',     'seci_std'),
@@ -208,7 +217,8 @@ def plot_comparison(settings, save_dir):
                         [metrics[a][mk] for a in present],
                         yerr=[metrics[a][sk] for a in present],
                         color=c, marker='o', markersize=5, linewidth=1.8,
-                        capsize=3, alpha=0.9, label=label)
+                        capsize=3, alpha=0.9,
+                        label=_DISPLAY_LABELS.get(label, label))
 
     titles = {
         'SECI':      'SECI vs α  (negative = social echo chamber)',
@@ -218,7 +228,7 @@ def plot_comparison(settings, save_dir):
         'Unmet':     'Unmet needs vs α  (L3+ cells with zero relief per tick)',
         'Precision': 'Targeting precision vs α  (relief tokens on L3+ cells)',
     }
-    for ax, (name, _, _) in panels:
+    for i, (ax, (name, _, _)) in enumerate(panels):
         ax.set_title(titles[name])
         ax.set_xlabel('AI alignment level (α)')
         ax.set_ylabel(name)
@@ -226,6 +236,8 @@ def plot_comparison(settings, save_dir):
             ax.axhline(0, color='k', ls=':', alpha=0.4)
         ax.grid(True, alpha=0.3)
         ax.legend(fontsize=9)
+        ax.text(-0.12, 1.06, chr(ord('a') + i), transform=ax.transAxes,
+                fontsize=15, fontweight='bold', va='bottom', ha='left')
 
     plt.tight_layout()
     os.makedirs(save_dir, exist_ok=True)
