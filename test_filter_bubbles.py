@@ -625,8 +625,17 @@ def _aggregate(runs):
         mat = np.array([a[:min_len] for a in arrays], dtype=float)
         result[f'{key}_mean'] = np.nanmean(mat, axis=0).tolist()
         result[f'{key}_std']  = np.nanstd( mat, axis=0).tolist()
-        # Per-run steady-state values for boxplot display in goldilocks figure
-        ss_window = STEADY_STATE_WINDOW
+        # Per-run steady-state values for boxplot display in goldilocks figure.
+        # The window must cover the same final 75 ticks for every series
+        # regardless of cadence: 5-tick-cadence series (SECI, MAE, prec; one
+        # sample per 5 ticks) use the last STEADY_STATE_WINDOW samples, while
+        # per-tick series (unmet_needs, aeci_var, ai_query_ratio) need 5× as
+        # many elements. Using STEADY_STATE_WINDOW elements for per-tick series
+        # covered only the last 15 ticks, so the paired per-seed deltas in
+        # tools/compare_configs.py were computed on a different window than the
+        # reported late-run means (last 75 ticks).
+        per_tick = min_len >= result['n_ticks']
+        ss_window = STEADY_STATE_WINDOW * 5 if per_tick else STEADY_STATE_WINDOW
         result[f'{key}_ss_runs'] = [
             float(np.nanmean(a[-ss_window:])) if a else float('nan')
             for a in arrays
@@ -795,7 +804,16 @@ def compute_goldilocks_metrics(all_results):
         prec_m, prec_s = ms('prec_exploit', 'prec_explor')
         # Per-tick series: use 75-tick window to match SECI cadence
         unmet_m = ss(res['unmet_needs_mean'], TICK_WINDOW)
-        unmet_s = ss(res['unmet_needs_std'],  TICK_WINDOW)
+        # SE across replications, computed from the per-run late-run means so it
+        # matches the paired-delta machinery. (The former value — the tick-wise
+        # across-run SD, not divided by √N — was neither an SD of run means nor
+        # an s.e.m., and was reported under an "SE" column header.)
+        _unmet_runs = np.asarray(res.get('unmet_needs_ss_runs', []), dtype=float)
+        _unmet_runs = _unmet_runs[~np.isnan(_unmet_runs)]
+        if len(_unmet_runs) > 1:
+            unmet_s = float(np.nanstd(_unmet_runs, ddof=1) / np.sqrt(len(_unmet_runs)))
+        else:
+            unmet_s = ss(res['unmet_needs_std'], TICK_WINDOW) / np.sqrt(res.get('n_runs', N_GAP_RUNS))
 
         metrics[alpha] = {
             'seci': seci_m, 'seci_std': seci_s, 'seci_runs': runs_pair('seci_exploit', 'seci_explor'),
@@ -978,6 +996,7 @@ def plot_alpha_star_sensitivity(metrics, save_dir):
         ax.set_xticklabels([str(a) for a in available])
         ax.legend(fontsize=8)
         ax.grid(True, alpha=0.3)
+    _panel_letters(axes)
     fig.suptitle('α* Sensitivity to Composite Definition (C5 robustness check)',
                  fontsize=13, fontweight='bold')
     plt.tight_layout()
@@ -991,6 +1010,14 @@ def plot_alpha_star_sensitivity(metrics, save_dir):
 # ---------------------------------------------------------------------------
 # Plots
 # ---------------------------------------------------------------------------
+
+def _panel_letters(axes_flat):
+    """Stamp bold lowercase panel letters (a, b, c, …) outside each panel's
+    top-left corner — required for Nature-family figures."""
+    for i, ax in enumerate(axes_flat):
+        ax.text(-0.12, 1.06, chr(ord('a') + i), transform=ax.transAxes,
+                fontsize=15, fontweight='bold', va='bottom', ha='left')
+
 
 def plot_goldilocks(metrics, all_results, save_dir):
     """2×3 Goldilocks summary — boxplots per alpha (N>1) or scatter dots (N=1).
@@ -1061,12 +1088,15 @@ def plot_goldilocks(metrics, all_results, save_dir):
         ax.legend(fontsize=9)
         ax.grid(True, alpha=0.3)
 
-    eb(axes[0, 0], 'seci', 'b', 'SECI (-1 to +1)',
-       'Social Echo Chamber\n(negative = stronger bubble)', (-1.1, 1.1), hline=0)
+    # Y-limits track the data (indices only ever reach ≈ −0.6 of their [−1, 1]
+    # range); fixing the axes at the theoretical bounds flattened the boxplots
+    # into unreadable slivers.
+    eb(axes[0, 0], 'seci', 'b', 'SECI',
+       'Social Echo Chamber\n(negative = stronger bubble)', hline=0)
 
-    eb(axes[0, 1], 'aeci', 'r', 'AECI-Var (-1 to +1)',
+    eb(axes[0, 1], 'aeci', 'r', 'AECI-Var',
        'AI-Induced Bubble (variance-based)\n(negative = AI users more homogeneous than global)',
-       (-1.1, 1.1), hline=0)
+       hline=0)
 
     # ── Goldilocks composite panel ──────────────────────────────────────────
     # Shows two normalised objectives so the reader can see whether the bubble-
@@ -1100,6 +1130,7 @@ def plot_goldilocks(metrics, all_results, save_dir):
     eb(axes[1, 2], 'prec', 'teal', 'Correct / Total targets',
        'Relief Targeting Precision\n(higher = relief on high-need cells)', (0, 1.05))
 
+    _panel_letters(axes.flat)
     plt.tight_layout()
     os.makedirs(save_dir, exist_ok=True)
     path = os.path.join(save_dir, 'goldilocks_alignment_sweep.png')
@@ -1457,6 +1488,10 @@ def plot_aeci_evolution(all_results, save_dir):
     fig, axes = plt.subplots(1, 2, figsize=(16, 6), sharey=True)
     fig.suptitle('AI Query Preference Evolution', fontsize=13, fontweight='bold')
 
+    # Variability bands are drawn only for the two endpoint alignment levels:
+    # with 11 overlapping ±s.d. bands the panel is unreadable, and the bands at
+    # α = 0 and α = 1 already convey the replication spread.
+    _BAND_ALPHAS = {ALIGNMENT_SWEEP[0], ALIGNMENT_SWEEP[-1]}
     for ax, key, title in [
         (axes[0], 'ai_query_ratio_exploit', 'Exploitative Agents'),
         (axes[1], 'ai_query_ratio_explor',  'Exploratory Agents'),
@@ -1465,16 +1500,18 @@ def plot_aeci_evolution(all_results, save_dir):
             mean  = np.array(res[f'{key}_mean'])
             std   = np.array(res[f'{key}_std'])
             ticks = np.arange(len(mean))   # per-tick series (not metric_ticks cadence)
-            ax.plot(ticks, mean, color=color, linewidth=2, label=f'AI Alignment={alpha}')
-            ax.fill_between(ticks, mean - std, mean + std, color=color, alpha=0.18)
+            ax.plot(ticks, mean, color=color, linewidth=1.8, label=f'α={alpha}')
+            if alpha in _BAND_ALPHAS:
+                ax.fill_between(ticks, mean - std, mean + std, color=color, alpha=0.15)
         ax.axhline(0.5, color='red', linestyle='--', linewidth=1.5, label='50% threshold')
         ax.set_xlabel('Simulation Tick')
         ax.set_ylabel('AI query share (per tick)')
         ax.set_title(title)
         ax.set_ylim(0, 1.02)
-        ax.legend(fontsize=8, loc='upper left')
+        ax.legend(fontsize=8, loc='upper left', ncol=2)
         ax.grid(True, alpha=0.3)
 
+    _panel_letters(axes)
     plt.tight_layout()
     os.makedirs(save_dir, exist_ok=True)
     path = os.path.join(save_dir, 'aeci_evolution.png')
@@ -1544,9 +1581,13 @@ def plot_echo_chamber_lifecycle(all_results, save_dir):
     w     = 0.38
     x_str = [str(a) for a in alphas]
 
+    # One colour pair for the two agent types, reused in every panel so the
+    # figure reads as one system (dark = exploitative, light = exploratory).
+    C_EXPLOIT, C_EXPLOR = '#1A3A6B', '#6BAED6'
+
     # ── Panel 1: peak strength ────────────────────────────────────────────────
-    ax_peak.bar(x - w/2, peak_exp,  w, label='Exploitative', color='#8B2020', alpha=0.85)
-    ax_peak.bar(x + w/2, peak_expl, w, label='Exploratory',  color='#FA8072', alpha=0.85)
+    ax_peak.bar(x - w/2, peak_exp,  w, label='Exploitative', color=C_EXPLOIT, alpha=0.9)
+    ax_peak.bar(x + w/2, peak_expl, w, label='Exploratory',  color=C_EXPLOR, alpha=0.9)
     ax_peak.set_title('Maximum Chamber Strength', fontsize=11)
     ax_peak.set_ylabel('Peak |SECI|')
     ax_peak.set_xticks(x); ax_peak.set_xticklabels(x_str)
@@ -1558,16 +1599,16 @@ def plot_echo_chamber_lifecycle(all_results, save_dir):
     when_exp_plot  = [max(v, 0) for v in when_exp]
     when_expl_plot = [max(v, 0) for v in when_expl]
     ax_when.bar(x - w/2, [min(v, n_ticks_val) for v in when_exp_plot],
-                w, label='Exploitative', color='#1A3A6B', alpha=0.85)
+                w, label='Exploitative', color=C_EXPLOIT, alpha=0.9)
     ax_when.bar(x + w/2, [min(v, n_ticks_val) for v in when_expl_plot],
-                w, label='Exploratory',  color='#6BAED6', alpha=0.85)
+                w, label='Exploratory',  color=C_EXPLOR, alpha=0.9)
     for xi, (ve, vr) in enumerate(zip(when_exp, when_expl)):
         if ve == -1:
-            ax_when.text(xi - w/2, 2, '○', ha='center', fontsize=9, color='#1A3A6B')
+            ax_when.text(xi - w/2, 2, '○', ha='center', fontsize=9, color=C_EXPLOIT)
         elif ve >= n_ticks_val:
             ax_when.text(xi - w/2, n_ticks_val + 1, '✗', ha='center', fontsize=9)
         if vr == -1:
-            ax_when.text(xi + w/2, 2, '○', ha='center', fontsize=9, color='#6BAED6')
+            ax_when.text(xi + w/2, 2, '○', ha='center', fontsize=9, color=C_EXPLOR)
         elif vr >= n_ticks_val:
             ax_when.text(xi + w/2, n_ticks_val + 1, '✗', ha='center', fontsize=9)
     ax_when.set_title(
@@ -1581,8 +1622,8 @@ def plot_echo_chamber_lifecycle(all_results, save_dir):
     ax_when.legend(fontsize=9); ax_when.grid(True, alpha=0.3, axis='y')
 
     # ── Panel 3: duration ─────────────────────────────────────────────────────
-    ax_dur.bar(x - w/2, dur_exp,  w, label='Exploitative', color='#1B5E20', alpha=0.85)
-    ax_dur.bar(x + w/2, dur_expl, w, label='Exploratory',  color='#66BB6A', alpha=0.85)
+    ax_dur.bar(x - w/2, dur_exp,  w, label='Exploitative', color=C_EXPLOIT, alpha=0.9)
+    ax_dur.bar(x + w/2, dur_expl, w, label='Exploratory',  color=C_EXPLOR, alpha=0.9)
     ax_dur.set_title('How Long Do Chambers Persist?\n(fraction of samples with SECI < −0.1)', fontsize=10)
     ax_dur.set_ylabel('Fraction of run in chamber')
     ax_dur.set_xticks(x); ax_dur.set_xticklabels(x_str)
@@ -1590,6 +1631,7 @@ def plot_echo_chamber_lifecycle(all_results, save_dir):
     ax_dur.set_ylim(0, 1.05)
     ax_dur.legend(fontsize=9); ax_dur.grid(True, alpha=0.3, axis='y')
 
+    _panel_letters([ax_peak, ax_when, ax_dur])
     plt.tight_layout()
     os.makedirs(save_dir, exist_ok=True)
     path = os.path.join(save_dir, 'echo_chamber_lifecycle.png')
@@ -2346,6 +2388,12 @@ if __name__ == '__main__':
              'VALUE is the numeric value.  Used by the CI matrix job.',
     )
     parser.add_argument(
+        '--n-factor-runs', type=int, default=None, metavar='N',
+        help=f'Override replications for --single-factor mode '
+             f'(default: N_FACTOR_RUNS={N_FACTOR_RUNS}). The in-process factor '
+             'sweeps of a full run are unaffected.',
+    )
+    parser.add_argument(
         '--single-gap', type=float, default=None, metavar='G',
         help='Run N_GAP_RUNS replications for one (g, α) pair and save the result '
              'to --out-file.  Requires --gap-alpha.  Used by the CI matrix job.',
@@ -2494,9 +2542,10 @@ if __name__ == '__main__':
             label = f'Exploitative share={fval_f}'
         else:
             raise ValueError(f'Unknown factor type {ftype!r}; expected rumor, disaster, or mix')
+        n_factor = args.n_factor_runs or N_FACTOR_RUNS
         print(f'Single-factor mode: type={ftype}, value={fval_f}, '
-              f'ticks={factor_ticks}, n_runs={N_FACTOR_RUNS}')
-        result = run_replicated(params, N_FACTOR_RUNS, label)
+              f'ticks={factor_ticks}, n_runs={n_factor}')
+        result = run_replicated(params, n_factor, label)
         out = args.out_file or f'filter_bubble_results/bubble_factor_{ftype}_{fval_str}.json'
         os.makedirs(os.path.dirname(out) or '.', exist_ok=True)
         with open(out, 'w') as f:
