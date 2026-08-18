@@ -17,6 +17,12 @@ on:
         description: "Simulation ticks per run (must match your primary sweep)"
         required: false
         default: "200"
+      configuration:
+        description: "Structural configuration: main_model (mobility, spatial_bridged, network scope) or control (immobile, components, global)"
+        required: false
+        type: choice
+        options: [main_model, control]
+        default: "main_model"
 
 env:
   MPLBACKEND: Agg
@@ -45,12 +51,18 @@ jobs:
       - name: Run g=${{ matrix.g }} d_mid=${{ matrix.d_mid }} alpha=${{ matrix.alpha }}
         run: |
           mkdir -p filter_bubble_results
+          if [ "${{ inputs.configuration }}" = "main_model" ]; then
+            CONFIG_FLAGS="--mobility 1 --network-type spatial_bridged --query-scope network"
+          else
+            CONFIG_FLAGS="--mobility 0 --network-type components --query-scope global"
+          fi
           python3 test_filter_bubbles.py \
             --single-gap  ${{ matrix.g }} \
             --gap-d-mid   ${{ matrix.d_mid }} \
             --gap-alpha   ${{ matrix.alpha }} \
             --out-file    filter_bubble_results/bubble_gap_${{ matrix.g }}_dmid_${{ matrix.d_mid }}_alpha_${{ matrix.alpha }}.json \
-            --ticks       ${{ inputs.ticks }}
+            --ticks       ${{ inputs.ticks }} \
+            $CONFIG_FLAGS
 
       - uses: actions/upload-artifact@v4
         with:

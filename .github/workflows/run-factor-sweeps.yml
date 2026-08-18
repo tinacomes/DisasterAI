@@ -1,0 +1,116 @@
+name: Run Factor Sweeps (S8)
+
+# One-at-a-time factor sweeps (Supplementary S8): rumour probability,
+# disaster dynamics, and exploitative share, each at FACTOR_ALPHA = 0.5,
+# 9 parallel jobs. The collect job merges the factor results into a copy of
+# the committed primary sweep (results/switched-sweep or baseline-sweep,
+# matching the chosen configuration) and regenerates the factor-comparison
+# figure, so factors and primary sweep come from the same configuration.
+#
+# Trigger: GitHub → Actions → "Run Factor Sweeps (S8)" → Run workflow
+
+on:
+  workflow_dispatch:
+    inputs:
+      ticks:
+        description: "Simulation ticks passed to the driver (factor jobs use ticks/2)"
+        required: false
+        default: "200"
+      n_factor_runs:
+        description: "Replications per factor condition"
+        required: false
+        default: "20"
+      configuration:
+        description: "Structural configuration: main_model (mobility, spatial_bridged, network scope) or control (immobile, components, global)"
+        required: false
+        type: choice
+        options: [main_model, control]
+        default: "main_model"
+
+env:
+  MPLBACKEND: Agg
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+
+  factor-cell:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {type: rumor,    value: "0.0"}
+          - {type: rumor,    value: "0.5"}
+          - {type: rumor,    value: "1.0"}
+          - {type: disaster, value: "0"}
+          - {type: disaster, value: "2"}
+          - {type: disaster, value: "3"}
+          - {type: mix,      value: "0.2"}
+          - {type: mix,      value: "0.5"}
+          - {type: mix,      value: "0.8"}
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11", cache: "pip"}
+      - run: pip install -r requirements.txt
+
+      - name: Run factor ${{ matrix.type }}=${{ matrix.value }}
+        run: |
+          mkdir -p filter_bubble_results
+          if [ "${{ inputs.configuration }}" = "main_model" ]; then
+            CONFIG_FLAGS="--mobility 1 --network-type spatial_bridged --query-scope network"
+          else
+            CONFIG_FLAGS="--mobility 0 --network-type components --query-scope global"
+          fi
+          python3 test_filter_bubbles.py \
+            --single-factor ${{ matrix.type }} ${{ matrix.value }} \
+            --n-factor-runs ${{ inputs.n_factor_runs }} \
+            --out-file filter_bubble_results/bubble_factor_${{ matrix.type }}_${{ matrix.value }}.json \
+            --ticks ${{ inputs.ticks }} \
+            $CONFIG_FLAGS
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: factor-cell-${{ matrix.type }}-${{ matrix.value }}
+          path: filter_bubble_results/bubble_factor_${{ matrix.type }}_${{ matrix.value }}.json
+          retention-days: 30
+
+  collect:
+    needs: factor-cell
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11", cache: "pip"}
+      - run: pip install -r requirements.txt
+
+      - name: Download factor artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: factor-cell-*
+          path: filter_bubble_results
+          merge-multiple: true
+
+      - name: Merge factors into committed primary sweep and replot
+        run: |
+          if [ "${{ inputs.configuration }}" = "main_model" ]; then
+            PRIMARY=results/switched-sweep/experiment_results.json
+          else
+            PRIMARY=results/baseline-sweep/experiment_results.json
+          fi
+          python3 tools/merge_factor_results.py "$PRIMARY" filter_bubble_results experiment_results.json
+          python3 test_filter_bubbles.py --plots-only \
+            --results-file experiment_results.json \
+            --save-dir factor-plots
+          cp experiment_results.json factor-plots/experiment_results_with_factors.json
+          cp filter_bubble_results/bubble_factor_*.json factor-plots/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: factor-sweeps
+          path: factor-plots/
+          retention-days: 30

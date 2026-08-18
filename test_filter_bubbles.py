@@ -2388,6 +2388,12 @@ if __name__ == '__main__':
              'VALUE is the numeric value.  Used by the CI matrix job.',
     )
     parser.add_argument(
+        '--n-factor-runs', type=int, default=None, metavar='N',
+        help=f'Override replications for --single-factor mode '
+             f'(default: N_FACTOR_RUNS={N_FACTOR_RUNS}). The in-process factor '
+             'sweeps of a full run are unaffected.',
+    )
+    parser.add_argument(
         '--single-gap', type=float, default=None, metavar='G',
         help='Run N_GAP_RUNS replications for one (g, α) pair and save the result '
              'to --out-file.  Requires --gap-alpha.  Used by the CI matrix job.',
@@ -2536,9 +2542,10 @@ if __name__ == '__main__':
             label = f'Exploitative share={fval_f}'
         else:
             raise ValueError(f'Unknown factor type {ftype!r}; expected rumor, disaster, or mix')
+        n_factor = args.n_factor_runs or N_FACTOR_RUNS
         print(f'Single-factor mode: type={ftype}, value={fval_f}, '
-              f'ticks={factor_ticks}, n_runs={N_FACTOR_RUNS}')
-        result = run_replicated(params, N_FACTOR_RUNS, label)
+              f'ticks={factor_ticks}, n_runs={n_factor}')
+        result = run_replicated(params, n_factor, label)
         out = args.out_file or f'filter_bubble_results/bubble_factor_{ftype}_{fval_str}.json'
         os.makedirs(os.path.dirname(out) or '.', exist_ok=True)
         with open(out, 'w') as f:
