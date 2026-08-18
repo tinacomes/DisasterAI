@@ -55,13 +55,13 @@ All signed echo indices share one convention: **negative = echo chamber**, 0 = n
 
 Normalised composites are range-normalised **within one sweep** — never compare their values across configurations; cross-configuration comparisons use raw metrics with paired per-seed deltas (`tools/compare_configs.py`). An α\* sensitivity analysis across six composite variants is reported with every sweep.
 
-## Headline Results (comparison run, 2026-07-10)
+## Headline Results (comparison run, 2026-08-17)
 
-From the seed-paired baseline-vs-switched comparison ([run 29100134858](https://github.com/tinacomes/DisasterAI/actions/runs/29100134858), post-fix code):
+From the seed-paired baseline-vs-switched comparison ([run 32040117179](https://github.com/tinacomes/DisasterAI/actions/runs/32040117179), pinned environment, window-consistent statistics):
 
-1. **Network-bounded access is a precondition for AI-amplified social echo chambers.** Under the switched configuration SECI deepens sharply at high α (−0.32 at α ≥ 0.9); under the baseline's global query pool it *weakens* instead (−0.13 at α = 1). Paired ΔSECI is significantly negative for α ≥ 0.7.
-2. **A Goldilocks optimum exists only in the switched configuration**, and there it is robust: α\* ∈ [0.3, 0.6] across all six composite variants (primary 0.6, operational +MAE 0.4). The baseline has no interior bubble optimum (α\* = 1.0 for bubble-only composites).
-3. **The switched configuration is operationally more robust to a confirming AI**: significantly lower MAE and higher precision at essentially every α, and the α ≥ 0.9 relief collapse is buffered (unmet needs ~3.5 vs ~11; precision 0.50 vs 0.21).
+1. **Network-bounded access is a precondition for AI-amplified social echo chambers.** Under the switched configuration SECI deepens sharply at high α (−0.30 to −0.33 at α ≥ 0.9); under the baseline's global query pool it *weakens* instead (−0.14 at α = 1). Paired ΔSECI is significantly negative for α ≥ 0.7.
+2. **An interior alignment optimum exists only in the switched configuration.** All six composite variants place α\* strictly inside the sweep, but the location is composite-dependent (bubble composites {0.4, 0.5, 0.8}; operational {0.1, 0.3, 0.5}); interiority, not the exact location, is the robust property. Baseline bubble composites are minimised at or next to the boundary (α\* ∈ {0.9, 1.0}).
+3. **The switched configuration is operationally more robust to a confirming AI**: significantly lower MAE and higher precision at every α, and the α ≥ 0.9 relief collapse is buffered by more than a factor of three (unmet needs ~3.1–3.3 vs ~11.3; precision 0.51–0.53 vs 0.21).
 
 The committed results from that run live in `results/` — the full sweep snapshot for **both** configurations plus the paired comparison tables and overlay figure. See `results/README.md` for provenance and the figure-by-figure inventory.
 
