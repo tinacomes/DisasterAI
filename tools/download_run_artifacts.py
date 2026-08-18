@@ -48,6 +48,33 @@ def api(url, token):
     return urllib.request.urlopen(req)
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def download_blob(url, token):
+    """Fetch an artifact zip: authenticate to the API, but do NOT forward the
+    Authorization header to the storage redirect — the blob host rejects
+    requests that carry it (HTTP 401)."""
+    opener = urllib.request.build_opener(_NoRedirect)
+    req = urllib.request.Request(url, headers={
+        'Authorization': f'Bearer {token}',
+        'Accept': 'application/vnd.github+json',
+        'User-Agent': 'archive-artifacts',
+    })
+    try:
+        with opener.open(req) as r:
+            return r.read()
+    except urllib.error.HTTPError as e:
+        if e.code in (301, 302, 307, 308):
+            loc = e.headers['Location']
+            plain = urllib.request.Request(loc, headers={'User-Agent': 'archive-artifacts'})
+            with urllib.request.urlopen(plain) as r:
+                return r.read()
+        raise
+
+
 def main(repo, run_id, pattern, dest):
     token = os.environ['GH_TOKEN']
     variants = expand_braces(pattern)
@@ -67,8 +94,7 @@ def main(repo, run_id, pattern, dest):
             matched += 1
             out_dir = os.path.join(dest, a['name'])
             os.makedirs(out_dir, exist_ok=True)
-            with api(a['archive_download_url'], token) as r:
-                blob = r.read()
+            blob = download_blob(a['archive_download_url'], token)
             with zipfile.ZipFile(io.BytesIO(blob)) as z:
                 z.extractall(out_dir)
             print(f'  {a["name"]} -> {out_dir}')
