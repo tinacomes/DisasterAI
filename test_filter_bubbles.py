@@ -1280,10 +1280,16 @@ def _plot_timeseries(all_results, save_dir, best_alpha=None):
 
 def plot_factor_comparison(rumor_res, disaster_res, mix_res, save_dir):
     """3×3 bar chart comparing factor effects on bubble & response metrics."""
+    # Read replication count and tick count from the results themselves — the
+    # module constants describe the in-process defaults, not what a CI matrix
+    # run (with --n-factor-runs / --ticks overrides) actually produced.
+    _any = next(iter({**rumor_res, **disaster_res, **mix_res}.values()), {})
+    _n = _any.get('n_runs', N_FACTOR_RUNS)
+    _t = _any.get('n_ticks', base_params['ticks'])
     fig, axes = plt.subplots(3, 3, figsize=(16, 12))
     fig.suptitle(
-        f'Factor Effects at α={FACTOR_ALPHA}  (mean ± std across {N_FACTOR_RUNS} runs)\n'
-        f'SECI & MAE: mean over all ticks;  Unmet needs: cumulative sum over all {base_params["ticks"]} ticks\n'
+        f'Factor Effects at α={FACTOR_ALPHA}  (mean ± std across {_n} runs)\n'
+        f'SECI & MAE: mean over all ticks;  Unmet needs: cumulative sum over all {_t} ticks\n'
         'Each column: one factor swept while others held at base values',
         fontsize=12, fontweight='bold'
     )

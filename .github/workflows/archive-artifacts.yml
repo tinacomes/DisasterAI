@@ -30,12 +30,18 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          run-id: ${{ inputs.run_id }}
-          github-token: ${{ github.token }}
-          pattern: ${{ inputs.pattern }}
-          path: ${{ inputs.dest }}
+      # actions/download-artifact@v4 only sees the first ~100 artifacts of a
+      # run, silently dropping the rest on large matrix runs; the helper
+      # script paginates the artifacts API instead.
+      - name: Download artifacts (paginated)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 tools/download_run_artifacts.py \
+            "${{ github.repository }}" \
+            "${{ inputs.run_id }}" \
+            "${{ inputs.pattern }}" \
+            "${{ inputs.dest }}"
       - name: Commit and push
         env:
           DEST: ${{ inputs.dest }}
