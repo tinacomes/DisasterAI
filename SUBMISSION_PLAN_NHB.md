@@ -79,15 +79,20 @@ because it ties the model to the NHB-published dyadic result.
 
 ## Phase N2 — Online experiment [HUMAN-led; transforms the submission]
 
-The design that tests the model's core prediction, in the Becker/Centola
-tradition: networked groups of ~16-20 participants estimate a quantity with
-ground truth (e.g., damage severity from imagery) over rounds; an "AI
-advisor" gives either truthful or belief-confirming advice (confirmation
-implemented as weighted echo of the participant's or the group's prior);
-2x2: advisor policy x communication structure (networked vs unrestricted).
-Prediction from the model: confirming advice deepens within-group belief
-convergence and error only in the networked condition; truthful advice
-produces advisor-reliant convergence in both.
+**Full design in `EXPERIMENT_DESIGN.md`** (task, treatments, hypotheses
+H1-H4, power strategy, budget, ethics, timeline, and the build prompt).
+Summary: Becker-style networked estimation of building-damage share from
+xBD imagery in 16-person groups; 2x2 (networked vs unrestricted
+communication x truthful vs confirming AI advisor, the confirming advisor
+targeting the visible neighbourhood's consensus at alpha=0.8) plus a
+no-advisor baseline; forced single-source choice per revision round
+(operationalising the model's source-selection learning); on-site/remote
+roles within every group (testing the periphery prediction). Predictions:
+confirming advice deepens within-neighbourhood convergence and error only
+in the networked condition (H1); truthful advice produces reliance-defined
+convergence in both (H2); harm concentrates on remote participants,
+unmoderated by network position (H3); the confirming advisor's query share
+grows over trials (H4).
 
 - **[HUMAN]**: ethics approval (TU Delft HREC), preregistration (OSF),
   Prolific budget (~200-400 participants), decide on incentive-compatible
