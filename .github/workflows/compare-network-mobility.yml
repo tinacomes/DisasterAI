@@ -25,6 +25,10 @@ on:
         description: "Simulation ticks per run"
         required: false
         default: "200"
+      confirmation_target:
+        description: "AI confirmation target: individual (type-agnostic, default) or consensus (legacy pre-fix behaviour, reproduction only)"
+        required: false
+        default: "individual"
 
 env:
   MPLBACKEND: Agg
@@ -57,6 +61,7 @@ jobs:
             --out-file out/bubble_alpha_${{ matrix.alpha }}.json \
             --ticks ${{ inputs.ticks }} \
             --n-runs ${{ inputs.n_runs }} \
+            --confirmation-target ${{ inputs.confirmation_target }} \
             $FLAGS
       - uses: actions/upload-artifact@v4
         with:
