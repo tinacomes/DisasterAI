@@ -2321,6 +2321,22 @@ class AIAgent(Agent):
         corrected = np.round(sensed_vals + alignment_strength * belief_differences)
         corrected = np.clip(corrected, 0, 5)  # Keep values in valid range
 
+        # Manipulation check (observation-only): the CONFIRMATION FRACTION
+        # actually delivered, (served − sensed)/(belief − sensed) over cells
+        # where belief ≠ sensed. Because reports are integer-rounded, the
+        # delivered fraction is a staircase in α (a 1-level discrepancy flips
+        # from 0% to 100% confirmation between α=0.5 and 0.6; all gap sizes
+        # saturate by α=0.9), so nominal α ≠ delivered confirmation.
+        _mask = belief_differences != 0
+        if _mask.any() and hasattr(self.model, '_eff_alpha_accum'):
+            _frac = ((corrected[_mask] - sensed_vals[_mask])
+                     / belief_differences[_mask])
+            _acc = self.model._eff_alpha_accum.get(
+                getattr(caller, 'agent_type', None))
+            if _acc is not None:
+                _acc[0] += float(_frac.sum())
+                _acc[1] += int(_mask.sum())
+
         # Build the report dictionary with aligned values
         for i, cell in enumerate(valid_cells_in_query):
             report[cell] = int(corrected[i])
@@ -2503,6 +2519,13 @@ class DisasterModel(Model):
         self.aeci_ie_chan_data = [] # (tick, exploit, explor) — AI channel, channel baseline
                                     # (community served pool vs global served pool)
         self.seci_ie_chan_data = [] # (tick, exploit, explor) — human channel, channel baseline
+        self.aeci_ie_rel_data = []  # (tick, exploit, explor) — AI channel vs community's OWN
+                                    # belief variance (+ broadens, − narrows, ≈0 mirrors)
+        self.seci_ie_rel_data = []  # (tick, exploit, explor) — human channel, same baseline
+        self.ie_reliance_data = []  # (tick, exploit, explor) — AI share of all delivered reports
+        self.effective_alpha_data = []  # (tick, exploit, explor) — realized confirmation
+                                        # fraction in served AI reports (manipulation check)
+        self._eff_alpha_accum = {'exploitative': [0.0, 0], 'exploratory': [0.0, 0]}
         self.ie_pool_data = []      # (tick, ai_pool_exploit, ai_pool_explor,
                                     #  human_pool_exploit, human_pool_explor) —
                                     # mean L1+ report-pool size per community
@@ -2790,12 +2813,36 @@ class DisasterModel(Model):
         ]
         global_var = np.var(all_belief_levels) if len(all_belief_levels) > 1 else 1e-6
 
+        # Per-community L1+ belief variance (baseline for the community-relative
+        # variant): does a channel serve the community information that is
+        # NARROWER (−), BROADER (+), or A MIRROR (≈0) of what the community
+        # already believes?  A truthful channel correcting a converged
+        # community reads positive; a fully aligned channel serving back the
+        # members' own priors reads ≈0 — so the α trajectory from + to 0 is
+        # the AI switching from bubble-breaking to pure echo.
+        comm_belief_var = {}
+        for ci, (component_nodes, _ctype) in enumerate(self.communities):
+            levels = []
+            for n in component_nodes:
+                agent = self.humans.get(f"H_{n}")
+                if agent is None:
+                    continue
+                levels.extend(
+                    b.get('level', 0) for b in agent.beliefs.values()
+                    if isinstance(b, dict) and b.get('level', 0) >= 1)
+            comm_belief_var[ci] = (float(np.var(levels))
+                                   if len(levels) > 1 else float('nan'))
+
         values = {}        # belief-baseline indices
         values_chan = {}   # channel-baseline indices (strict SECI parallel)
+        values_rel = {}    # community-relative indices (vs own belief variance)
+        raw_counts = {}    # ALL delivered reports (incl. level 0) per channel/type
         pools = {}
         for channel in ('ai', 'human'):
             comm_vars = {'exploitative': [], 'exploratory': []}
+            rel_vals = {'exploitative': [], 'exploratory': []}
             pool_sizes = {'exploitative': [], 'exploratory': []}
+            n_raw = {'exploitative': 0, 'exploratory': 0}
             channel_levels = []   # global served pool of this channel (all agents)
             for agent in self.humans.values():
                 channel_levels.extend(
@@ -2803,7 +2850,7 @@ class DisasterModel(Model):
                     if lvl >= 1)
             channel_var = (np.var(channel_levels)
                            if len(channel_levels) > 1 else float('nan'))
-            for component_nodes, community_type in self.communities:
+            for ci, (component_nodes, community_type) in enumerate(self.communities):
                 if len(component_nodes) <= 1:
                     continue
                 levels = []
@@ -2811,12 +2858,18 @@ class DisasterModel(Model):
                     agent = self.humans.get(f"H_{n}")
                     if agent is None:
                         continue
+                    n_raw[community_type] += len(agent.received_report_log[channel])
                     levels.extend(
                         lvl for _cell, lvl in agent.received_report_log[channel]
                         if lvl >= 1)   # L1+ filter, exactly like SECI
                 pool_sizes[community_type].append(len(levels))
                 if len(levels) > 1:
-                    comm_vars[community_type].append(float(np.var(levels)))
+                    served_var = float(np.var(levels))
+                    comm_vars[community_type].append(served_var)
+                    if not np.isnan(comm_belief_var.get(ci, float('nan'))):
+                        rel_vals[community_type].append(
+                            self._variance_ratio_index(served_var,
+                                                       comm_belief_var[ci]))
             values[channel] = {
                 t: (self._variance_ratio_index(float(np.mean(comm_vars[t])),
                                                global_var)
@@ -2830,6 +2883,11 @@ class DisasterModel(Model):
                     else float('nan'))
                 for t in ('exploitative', 'exploratory')
             }
+            values_rel[channel] = {
+                t: (float(np.mean(rel_vals[t])) if rel_vals[t] else float('nan'))
+                for t in ('exploitative', 'exploratory')
+            }
+            raw_counts[channel] = n_raw
             pools[channel] = {
                 t: (float(np.mean(pool_sizes[t])) if pool_sizes[t] else 0.0)
                 for t in ('exploitative', 'exploratory')
@@ -2843,6 +2901,27 @@ class DisasterModel(Model):
             (self.tick, values_chan['ai']['exploitative'], values_chan['ai']['exploratory']))
         self.seci_ie_chan_data.append(
             (self.tick, values_chan['human']['exploitative'], values_chan['human']['exploratory']))
+        self.aeci_ie_rel_data.append(
+            (self.tick, values_rel['ai']['exploitative'], values_rel['ai']['exploratory']))
+        self.seci_ie_rel_data.append(
+            (self.tick, values_rel['human']['exploitative'], values_rel['human']['exploratory']))
+        # AI reliance: the AI channel's share of ALL externally delivered
+        # reports (level 0 included — reliance is about the diet's channel
+        # mix, not its severity content) per type over the window.
+        _rel_share = {}
+        for t in ('exploitative', 'exploratory'):
+            total = raw_counts['ai'][t] + raw_counts['human'][t]
+            _rel_share[t] = (raw_counts['ai'][t] / total) if total else float('nan')
+        self.ie_reliance_data.append(
+            (self.tick, _rel_share['exploitative'], _rel_share['exploratory']))
+        # Flush the effective-α (delivered confirmation fraction) window.
+        _ea = {}
+        for t in ('exploitative', 'exploratory'):
+            num, den = self._eff_alpha_accum[t]
+            _ea[t] = (num / den) if den else float('nan')
+            self._eff_alpha_accum[t] = [0.0, 0]
+        self.effective_alpha_data.append(
+            (self.tick, _ea['exploitative'], _ea['exploratory']))
         self.ie_pool_data.append(
             (self.tick,
              pools['ai']['exploitative'], pools['ai']['exploratory'],

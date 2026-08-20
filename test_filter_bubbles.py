@@ -240,6 +240,12 @@ def run_one_sim(params):
     # of the same channel (strict SECI parallel; see calculate_ie_indices)
     aeci_ie_chan_exploit, aeci_ie_chan_explor   = [], []
     seci_ie_chan_exploit, seci_ie_chan_explor   = [], []
+    # Community-relative variant (served pool vs community's OWN belief
+    # variance: + broadens, − narrows, ≈0 mirrors) and AI reliance share
+    aeci_ie_rel_exploit, aeci_ie_rel_explor     = [], []
+    seci_ie_rel_exploit, seci_ie_rel_explor     = [], []
+    ai_reliance_exploit, ai_reliance_explor     = [], []
+    effective_alpha_exploit, effective_alpha_explor = [], []
     ie_pool_ai_exploit, ie_pool_ai_explor       = [], []   # per-community L1+ report-pool sizes
     ie_pool_human_exploit, ie_pool_human_explor = [], []
     lockin_exploit, lockin_explor       = [], []   # AECI-LockIn: negative = AI-heavy beliefs more frozen
@@ -334,6 +340,18 @@ def run_one_sim(params):
             _sec = model.seci_ie_chan_data[-1] if getattr(model, 'seci_ie_chan_data', None) else (0, float('nan'), float('nan'))
             seci_ie_chan_exploit.append(float(_sec[1]))
             seci_ie_chan_explor.append( float(_sec[2]))
+            _ier = model.aeci_ie_rel_data[-1] if getattr(model, 'aeci_ie_rel_data', None) else (0, float('nan'), float('nan'))
+            aeci_ie_rel_exploit.append(float(_ier[1]))
+            aeci_ie_rel_explor.append( float(_ier[2]))
+            _ser = model.seci_ie_rel_data[-1] if getattr(model, 'seci_ie_rel_data', None) else (0, float('nan'), float('nan'))
+            seci_ie_rel_exploit.append(float(_ser[1]))
+            seci_ie_rel_explor.append( float(_ser[2]))
+            _rl = model.ie_reliance_data[-1] if getattr(model, 'ie_reliance_data', None) else (0, float('nan'), float('nan'))
+            ai_reliance_exploit.append(float(_rl[1]))
+            ai_reliance_explor.append( float(_rl[2]))
+            _ea = model.effective_alpha_data[-1] if getattr(model, 'effective_alpha_data', None) else (0, float('nan'), float('nan'))
+            effective_alpha_exploit.append(float(_ea[1]))
+            effective_alpha_explor.append( float(_ea[2]))
             _ip  = model.ie_pool_data[-1] if getattr(model, 'ie_pool_data', None) else (0,) + (float('nan'),) * 4
             ie_pool_ai_exploit.append(   float(_ip[1]))
             ie_pool_ai_explor.append(    float(_ip[2]))
@@ -553,6 +571,14 @@ def run_one_sim(params):
         'aeci_ie_chan_explor':     aeci_ie_chan_explor,
         'seci_ie_chan_exploit':    seci_ie_chan_exploit,
         'seci_ie_chan_explor':     seci_ie_chan_explor,
+        'aeci_ie_rel_exploit':     aeci_ie_rel_exploit,
+        'aeci_ie_rel_explor':      aeci_ie_rel_explor,
+        'seci_ie_rel_exploit':     seci_ie_rel_exploit,
+        'seci_ie_rel_explor':      seci_ie_rel_explor,
+        'ai_reliance_exploit':     ai_reliance_exploit,
+        'ai_reliance_explor':      ai_reliance_explor,
+        'effective_alpha_exploit': effective_alpha_exploit,
+        'effective_alpha_explor':  effective_alpha_explor,
         'ie_pool_ai_exploit':      ie_pool_ai_exploit,
         'ie_pool_ai_explor':       ie_pool_ai_explor,
         'ie_pool_human_exploit':   ie_pool_human_exploit,
@@ -639,6 +665,10 @@ def _aggregate(runs):
         'aeci_ie_exploit', 'aeci_ie_explor', 'seci_ie_exploit', 'seci_ie_explor',
         'aeci_ie_chan_exploit', 'aeci_ie_chan_explor',
         'seci_ie_chan_exploit', 'seci_ie_chan_explor',
+        'aeci_ie_rel_exploit', 'aeci_ie_rel_explor',
+        'seci_ie_rel_exploit', 'seci_ie_rel_explor',
+        'ai_reliance_exploit', 'ai_reliance_explor',
+        'effective_alpha_exploit', 'effective_alpha_explor',
         'ie_pool_ai_exploit', 'ie_pool_ai_explor',
         'ie_pool_human_exploit', 'ie_pool_human_explor',
         'lockin_exploit', 'lockin_explor', 'l1pool_exploit', 'l1pool_explor',
@@ -885,6 +915,10 @@ def compute_goldilocks_metrics(all_results):
         # Channel-baseline variant (strict SECI parallel; M1 validation)
         aeci_iec_m, aeci_iec_s = ms('aeci_ie_chan_exploit', 'aeci_ie_chan_explor')
         seci_iec_m, seci_iec_s = ms('seci_ie_chan_exploit', 'seci_ie_chan_explor')
+        aeci_ier_m, aeci_ier_s = ms('aeci_ie_rel_exploit', 'aeci_ie_rel_explor')
+        seci_ier_m, seci_ier_s = ms('seci_ie_rel_exploit', 'seci_ie_rel_explor')
+        relia_m,    relia_s    = ms('ai_reliance_exploit', 'ai_reliance_explor')
+        effa_m,     effa_s     = ms('effective_alpha_exploit', 'effective_alpha_explor')
         mae_m,  mae_s  = ms('mae_exploit',  'mae_explor')
         prec_m, prec_s = ms('prec_exploit', 'prec_explor')
         # Per-tick series: use 75-tick window to match SECI cadence
@@ -913,6 +947,14 @@ def compute_goldilocks_metrics(all_results):
             'aeci_ie_chan_runs': runs_pair('aeci_ie_chan_exploit', 'aeci_ie_chan_explor'),
             'seci_ie_chan': seci_iec_m, 'seci_ie_chan_std': seci_iec_s,
             'seci_ie_chan_runs': runs_pair('seci_ie_chan_exploit', 'seci_ie_chan_explor'),
+            'aeci_ie_rel': aeci_ier_m, 'aeci_ie_rel_std': aeci_ier_s,
+            'aeci_ie_rel_runs': runs_pair('aeci_ie_rel_exploit', 'aeci_ie_rel_explor'),
+            'seci_ie_rel': seci_ier_m, 'seci_ie_rel_std': seci_ier_s,
+            'seci_ie_rel_runs': runs_pair('seci_ie_rel_exploit', 'seci_ie_rel_explor'),
+            'ai_reliance': relia_m, 'ai_reliance_std': relia_s,
+            'ai_reliance_runs': runs_pair('ai_reliance_exploit', 'ai_reliance_explor'),
+            'effective_alpha': effa_m, 'effective_alpha_std': effa_s,
+            'effective_alpha_runs': runs_pair('effective_alpha_exploit', 'effective_alpha_explor'),
             'mae':  mae_m,  'mae_std':  mae_s,  'mae_runs':  runs_pair('mae_exploit',  'mae_explor'),
             'prec': prec_m, 'prec_std': prec_s, 'prec_runs': runs_pair('prec_exploit', 'prec_explor'),
             'unmet': unmet_m, 'unmet_std': unmet_s,
@@ -1057,6 +1099,14 @@ def write_summary_tables(metrics, save_dir, n_runs=None):
         ('aeci_ie_chan_se',   lambda a, m: m.get('aeci_ie_chan_std', float('nan'))),
         ('seci_ie_chan',      lambda a, m: m.get('seci_ie_chan', float('nan'))),
         ('seci_ie_chan_se',   lambda a, m: m.get('seci_ie_chan_std', float('nan'))),
+        ('aeci_ie_rel',       lambda a, m: m.get('aeci_ie_rel', float('nan'))),
+        ('aeci_ie_rel_se',    lambda a, m: m.get('aeci_ie_rel_std', float('nan'))),
+        ('seci_ie_rel',       lambda a, m: m.get('seci_ie_rel', float('nan'))),
+        ('seci_ie_rel_se',    lambda a, m: m.get('seci_ie_rel_std', float('nan'))),
+        ('ai_reliance',       lambda a, m: m.get('ai_reliance', float('nan'))),
+        ('ai_reliance_se',    lambda a, m: m.get('ai_reliance_std', float('nan'))),
+        ('effective_alpha',   lambda a, m: m.get('effective_alpha', float('nan'))),
+        ('effective_alpha_se', lambda a, m: m.get('effective_alpha_std', float('nan'))),
         ('aeci_var',          lambda a, m: m['aeci']),
         ('aeci_var_se',       lambda a, m: m['aeci_std']),
         ('aeci_err',          lambda a, m: m['aeci_err']),

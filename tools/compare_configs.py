@@ -71,6 +71,9 @@ RAW_METRICS = [
     ('SECI-IE',      'seci_ie',      'seci_ie_std'),
     ('AECI-IE-chan', 'aeci_ie_chan', 'aeci_ie_chan_std'),
     ('SECI-IE-chan', 'seci_ie_chan', 'seci_ie_chan_std'),
+    ('AECI-IE-rel',  'aeci_ie_rel',  'aeci_ie_rel_std'),
+    ('Reliance',     'ai_reliance',  'ai_reliance_std'),
+    ('Eff-alpha',    'effective_alpha', 'effective_alpha_std'),
     ('AECI-Var',     'aeci',         'aeci_std'),
     ('AECI-Err',     'aeci_err',     'aeci_err_std'),
     ('MAE',          'mae',          'mae_std'),
@@ -85,6 +88,9 @@ RUNS_KEYS = {
     'SECI-IE':      'seci_ie_runs',
     'AECI-IE-chan': 'aeci_ie_chan_runs',
     'SECI-IE-chan': 'seci_ie_chan_runs',
+    'AECI-IE-rel':  'aeci_ie_rel_runs',
+    'Reliance':     'ai_reliance_runs',
+    'Eff-alpha':    'effective_alpha_runs',
     'AECI-Var':     'aeci_runs',
     'AECI-Err':     'aeci_err_runs',
     'MAE':          'mae_runs',
@@ -216,7 +222,7 @@ def write_md(settings, save_dir):
 
 def plot_comparison(settings, save_dir):
     """Overlay the RAW sweep metrics for every configuration."""
-    fig, axes = plt.subplots(2, 5, figsize=(28, 10))
+    fig, axes = plt.subplots(3, 5, figsize=(28, 15))
     fig.suptitle('Configuration comparison — primary alignment sweep (raw metrics)',
                  fontsize=14, fontweight='bold')
 
@@ -238,6 +244,9 @@ def plot_comparison(settings, save_dir):
         'SECI-IE':      'SECI-IE vs α  (human-channel counterpart;\nconsistency check against SECI)',
         'AECI-IE-chan': 'AECI-IE-chan vs α  (channel baseline; community\nserved pool vs global served pool — strict SECI parallel)',
         'SECI-IE-chan': 'SECI-IE-chan vs α  (human channel,\nchannel baseline)',
+        'AECI-IE-rel':  'AECI-IE-rel vs α  (vs community\'s OWN beliefs:\n+ broadens, − narrows, ≈0 mirrors)',
+        'Reliance':     'AI reliance vs α  (AI share of all\ndelivered external reports)',
+        'Eff-alpha':    'Effective α vs α  (delivered confirmation fraction;\nrounding makes this a staircase in nominal α)',
         'AECI-Var':     'AECI-Var vs α  (retired; negative = AI echo chamber;\nL1+ beliefs, same pool as SECI)',
         'AECI-Err':     'AECI-Err vs α  (negative = AI-heavy agents\nmore confidently wrong)',
         'MAE':          'Belief MAE vs α  (disaster cells; lower = better)',
@@ -249,8 +258,10 @@ def plot_comparison(settings, save_dir):
         ax.set_xlabel('AI alignment level (α)')
         ax.set_ylabel(name)
         if name in ('SECI', 'AECI-IE', 'SECI-IE', 'AECI-IE-chan',
-                    'SECI-IE-chan', 'AECI-Var', 'AECI-Err'):
+                    'SECI-IE-chan', 'AECI-IE-rel', 'AECI-Var', 'AECI-Err'):
             ax.axhline(0, color='k', ls=':', alpha=0.4)
+        elif name == 'Eff-alpha':
+            ax.plot([0, 1], [0, 1], color='k', ls=':', alpha=0.4)  # nominal = delivered
         ax.grid(True, alpha=0.3)
         ax.legend(fontsize=9)
         ax.text(-0.12, 1.06, chr(ord('a') + i), transform=ax.transAxes,

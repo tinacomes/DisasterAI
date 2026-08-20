@@ -51,6 +51,10 @@ def run_one(params):
     seci_ie_exploit, seci_ie_explor             = [], []
     aeci_ie_chan_exploit, aeci_ie_chan_explor   = [], []
     seci_ie_chan_exploit, seci_ie_chan_explor   = [], []
+    aeci_ie_rel_exploit, aeci_ie_rel_explor     = [], []
+    seci_ie_rel_exploit, seci_ie_rel_explor     = [], []
+    ai_reliance_exploit, ai_reliance_explor     = [], []
+    effective_alpha_exploit, effective_alpha_explor = [], []
     ie_pool_ai_exploit, ie_pool_ai_explor       = [], []
     ie_pool_human_exploit, ie_pool_human_explor = [], []
     lockin_exploit, lockin_explor               = [], []
@@ -122,6 +126,18 @@ def run_one(params):
             _sec = model.seci_ie_chan_data[-1] if model.seci_ie_chan_data else (0, float('nan'), float('nan'))
             seci_ie_chan_exploit.append(float(_sec[1]))
             seci_ie_chan_explor.append( float(_sec[2]))
+            _ier = model.aeci_ie_rel_data[-1] if model.aeci_ie_rel_data else (0, float('nan'), float('nan'))
+            aeci_ie_rel_exploit.append(float(_ier[1]))
+            aeci_ie_rel_explor.append( float(_ier[2]))
+            _ser = model.seci_ie_rel_data[-1] if model.seci_ie_rel_data else (0, float('nan'), float('nan'))
+            seci_ie_rel_exploit.append(float(_ser[1]))
+            seci_ie_rel_explor.append( float(_ser[2]))
+            _rl = model.ie_reliance_data[-1] if model.ie_reliance_data else (0, float('nan'), float('nan'))
+            ai_reliance_exploit.append(float(_rl[1]))
+            ai_reliance_explor.append( float(_rl[2]))
+            _ea = model.effective_alpha_data[-1] if model.effective_alpha_data else (0, float('nan'), float('nan'))
+            effective_alpha_exploit.append(float(_ea[1]))
+            effective_alpha_explor.append( float(_ea[2]))
             _ip  = model.ie_pool_data[-1] if model.ie_pool_data else (0,) + (float('nan'),) * 4
             ie_pool_ai_exploit.append(   float(_ip[1]))
             ie_pool_ai_explor.append(    float(_ip[2]))
@@ -176,6 +192,14 @@ def run_one(params):
         'aeci_ie_chan_explor':    aeci_ie_chan_explor,
         'seci_ie_chan_exploit':   seci_ie_chan_exploit,
         'seci_ie_chan_explor':    seci_ie_chan_explor,
+        'aeci_ie_rel_exploit':    aeci_ie_rel_exploit,
+        'aeci_ie_rel_explor':     aeci_ie_rel_explor,
+        'seci_ie_rel_exploit':    seci_ie_rel_exploit,
+        'seci_ie_rel_explor':     seci_ie_rel_explor,
+        'ai_reliance_exploit':    ai_reliance_exploit,
+        'ai_reliance_explor':     ai_reliance_explor,
+        'effective_alpha_exploit': effective_alpha_exploit,
+        'effective_alpha_explor':  effective_alpha_explor,
         'ie_pool_ai_exploit':     ie_pool_ai_exploit,
         'ie_pool_ai_explor':      ie_pool_ai_explor,
         'ie_pool_human_exploit':  ie_pool_human_exploit,
