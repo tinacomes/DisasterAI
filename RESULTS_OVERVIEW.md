@@ -135,17 +135,28 @@ reward-channel fixes, not to the targeting.
 | Unmet needs α=1.0 (control / main) | 11.3 / 3.3 | 10.3 / 3.1 | unchanged |
 | Interior α* spread (main) | [0.1–0.8] | [0.3–0.6] | tighter; reward fixes |
 
-## 8. Open items before submission
+## 8. Open items before submission (details: PNAS_WRITING_INSTRUCTIONS §2, M1–M8)
 
-1. **Robustness envelope** (plan Phase 2): population size, topology variant,
-   AI supply, verification probability — to be run **on the fixed model**.
-2. **Statistics upgrade** (Phase 3): mixed-model regressions with
-   Holm-corrected contrasts; N=50 re-runs of the α∈{0.8,0.9,1.0} cells.
-3. **Dyadic docking** (Phase 3): two-agent Glickman–Sharot reproduction.
-4. Decision: keep `salience_weight=0` in the mainline (C12 as a *finding*
-   about base-rate-blind verification) or promote a salience>0 variant.
-5. Zenodo DOI for code + all three results directories; resolve the flagged
-   placeholder reference; Significance Statement approval.
+1. **M1 — Metric revision (highest priority).** AECI-Var is judged
+   inadequate as the AI-side counterpart of SECI: it is blind to the
+   individualized (own-prior) bubble and is *most* negative at the truthful
+   endpoint (truth-convergence confound) — it is not α-monotone in the
+   direction the construct claims. Replacement: **AECI-IE**, SECI's exact
+   variance-ratio formula applied to the report levels community members
+   *receive from the AI channel* per window (with SECI-IE over the human
+   channel as consistency check). Observation-only → the re-run reproduces
+   all existing series on the same seeds and becomes the final citable
+   dataset (`results-final/`).
+2. **M2** cognitive-gap sweep on the fixed model (Fig. 3b). **M3** N=50
+   boundary cells α∈{0.8, 0.9, 1.0}. **M4** mixed-model regressions with
+   Holm-corrected contrasts.
+3. **M5** robustness envelope (population, topology, AI supply,
+   verification probability). **M6** dyadic docking (Glickman–Sharot).
+4. **M7** salience decision experiment — keep `salience_weight=0` mainline
+   (C12 as a *finding*) or promote a salience>0 variant; Finding 3's text
+   depends on this author decision.
+5. **M8** final figures from `results-final/`; Zenodo DOI; resolve the
+   flagged placeholder reference; Significance Statement approval.
 
 Full provenance and per-directory READMEs: `results/README.md`,
 `results-verification/README.md`, `results-ablation-consensus/README.md`.
