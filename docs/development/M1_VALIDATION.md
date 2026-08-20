@@ -105,3 +105,35 @@ brief's own default. Options:
 The composite/α\* sensitivity table reports variants under (a) and both
 normalizations, so the N=20 dataset supports any of these choices without
 re-running.
+
+## 5. N=20 × 200-tick paired sweep (run 32404133354) — type-averaged check
+
+The full paired sweep (baseline = control, switches = main; 11 α levels,
+20 seeds, 200 ticks) completed on commit 431dde0. Type-averaged AECI-IE
+confirms the local per-type diagnosis: a modest dose-response into
+mid-α (baseline −0.10 → −0.26 at α=0.5; switches −0.11 → −0.27) that
+*shallows* again at α≥0.9 (−0.17 / −0.12) — exactly the signature of the
+explorer deepening being cancelled by the exploiter collapse-toward-SECI.
+SECI-IE tracks SECI at low-mid α and deepens sharply at α≥0.9
+(baseline −0.45 vs SECI −0.15; switches −0.40 vs −0.31), consistent with
+human-channel pool starvation plus convergence.
+
+Two headline results are seed-robust at N=20 (95% CI excludes 0):
+ΔSECI (switches − baseline) = −0.157 [−0.218, −0.095] at α=0.9 and
+−0.151 [−0.218, −0.084] at α=1.0 (Finding 1), and the operational cliff
+at α≥0.9 (baseline unmet needs 0.3–2.3 → 9.7–10.1; precision 0.70 → 0.22),
+which coincides with the integer-rounding saturation of the alignment
+formula (α≥0.9 serves the caller's prior exactly — see the effective-α
+manipulation check).
+
+α\* is NOT robustly interior for type-averaged composites at N=20
+(SECI+AECI-IE: 1.0 baseline / 0.3 switches; +MAE: 0.1 / 0.0; chan
+variants: 0.8 / 0.5 and 0.5 / 0.3) — the exploiter non-monotonicity
+pollutes the average. An interior α\* claim should wait for the per-type
+metric decision (§4) and be framed per type.
+
+Note: this run predates the co-evolution metrics (aeci_ie_rel,
+ai_reliance, effective_alpha). Re-dispatching the same workflow from
+current main reproduces every existing column bit-identically and adds
+the new ones; do that before archiving as `results-final` if those
+columns should be citable.
