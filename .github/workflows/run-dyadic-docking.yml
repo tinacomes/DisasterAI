@@ -1,0 +1,49 @@
+name: Run Dyadic Docking (M6)
+
+# M6 dyadic docking experiment: one human (each cognitive type) × one AI,
+# no network, no relief loop, alpha sweep, vs a human-human pair.
+# Docking target: qualitative reproduction of the dyadic human-AI
+# feedback-loop amplification of Glickman & Sharot (NHB 2024).
+# Produces the SI figure (dyadic_docking.png) + JSON.
+#
+# Trigger: GitHub → Actions → "Run Dyadic Docking" → Run workflow
+
+on:
+  workflow_dispatch:
+    inputs:
+      n_seeds:
+        description: "Seeded replications per condition"
+        required: false
+        default: "20"
+      rounds:
+        description: "Dyadic interaction rounds"
+        required: false
+        default: "40"
+
+env:
+  MPLBACKEND: Agg
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  dock:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11", cache: "pip"}
+      - run: pip install -r requirements.txt
+      - run: |
+          python3 experiments/dyadic_docking.py \
+            --n-seeds ${{ inputs.n_seeds }} \
+            --rounds ${{ inputs.rounds }} \
+            --save-dir dyadic_results | tee dyadic_results_log.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dyadic-docking
+          path: |
+            dyadic_results/dyadic_docking.png
+            dyadic_results/dyadic_docking.json
+            dyadic_results_log.txt
+          retention-days: 30

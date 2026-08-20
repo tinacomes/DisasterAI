@@ -1,0 +1,135 @@
+name: Run Robustness Sweeps (M5)
+
+# M5 robustness envelope on the fixed model, N=20 seeded replications,
+# main-model configuration (mobility=1, spatial network, network query
+# scope). Four sweeps, each over alpha in {0.0, 0.5, 0.7, 0.9, 1.0}:
+#
+#   pop     population size {100, 300, 500}  (components-style community
+#           count scales as ~N_type/25; spatial networks keep
+#           n_communities_per_type — community size scales instead)
+#   net     alternative within-community generator: spatial_smallworld
+#           (Watts–Strogatz within-community wiring; compare against the
+#           archived spatial_bridged main run)
+#   ai      AI information supply: num_ai {1, 5, 10}
+#   verif   verification_probability {0.1, 0.3, 0.5} (recovery ticks are
+#           reported alongside via the seci_break transition scalars)
+#
+# The collect job renders per-sweep tables (tools/robustness_summary.py);
+# the one-paragraph-per-sweep verdicts go to docs/robustness_summary.md.
+#
+# Trigger: GitHub → Actions → "Run Robustness Sweeps" → Run workflow
+
+on:
+  workflow_dispatch:
+    inputs:
+      n_runs:
+        description: "Replications per condition"
+        required: false
+        default: "20"
+      ticks:
+        description: "Simulation ticks per run"
+        required: false
+        default: "200"
+
+env:
+  MPLBACKEND: Agg
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      matrix:
+        sweep: [pop, net, ai, verif]
+        level: ["100", "300", "500", "smallworld", "1", "5", "10", "0.1", "0.3", "0.5"]
+        alpha: ["0.0", "0.5", "0.7", "0.9", "1.0"]
+        exclude:
+          # pop sweep: only the population levels
+          - {sweep: pop, level: smallworld}
+          - {sweep: pop, level: "1"}
+          - {sweep: pop, level: "5"}
+          - {sweep: pop, level: "10"}
+          - {sweep: pop, level: "0.1"}
+          - {sweep: pop, level: "0.3"}
+          - {sweep: pop, level: "0.5"}
+          # net sweep: only the generator level
+          - {sweep: net, level: "100"}
+          - {sweep: net, level: "300"}
+          - {sweep: net, level: "500"}
+          - {sweep: net, level: "1"}
+          - {sweep: net, level: "5"}
+          - {sweep: net, level: "10"}
+          - {sweep: net, level: "0.1"}
+          - {sweep: net, level: "0.3"}
+          - {sweep: net, level: "0.5"}
+          # ai sweep: only the supply levels
+          - {sweep: ai, level: "100"}
+          - {sweep: ai, level: "300"}
+          - {sweep: ai, level: "500"}
+          - {sweep: ai, level: smallworld}
+          - {sweep: ai, level: "0.1"}
+          - {sweep: ai, level: "0.3"}
+          - {sweep: ai, level: "0.5"}
+          # verif sweep: only the probability levels
+          - {sweep: verif, level: "100"}
+          - {sweep: verif, level: "300"}
+          - {sweep: verif, level: "500"}
+          - {sweep: verif, level: smallworld}
+          - {sweep: verif, level: "1"}
+          - {sweep: verif, level: "5"}
+          - {sweep: verif, level: "10"}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11", cache: "pip"}
+      - run: pip install -r requirements.txt
+      - name: Run ${{ matrix.sweep }}=${{ matrix.level }} alpha=${{ matrix.alpha }}
+        run: |
+          # Main-model configuration; each sweep varies one dimension
+          FLAGS="--mobility 1 --network-type spatial_bridged --query-scope network"
+          case "${{ matrix.sweep }}" in
+            pop)   EXTRA="--n-humans ${{ matrix.level }}" ;;
+            net)   FLAGS="--mobility 1 --network-type spatial_smallworld --query-scope network"
+                   EXTRA="" ;;
+            ai)    EXTRA="--num-ai ${{ matrix.level }}" ;;
+            verif) EXTRA="--verification-probability ${{ matrix.level }}" ;;
+          esac
+          mkdir -p out
+          python3 test_filter_bubbles.py \
+            --single-alpha ${{ matrix.alpha }} \
+            --out-file out/robust_${{ matrix.sweep }}_${{ matrix.level }}_alpha_${{ matrix.alpha }}.json \
+            --ticks ${{ inputs.ticks }} \
+            --n-runs ${{ inputs.n_runs }} \
+            $FLAGS $EXTRA
+      - uses: actions/upload-artifact@v4
+        with:
+          name: robust-${{ matrix.sweep }}-${{ matrix.level }}-${{ matrix.alpha }}
+          path: out/robust_*.json
+          retention-days: 30
+
+  collect:
+    needs: sweep
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11", cache: "pip"}
+      - run: pip install -r requirements.txt
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: robust-*
+          path: robustness/
+      - run: |
+          python3 tools/robustness_summary.py robustness/ . | tee robustness_summary.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: robustness-tables
+          path: |
+            robustness_summary.txt
+            robustness_tables.md
+          retention-days: 30

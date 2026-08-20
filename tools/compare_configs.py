@@ -61,8 +61,14 @@ _DISPLAY_LABELS = {
 }
 
 # (column header, metrics key for the mean, metrics key for the SE)
+# AECI-IE is the M1 primary AI-side echo index (SECI's construct on the
+# AI-served report levels); SECI-IE is its human-channel consistency check;
+# AECI-Var is retired but kept for the transparency comparison. Both IE
+# columns are NaN for results predating M1.
 RAW_METRICS = [
     ('SECI',      'seci',     'seci_std'),
+    ('AECI-IE',   'aeci_ie',  'aeci_ie_std'),
+    ('SECI-IE',   'seci_ie',  'seci_ie_std'),
     ('AECI-Var',  'aeci',     'aeci_std'),
     ('AECI-Err',  'aeci_err', 'aeci_err_std'),
     ('MAE',       'mae',      'mae_std'),
@@ -73,6 +79,8 @@ RAW_METRICS = [
 # metrics key of the per-replicate late-run lists (for paired deltas)
 RUNS_KEYS = {
     'SECI':      'seci_runs',
+    'AECI-IE':   'aeci_ie_runs',
+    'SECI-IE':   'seci_ie_runs',
     'AECI-Var':  'aeci_runs',
     'AECI-Err':  'aeci_err_runs',
     'MAE':       'mae_runs',
@@ -204,7 +212,7 @@ def write_md(settings, save_dir):
 
 def plot_comparison(settings, save_dir):
     """Overlay the RAW sweep metrics for every configuration."""
-    fig, axes = plt.subplots(2, 3, figsize=(18, 10))
+    fig, axes = plt.subplots(2, 4, figsize=(24, 10))
     fig.suptitle('Configuration comparison — primary alignment sweep (raw metrics)',
                  fontsize=14, fontweight='bold')
 
@@ -222,7 +230,9 @@ def plot_comparison(settings, save_dir):
 
     titles = {
         'SECI':      'SECI vs α  (negative = social echo chamber)',
-        'AECI-Var':  'AECI-Var vs α  (negative = AI echo chamber;\nL1+ beliefs, same pool as SECI)',
+        'AECI-IE':   'AECI-IE vs α  (M1 primary; negative = AI serves\ncommunities a narrower pool than global beliefs)',
+        'SECI-IE':   'SECI-IE vs α  (human-channel counterpart;\nconsistency check against SECI)',
+        'AECI-Var':  'AECI-Var vs α  (retired; negative = AI echo chamber;\nL1+ beliefs, same pool as SECI)',
         'AECI-Err':  'AECI-Err vs α  (negative = AI-heavy agents\nmore confidently wrong)',
         'MAE':       'Belief MAE vs α  (disaster cells; lower = better)',
         'Unmet':     'Unmet needs vs α  (L3+ cells with zero relief per tick)',
@@ -232,7 +242,7 @@ def plot_comparison(settings, save_dir):
         ax.set_title(titles[name])
         ax.set_xlabel('AI alignment level (α)')
         ax.set_ylabel(name)
-        if name in ('SECI', 'AECI-Var', 'AECI-Err'):
+        if name in ('SECI', 'AECI-IE', 'SECI-IE', 'AECI-Var', 'AECI-Err'):
             ax.axhline(0, color='k', ls=':', alpha=0.4)
         ax.grid(True, alpha=0.3)
         ax.legend(fontsize=9)
