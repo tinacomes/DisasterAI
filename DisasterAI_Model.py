@@ -352,9 +352,10 @@ class HumanAgent(Agent):
 
     def query_source(self, source_id, interest_point, query_radius):
         source_agent = self.model.humans.get(source_id) or self.model.ais.get(source_id)
-        if source_agent:
-            if hasattr(source_agent, 'report_beliefs'):
-                return source_agent.report_beliefs(interest_point, query_radius)
+        if source_agent and hasattr(source_agent, 'report_beliefs'):
+            if isinstance(source_agent, AIAgent):
+                return source_agent.report_beliefs(interest_point, query_radius, self)
+            return source_agent.report_beliefs(interest_point, query_radius)
         return {}
 
     def reward_belief_accuracy(self, cell, actual_level):
@@ -363,7 +364,8 @@ class HumanAgent(Agent):
         This evaluates the agent's OWN assessment accuracy.
         Rewards are accumulated and applied as a single self_action Q-update
         at the end of sense_environment() to avoid inflating self_action Q
-        with ~25 updates per tick while human/ai get 0-1 updates.
+        with ~25 per-cell updates per tick. Queried-source (human/ai) feedback
+        is batched the same way, per source per tick, in evaluate_pending_info.
         """
         prior_belief = self.beliefs.get(cell, {})
         if not isinstance(prior_belief, dict):
@@ -709,6 +711,7 @@ class HumanAgent(Agent):
 
         current_tick = self.model.tick
         evaluated = []
+        _batch = {}  # source_id → accumulated per-item rewards/lrs, applied once after the loop
 
         for item in self.pending_info_evaluations:
             # Support 4-tuple, 6-tuple, and new 7-tuple (adds was_accepted flag at index 6)
@@ -794,13 +797,20 @@ class HumanAgent(Agent):
             # truthful sources that report correct info that differs from wrong beliefs.
             #
             # EXPLOITERS: Use network/own-belief confirmation (echo chamber by design)
-            # EXPLORERS: For accepted remote reports, wait for an external verification
-            #            ("situation report") — see block below. Rejected remote reports
-            #            are scored against the stored prior (belief unchanged).
+            # EXPLORERS: ALL remote reports — accepted or rejected by D/delta —
+            #            wait for an external verification ("situation report"),
+            #            see block below. Rejected remote reports used to be
+            #            scored against the stored prior, which silently turned
+            #            the accuracy channel into a confirmation channel for
+            #            the ~30-57% of strongly disconfirming (i.e. often
+            #            truthful-when-the-prior-is-wrong) reports that D/delta
+            #            rejects. Fixed: they verify externally like accepted
+            #            ones, or expire unevaluated.
 
-            # --- Situation-report verification (explorers, accepted remote reports) ---
-            # Accuracy-seeking explorers actively verify accepted remote reports against
-            # external information (official assessments, media, situation reports).
+            # --- Situation-report verification (explorers, ALL remote reports) ---
+            # Accuracy-seeking explorers actively verify remote reports (whether or
+            # not D/delta accepted them into beliefs) against external information
+            # (official assessments, media, situation reports).
             # Each evaluation attempt, verification arrives with probability
             # model.verification_probability; when it arrives it carries the same noise
             # model as direct human sensing (±1 with prob 0.2). Until it arrives the item
@@ -817,7 +827,7 @@ class HumanAgent(Agent):
             # wrong) → large error → negative reward. This preserves the Q-learning
             # asymmetry, but through a defensible information channel.
             verified_reference = False
-            if is_remote_cell and self.agent_type == "exploratory" and was_accepted:
+            if is_remote_cell and self.agent_type == "exploratory":
                 if not (0 <= cell[0] < self.model.width and 0 <= cell[1] < self.model.height):
                     continue  # out-of-bounds cell: skip safely
                 if random.random() < self.model.verification_probability:
@@ -856,9 +866,9 @@ class HumanAgent(Agent):
                     confidence_scaling *= (1.0 - s) + s * salience
 
             # --- Accuracy score: reported vs current reference ---
-            # Verified items use the (noisy) situation-report level; rejected remote
-            # queries (was_accepted=False) and local cells use reference_level
-            # (the stored prior for rejected items, as the belief was not updated).
+            # Verified items (explorer remote reports) use the (noisy)
+            # situation-report level; local cells use reference_level (current
+            # belief, or the stored prior when self-contaminated).
             level_error = abs(reported_level - reference_level)
             if level_error == 0:
                 accuracy_score = 1.0
@@ -918,54 +928,68 @@ class HumanAgent(Agent):
             else:
                 mode = None
 
-            # Update mode Q-value (scaled by confidence AND source knowledge)
-            if mode and mode in self.q_table:
-                old_mode_q = self.q_table[mode]
-                base_lr = 0.25 if self.agent_type == "exploratory" else 0.12
-                # Scale by BOTH reference confidence and source knowledge
-                info_lr = base_lr * confidence_scaling * source_knowledge_conf
-                self.q_table[mode] = old_mode_q + info_lr * (accuracy_reward - old_mode_q)
+            # BATCHED updates: one query returns ~(2r+1)^2 cells, i.e. up to
+            # ~25 pending items that all mature in the same tick. Applying ~25
+            # sequential Q/trust updates made the mode Q snap to the LAST
+            # batch's reward (effective learning rate ≈ 1) and outvoted the
+            # single truth-grounded relief update ~25:1. Mirror the batched
+            # self_action design (flush_belief_rewards): accumulate per-item
+            # rewards and learning rates here, apply ONE update per source
+            # (and per mode) after the loop, using the lr-weighted mean reward
+            # and the mean lr.
+            base_lr = 0.25 if self.agent_type == "exploratory" else 0.12
+            info_lr = base_lr * confidence_scaling * source_knowledge_conf
 
-            # Update specific source Q-value (scaled by confidence AND source knowledge)
-            if source_id in self.q_table:
-                old_q = self.q_table[source_id]
-                base_lr = 0.25 if self.agent_type == "exploratory" else 0.12
-                info_lr = base_lr * confidence_scaling * source_knowledge_conf
-                self.q_table[source_id] = old_q + info_lr * (accuracy_reward - old_q)
-
-            # Fix trust learning rate: align with evaluate_information_quality logic.
-            # Previously inverted: exploiters penalized bad info faster (0.20) than
-            # explorers (0.10), but evaluate_information_quality correctly has explorers
-            # penalizing faster (0.25 vs 0.15) since they care about accuracy.
-            # Consistent design: explorers penalize inaccuracy faster, exploiters
-            # penalize disagreement-with-belief more slowly (they are stubborn).
-            # confidence_scaling already reduces effect for uncertain belief references.
-            if source_id in self.trust:
-                old_trust = self.trust[source_id]
-                if accuracy_reward < 0:
-                    trust_target = max(0.0, 0.5 + accuracy_reward)
-                    # EXPLORERS: Faster penalty for inaccurate sources (accuracy-focused)
-                    # EXPLOITERS: Slower penalty (stubborn; high-confidence beliefs resist change)
-                    base_trust_lr = 0.25 if self.agent_type == "exploratory" else 0.15
+            # Trust learning rate: consistent design — explorers penalize
+            # inaccuracy faster; exploiters penalize disagreement-with-belief
+            # more slowly (stubborn). Fix 4: exploiters' positive LR is raised
+            # when the network consensus served as reference (network
+            # corroboration beats own-belief confirmation as a signal).
+            if accuracy_reward < 0:
+                trust_target = max(0.0, 0.5 + accuracy_reward)
+                base_trust_lr = 0.25 if self.agent_type == "exploratory" else 0.15
+            else:
+                trust_target = min(1.0, 0.5 + 0.5 * accuracy_reward)
+                if self.agent_type == "exploitative":
+                    base_trust_lr = 0.09 if used_network_consensus else 0.06
                 else:
-                    trust_target = min(1.0, 0.5 + 0.5 * accuracy_reward)
-                    # EXPLORERS: Moderate reward for accurate sources
-                    # EXPLOITERS: Slow reward (suspicious of new trust), but Fix 4: raise
-                    # the positive LR when the network consensus was used as reference —
-                    # network corroboration is a stronger signal than own-belief confirmation.
-                    if self.agent_type == "exploitative":
-                        base_trust_lr = 0.09 if used_network_consensus else 0.06
-                    else:
-                        base_trust_lr = 0.12
-                # Scale by BOTH reference confidence and source knowledge
-                trust_lr = base_trust_lr * confidence_scaling * source_knowledge_conf
-                new_trust = max(0.0, min(1.0, old_trust + trust_lr * (trust_target - old_trust)))
-                self.trust[source_id] = new_trust
+                    base_trust_lr = 0.12
+            trust_lr = base_trust_lr * confidence_scaling * source_knowledge_conf
+
+            b = _batch.setdefault(source_id, {
+                'mode': mode, 'q_r': [], 'q_lr': [], 't_tgt': [], 't_lr': []})
+            b['q_r'].append(accuracy_reward)
+            b['q_lr'].append(info_lr)
+            b['t_tgt'].append(trust_target)
+            b['t_lr'].append(trust_lr)
 
             evaluated.append(item)
 
             if self.model.debug_mode and hasattr(self, 'id_num') and (self.id_num < 2 or (50 <= self.id_num < 52)):
-                print(f"[DEBUG] Agent {self.unique_id} ({self.agent_type}) PENDING INFO EVAL: source={source_id}, mode={mode}, error={level_error}, acc_rew={accuracy_reward:.3f}, trust={new_trust:.2f}, net_consensus={used_network_consensus}, verified={verified_reference}")
+                print(f"[DEBUG] Agent {self.unique_id} ({self.agent_type}) PENDING INFO EVAL: source={source_id}, mode={mode}, error={level_error}, acc_rew={accuracy_reward:.3f}, net_consensus={used_network_consensus}, verified={verified_reference}")
+
+        # Apply the batched updates: one Q update per mode and per source, one
+        # trust update per source. Rewards are lr-weighted so high-signal items
+        # (confident reference, knowledgeable source) dominate the batch mean.
+        for source_id, b in _batch.items():
+            w = sum(b['q_lr'])
+            if w > 0:
+                batched_reward = sum(r * lr for r, lr in zip(b['q_r'], b['q_lr'])) / w
+                batched_lr = w / len(b['q_lr'])
+                mode = b['mode']
+                if mode and mode in self.q_table:
+                    old_mode_q = self.q_table[mode]
+                    self.q_table[mode] = old_mode_q + batched_lr * (batched_reward - old_mode_q)
+                if source_id in self.q_table:
+                    old_q = self.q_table[source_id]
+                    self.q_table[source_id] = old_q + batched_lr * (batched_reward - old_q)
+            tw = sum(b['t_lr'])
+            if tw > 0 and source_id in self.trust:
+                batched_target = sum(t * lr for t, lr in zip(b['t_tgt'], b['t_lr'])) / tw
+                batched_trust_lr = tw / len(b['t_lr'])
+                old_trust = self.trust[source_id]
+                self.trust[source_id] = max(0.0, min(1.0,
+                    old_trust + batched_trust_lr * (batched_target - old_trust)))
 
         # Remove evaluated/expired items
         self.pending_info_evaluations = [
@@ -1567,7 +1591,7 @@ class HumanAgent(Agent):
                 source_agent = self.model.ais.get(source_id)
 
                 if source_agent:
-                    reports = source_agent.report_beliefs(interest_point, query_radius, self, self.trust.get(source_id, 0.1))
+                    reports = source_agent.report_beliefs(interest_point, query_radius, self)
 
                     # track AI source
                     self.last_queried_source_ids = [source_id]
@@ -2111,16 +2135,22 @@ class AIAgent(Agent):
                     knowledge_map[cell[0], cell[1]] = 1
             self.model.ai_knowledge_maps[self.unique_id] = knowledge_map
 
-    def report_beliefs(self, interest_point, query_radius, caller, caller_trust_in_ai):
+    def report_beliefs(self, interest_point, query_radius, caller):
         """
         Reports AI's beliefs about cells within query_radius of interest_point,
-        applying alignment based on caller's trust and beliefs.
+        applying alignment based on the caller's revealed beliefs.
 
-        `caller` is the querying HumanAgent. Its beliefs and agent_type are used
-        in the alignment formula. For exploitative callers the AI confirms the
-        community's network-consensus belief (not the individual prior) so that
-        confirming AI amplifies social echo chambers rather than locking in
-        idiosyncratic individual beliefs.
+        `caller` is the querying HumanAgent. The AI adapts ONLY to the caller's
+        own current beliefs (the confirmation target b in the alignment
+        formula) — it treats exploratory and exploitative callers identically,
+        because a cognitive type is a behavioural pattern that neither an AI
+        nor a human interlocutor can observe. Type-specific dynamics must
+        emerge from how the two HUMAN types select, accept, and evaluate
+        information, never from the AI's response policy.
+
+        model.confirmation_target='consensus' restores the legacy pre-fix
+        behaviour (network-consensus targeting for exploitative callers) solely
+        to reproduce the archived sweeps.
         """
         report = {}
         caller_beliefs = caller.beliefs if hasattr(caller, 'beliefs') else {}
@@ -2147,7 +2177,6 @@ class AIAgent(Agent):
         valid_cells_in_query = []
         sensed_vals_list = []
         human_vals_list = []
-        human_confidence_list = []
 
         # First pass: collect all directly sensed values
         directly_sensed_cells = {}
@@ -2226,22 +2255,24 @@ class AIAgent(Agent):
                     valid_cells_in_query.append(cell)
                     sensed_vals_list.append(int(value_to_use))
 
-                    # Get the belief level that the confirming AI should target.
-                    # For exploitative callers: use the network-consensus belief so that
-                    # confirming AI amplifies the community's shared narrative (echo chamber).
-                    # Without this, confirming individual priors disrupts social convergence
-                    # and makes SECI less negative than the no-AI control — the opposite of H1.
-                    # For exploratory callers: use individual belief (unchanged behaviour).
+                    # Confirmation target b for the alignment formula: the
+                    # caller's own current belief, identically for both agent
+                    # types (see docstring).
                     caller_belief_info = caller_beliefs.get(cell, {'level': 0, 'confidence': 0.1})
                     human_level = caller_belief_info.get('level', 0)
-                    human_confidence = caller_belief_info.get('confidence', 0.1)
-                    if (hasattr(caller, 'agent_type') and caller.agent_type == "exploitative"
+                    if (getattr(self.model, 'confirmation_target', 'individual') == 'consensus'
+                            and getattr(caller, 'agent_type', None) == "exploitative"
                             and hasattr(caller, 'get_network_consensus')):
+                        # LEGACY (reproduction-only): confirm the trusted-network
+                        # consensus for exploitative callers. Conditions the AI's
+                        # response on the caller's cognitive type and their
+                        # friends' private beliefs — neither is observable to a
+                        # real system. Kept behind the flag to reproduce the
+                        # archived sweeps; do not use for new results.
                         net_level, net_conf = caller.get_network_consensus(cell)
                         if net_level is not None and net_conf >= 0.2:
-                            human_level = int(round(net_level))   # confirm community belief
+                            human_level = int(round(net_level))
                     human_vals_list.append(int(human_level))
-                    human_confidence_list.append(human_confidence)
 
         # If no cells to report on, return empty
         if not valid_cells_in_query:
@@ -2252,7 +2283,6 @@ class AIAgent(Agent):
         # Convert to numpy arrays for alignment logic
         sensed_vals = np.array(sensed_vals_list)
         human_vals = np.array(human_vals_list)
-        human_conf = np.array(human_confidence_list)
 
         # --- Alignment Logic ---
         # α = 0  → AI reports pure ground truth (fully informative)
@@ -2343,6 +2373,24 @@ class DisasterModel(Model):
                                           # p = 0.1 the query goes to the 2-hop neighbourhood
                                           # (friends-of-friends) instead, so reaching a stranger
                                           # requires an intermediary and access follows edges.
+                 confirmation_target='individual',
+                                          # Belief b that a confirming AI targets in the alignment
+                                          # formula reported = (1-α)·truth + α·b.
+                                          # 'individual' (default): b = the caller's own current
+                                          #   belief, identically for BOTH agent types. The AI
+                                          #   conditions only on information a real system could
+                                          #   observe (the caller's revealed prior), never on the
+                                          #   caller's cognitive type.
+                                          # 'consensus': legacy pre-fix TARGETING kept only for
+                                          #   ablation: for exploitative callers b = the
+                                          #   trusted-network consensus when defined. Reads the
+                                          #   caller's type and their friends' private beliefs —
+                                          #   epistemically illegitimate; do not use for new
+                                          #   results. (Bit-exact reproduction of the archived
+                                          #   sweeps additionally requires the archived code
+                                          #   version, commit 0e05139 — later fixes to reward
+                                          #   scoring and Q-update batching apply under both
+                                          #   flag values.)
                  p_within=0.5,            # spatial_bridged: within-community edge probability
                  p_bridge=0.15,           # spatial_bridged: probability an agent carries one bridge
                  bridge_decay=2.0,        # spatial_bridged: bridge endpoint prob ∝ (1+d)^-decay
@@ -2385,6 +2433,7 @@ class DisasterModel(Model):
 
         # Spatial network / mobility switches (design proposal)
         self.mobility = mobility
+        self.confirmation_target = confirmation_target
         self.network_type = network_type
         self.query_scope = query_scope
         self.p_within = p_within
@@ -2419,6 +2468,9 @@ class DisasterModel(Model):
 
         self.seci_data = []         # (tick, avg_SECI_exploit, avg_SECI_explor)
         self.aeci_data = []         # (tick, avg_AECI_exploit, avg_AECI_explor)
+        self.aeci_lockin_data = []  # (tick, exploit, explor); negative = AI-heavy agents' beliefs more frozen
+        self.belief_pool_data = []  # (tick, mean # L1+ beliefs per exploit agent, per explor agent)
+        self._belief_level_snapshots = {}  # agent_id → belief-level vector at previous metrics tick
         self.retain_aeci_data = []  # (tick, avg_retain_AECI_exploit, avg_retain_AECI_explor)
         self.retain_seci_data = []  # (tick, avg_retain_SECI_exploit, avg_retain_SECI_explor)
         self.belief_error_data = [] # (tick, avg_MAE_exploit, avg_MAE_explor)
@@ -2701,6 +2753,70 @@ class DisasterModel(Model):
         self.aeci_variance_data.append(aeci_variance_tuple)
 
         return aeci_variance_tuple
+
+    def calculate_aeci_lockin(self):
+        """AECI-LockIn: belief lock-in attributable to AI reliance, on [-1, +1].
+
+        Rationale: AECI-Var and AECI-Err cannot register an INDIVIDUALISED AI
+        echo chamber. An AI that confirms each caller's own prior freezes
+        beliefs without homogenising them across agents (no variance signal)
+        and without separating the error of AI-heavy vs AI-light agents who
+        hold similar priors (no error-split signal). The observable is
+        lock-in: belief mobility = the fraction of grid cells whose belief
+        level changed since the previous metrics tick (5 ticks). Within each
+        type — median split by cum_accepted_ai, the same classification basis
+        as AECI-Var/AECI-Err — compare AI-heavy vs AI-light mobility:
+
+            lockin = (m_heavy − m_light) / max(m_heavy, m_light)
+
+        NEGATIVE = AI-heavy agents' beliefs are more frozen than their
+        AI-light peers' (AI lock-in), matching the SECI/AECI sign convention
+        (negative = echo chamber). Per-type values are stored; None when the
+        type has < 4 agents, no prior snapshot, or no AI influence at all.
+
+        Interpretation caveats: read the α-GRADIENT of this index, not its
+        absolute sign in a single condition. Mobility is confounded by (a)
+        overall query activity (heavy AI users interact more) and (b) the
+        relief feedback loop — process_reward corrects targeted cells toward
+        ground truth, so agents whose confirming AI keeps re-inflating wrong
+        beliefs show correction CHURN rather than freeze. In seeded probes the
+        explorer series behaves as expected (deepening negative with α, i.e.
+        AI-heavy explorers freeze), while the exploiter series can turn
+        positive at high α through the churn mechanism; both patterns are
+        informative, but only relative to the same type at other α levels.
+        """
+        mobility = {}
+        for agent_id, agent in self.humans.items():
+            levels = np.fromiter(
+                (b.get('level', 0) if isinstance(b, dict) else 0
+                 for b in agent.beliefs.values()),
+                dtype=np.int16)
+            prev = self._belief_level_snapshots.get(agent_id)
+            if prev is not None and len(prev) == len(levels):
+                mobility[agent_id] = float(np.mean(prev != levels))
+            self._belief_level_snapshots[agent_id] = levels
+
+        def _lockin_for(type_label):
+            ags = [(a, mobility[a.unique_id]) for a in self.humans.values()
+                   if a.agent_type == type_label and a.unique_id in mobility
+                   and hasattr(a, 'cum_accepted_ai')]
+            if len(ags) < 4:
+                return None
+            ags.sort(key=lambda t: t[0].cum_accepted_ai)
+            if ags[-1][0].cum_accepted_ai <= 0:
+                return None  # zero AI influence anywhere → no group, no signal
+            mid = len(ags) // 2
+            m_light = float(np.mean([m for _, m in ags[:mid]]))
+            m_heavy = float(np.mean([m for _, m in ags[mid:]]))
+            denom = max(m_light, m_heavy, 1e-9)
+            return max(-1.0, min(1.0, (m_heavy - m_light) / denom))
+
+        lockin_ex = _lockin_for("exploitative")
+        lockin_er = _lockin_for("exploratory")
+        self.aeci_lockin_data.append((self.tick, lockin_ex, lockin_er))
+        self._last_metrics['aeci_lockin'] = {
+            'tick': self.tick, 'exploit': lockin_ex, 'explor': lockin_er}
+        return lockin_ex, lockin_er
 
     def calculate_info_diversity(self):
         """Calculate Information Diversity (Shannon Entropy of source usage).
@@ -3394,6 +3510,28 @@ class DisasterModel(Model):
             else:
                 # Add default values if no data
                 self.seci_data.append((self.tick, 0, 0))
+
+            # --- Per-type L1+ belief pool size (context for SECI) ---
+            # SECI conditions on L1+ beliefs, so a shrinking pool (agents
+            # frozen at level 0, e.g. under a confirming AI) can read as
+            # within-community homogeneity. Always report the pool size
+            # alongside SECI so pool-shrinkage effects are visible.
+            _pool_ex, _pool_er = [], []
+            for agent in self.humans.values():
+                n_l1 = sum(1 for b in agent.beliefs.values()
+                           if isinstance(b, dict) and b.get('level', 0) >= 1)
+                (_pool_ex if agent.agent_type == "exploitative" else _pool_er).append(n_l1)
+            self.belief_pool_data.append((
+                self.tick,
+                float(np.mean(_pool_ex)) if _pool_ex else 0.0,
+                float(np.mean(_pool_er)) if _pool_er else 0.0))
+            self._last_metrics['belief_pool'] = {
+                'tick': self.tick,
+                'exploit': self.belief_pool_data[-1][1],
+                'explor': self.belief_pool_data[-1][2]}
+
+            # --- AECI-LockIn (belief mobility of AI-heavy vs AI-light agents) ---
+            self.calculate_aeci_lockin()
 
             # --- AECI-Variance (AI Echo Chamber Index) ---
             aeci_variance_result = self.calculate_aeci_variance()

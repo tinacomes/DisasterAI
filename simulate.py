@@ -47,6 +47,8 @@ def run_one(params):
 
     seci_exploit, seci_explor                   = [], []
     aeci_exploit, aeci_explor                   = [], []
+    lockin_exploit, lockin_explor               = [], []
+    l1pool_exploit, l1pool_explor               = [], []
     mae_exploit,  mae_explor                    = [], []
     prec_exploit, prec_explor                   = [], []
     ai_query_ratio_exploit, ai_query_ratio_explor = [], []
@@ -97,6 +99,14 @@ def run_one(params):
             seci_explor.append( float(model.seci_data[-1][2]) if model.seci_data else float('nan'))
             aeci_exploit.append(float(model.aeci_data[-1][1]) if model.aeci_data else float('nan'))
             aeci_explor.append( float(model.aeci_data[-1][2]) if model.aeci_data else float('nan'))
+            # AECI-LockIn (negative = AI-heavy agents' beliefs more frozen) and
+            # per-type L1+ belief pool size (context for SECI)
+            _lk = model.aeci_lockin_data[-1] if model.aeci_lockin_data else (0, None, None)
+            lockin_exploit.append(float(_lk[1]) if _lk[1] is not None else float('nan'))
+            lockin_explor.append( float(_lk[2]) if _lk[2] is not None else float('nan'))
+            _bp = model.belief_pool_data[-1] if model.belief_pool_data else (0, float('nan'), float('nan'))
+            l1pool_exploit.append(float(_bp[1]))
+            l1pool_explor.append( float(_bp[2]))
 
             ex_errors, er_errors = [], []
             for agent in model.agent_list:
@@ -130,6 +140,10 @@ def run_one(params):
         'seci_explor':            seci_explor,
         'aeci_exploit':           aeci_exploit,
         'aeci_explor':            aeci_explor,
+        'lockin_exploit':         lockin_exploit,
+        'lockin_explor':          lockin_explor,
+        'l1pool_exploit':         l1pool_exploit,
+        'l1pool_explor':          l1pool_explor,
         'mae_exploit':            mae_exploit,
         'mae_explor':             mae_explor,
         'prec_exploit':           prec_exploit,
@@ -173,6 +187,14 @@ def main():
                         choices=['global', 'network'],
                         help="'network' = queries follow social edges (friends + "
                              "2-hop); 'global' = any human reachable (baseline)")
+    parser.add_argument('--confirmation_target', default='individual',
+                        choices=['individual', 'consensus'],
+                        help="Belief the confirming AI targets: 'individual' "
+                             "(default) = the caller's own prior for BOTH agent "
+                             "types (type-agnostic AI); 'consensus' = legacy "
+                             "pre-fix behaviour (network consensus for "
+                             "exploitative callers), kept only to reproduce the "
+                             "archived sweeps")
     args = parser.parse_args()
 
     params = BASE_PARAMS.copy()
@@ -184,6 +206,7 @@ def main():
     params['mobility']            = args.mobility
     params['network_type']        = args.network_type
     params['query_scope']         = args.query_scope
+    params['confirmation_target'] = args.confirmation_target
 
     print(f'Condition: α={args.alpha}, rumor={args.rumor_probability}, '
           f'disaster={args.disaster_dynamics}, exploit={args.share_exploitative}')

@@ -225,6 +225,8 @@ def run_one_sim(params):
 
     seci_exploit, seci_explor           = [], []
     aeci_exploit, aeci_explor           = [], []
+    lockin_exploit, lockin_explor       = [], []   # AECI-LockIn: negative = AI-heavy beliefs more frozen
+    l1pool_exploit, l1pool_explor       = [], []   # mean # L1+ beliefs per agent (context for SECI)
     trust_ai_exploit, trust_fri_exploit = [], []
     trust_ai_explor,  trust_fri_explor  = [], []
     ai_query_ratio_exploit              = []   # per-tick fraction of queries sent to AI
@@ -303,6 +305,12 @@ def run_one_sim(params):
             seci_explor.append( float(model.seci_data[-1][2]) if model.seci_data else float('nan'))
             aeci_exploit.append(float(model.aeci_data[-1][1]) if model.aeci_data else float('nan'))
             aeci_explor.append( float(model.aeci_data[-1][2]) if model.aeci_data else float('nan'))
+            _lk = model.aeci_lockin_data[-1] if getattr(model, 'aeci_lockin_data', None) else (0, None, None)
+            lockin_exploit.append(float(_lk[1]) if _lk[1] is not None else float('nan'))
+            lockin_explor.append( float(_lk[2]) if _lk[2] is not None else float('nan'))
+            _bp = model.belief_pool_data[-1] if getattr(model, 'belief_pool_data', None) else (0, float('nan'), float('nan'))
+            l1pool_exploit.append(float(_bp[1]))
+            l1pool_explor.append( float(_bp[2]))
 
             ex_errors, er_errors = [], []
             _g_mae = {'near': [], 'far': [], 'lobetw': [], 'hibetw': []}
@@ -503,6 +511,10 @@ def run_one_sim(params):
         'seci_explor':             seci_explor,
         'aeci_exploit':            aeci_exploit,
         'aeci_explor':             aeci_explor,
+        'lockin_exploit':          lockin_exploit,
+        'lockin_explor':           lockin_explor,
+        'l1pool_exploit':          l1pool_exploit,
+        'l1pool_explor':           l1pool_explor,
         'trust_ai_exploit':        trust_ai_exploit,
         'trust_fri_exploit':       trust_fri_exploit,
         'trust_ai_explor':         trust_ai_explor,
@@ -578,6 +590,7 @@ def _aggregate(runs):
     """Compute mean and std across replications for all metrics."""
     ts_keys = [
         'seci_exploit', 'seci_explor', 'aeci_exploit', 'aeci_explor',
+        'lockin_exploit', 'lockin_explor', 'l1pool_exploit', 'l1pool_explor',
         'trust_ai_exploit', 'trust_fri_exploit', 'trust_ai_explor', 'trust_fri_explor',
         'ai_query_ratio_exploit', 'ai_query_ratio_explor',
         'aeci_var',
@@ -2447,6 +2460,13 @@ if __name__ == '__main__':
              "human reachable with non-friends at a small baseline (default).",
     )
     parser.add_argument(
+        '--confirmation-target', choices=['individual', 'consensus'], default=None,
+        help="Belief the confirming AI targets: 'individual' (model default) = "
+             "the caller's own prior for BOTH agent types (type-agnostic AI); "
+             "'consensus' = legacy pre-fix behaviour (network consensus for "
+             "exploitative callers), kept only to reproduce the archived sweeps.",
+    )
+    parser.add_argument(
         '--collect-spatial-and-plot', action='store_true',
         help='Load per-alpha spatial JSONs (spatial_alpha_*.json) from --results-dir, '
              'compute metrics, and generate spatial_coverage.png + periphery_gap.png. '
@@ -2471,6 +2491,8 @@ if __name__ == '__main__':
         base_params['network_type'] = args.network_type
     if args.query_scope is not None:
         base_params['query_scope'] = args.query_scope
+    if args.confirmation_target is not None:
+        base_params['confirmation_target'] = args.confirmation_target
     n_runs_primary = args.n_runs if args.n_runs is not None else N_RUNS
     # Factor/gap sweeps use at most half the primary ticks (they measure relative
     # differences, not absolute steady-state values, so shorter runs suffice)
