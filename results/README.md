@@ -1,4 +1,18 @@
-# Committed Results
+# Committed Results (legacy model)
+
+> **Status note (2026-08-20).** These results were produced by the **pre-fix
+> model**, whose AI conditioned its confirmation target on the caller's
+> cognitive type (network consensus for exploitative callers) — behaviour later
+> judged epistemically illegitimate and removed in commit `55d4b2b`, which also
+> fixed explorer rejected-remote scoring and Q/trust update batching. The
+> **verification sweep of the fixed, type-agnostic model** — same workflow,
+> seeds, N and ticks — lives in `results-verification/` (run 32298278561) and
+> reproduces all qualitative findings; the consensus-targeting ablation of the
+> fixed model is archived in `results-ablation-consensus/` (run 32338797843).
+> This directory is retained as the record of the archived legacy runs; new
+> results should be based on the fixed model. To approximate the legacy
+> targeting on current code use `confirmation_target=consensus`; bit-exact
+> reproduction of these numbers requires code version `0e05139`.
 
 All results in this directory come from one seed-paired GitHub Actions run of the
 **Compare Baseline vs Network/Mobility Switches** workflow:
