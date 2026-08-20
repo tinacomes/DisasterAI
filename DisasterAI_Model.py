@@ -2498,8 +2498,11 @@ class DisasterModel(Model):
         # from a channel during the 5-tick metrics window. Sign convention as
         # SECI: negative = echo chamber. NaN when a channel served < 2 L1+
         # levels to every community of a type in the window.
-        self.aeci_ie_data = []      # (tick, exploit, explor) — AI channel
+        self.aeci_ie_data = []      # (tick, exploit, explor) — AI channel, belief baseline
         self.seci_ie_data = []      # (tick, exploit, explor) — human channel (SECI consistency check)
+        self.aeci_ie_chan_data = [] # (tick, exploit, explor) — AI channel, channel baseline
+                                    # (community served pool vs global served pool)
+        self.seci_ie_chan_data = [] # (tick, exploit, explor) — human channel, channel baseline
         self.ie_pool_data = []      # (tick, ai_pool_exploit, ai_pool_explor,
                                     #  human_pool_exploit, human_pool_explor) —
                                     # mean L1+ report-pool size per community
@@ -2749,6 +2752,21 @@ class DisasterModel(Model):
         confirmation and shared-source convergence alike. Sign convention as
         SECI: NEGATIVE = echo chamber.
 
+        Two normalisation baselines are computed for each channel (the M1
+        validation showed they differ materially for exploitative callers,
+        whose spatially concentrated queries make their served pool narrow at
+        ANY α when compared against global beliefs):
+
+          belief-baseline (aeci_ie_data / seci_ie_data): community served
+              pool vs the global variance of all agents' L1+ BELIEFS — the
+              PNAS-brief formula ("var(pool) vs var(global beliefs)").
+          channel-baseline (aeci_ie_chan_data / seci_ie_chan_data):
+              community served pool vs the global variance of ALL levels the
+              SAME channel served during the window — the strictly
+              SECI-identical construct (SECI: community beliefs vs global
+              beliefs; here: community served-info vs global served-info),
+              which cancels the query-concentration confound.
+
         Pool sizes are recorded alongside (ie_pool_data) because — exactly as
         for SECI — a shrinking L1+ pool can itself read as homogeneity, and
         because they expose how much information each channel actually
@@ -2772,11 +2790,19 @@ class DisasterModel(Model):
         ]
         global_var = np.var(all_belief_levels) if len(all_belief_levels) > 1 else 1e-6
 
-        values = {}
+        values = {}        # belief-baseline indices
+        values_chan = {}   # channel-baseline indices (strict SECI parallel)
         pools = {}
         for channel in ('ai', 'human'):
             comm_vars = {'exploitative': [], 'exploratory': []}
             pool_sizes = {'exploitative': [], 'exploratory': []}
+            channel_levels = []   # global served pool of this channel (all agents)
+            for agent in self.humans.values():
+                channel_levels.extend(
+                    lvl for _cell, lvl in agent.received_report_log[channel]
+                    if lvl >= 1)
+            channel_var = (np.var(channel_levels)
+                           if len(channel_levels) > 1 else float('nan'))
             for component_nodes, community_type in self.communities:
                 if len(component_nodes) <= 1:
                     continue
@@ -2797,6 +2823,13 @@ class DisasterModel(Model):
                     if comm_vars[t] else float('nan'))
                 for t in ('exploitative', 'exploratory')
             }
+            values_chan[channel] = {
+                t: (self._variance_ratio_index(float(np.mean(comm_vars[t])),
+                                               float(channel_var))
+                    if comm_vars[t] and not np.isnan(channel_var)
+                    else float('nan'))
+                for t in ('exploitative', 'exploratory')
+            }
             pools[channel] = {
                 t: (float(np.mean(pool_sizes[t])) if pool_sizes[t] else 0.0)
                 for t in ('exploitative', 'exploratory')
@@ -2806,6 +2839,10 @@ class DisasterModel(Model):
             (self.tick, values['ai']['exploitative'], values['ai']['exploratory']))
         self.seci_ie_data.append(
             (self.tick, values['human']['exploitative'], values['human']['exploratory']))
+        self.aeci_ie_chan_data.append(
+            (self.tick, values_chan['ai']['exploitative'], values_chan['ai']['exploratory']))
+        self.seci_ie_chan_data.append(
+            (self.tick, values_chan['human']['exploitative'], values_chan['human']['exploratory']))
         self.ie_pool_data.append(
             (self.tick,
              pools['ai']['exploitative'], pools['ai']['exploratory'],
@@ -2827,6 +2864,8 @@ class DisasterModel(Model):
             agent.received_report_log = {'human': [], 'ai': []}
 
         return {'aeci_ie': values['ai'], 'seci_ie': values['human'],
+                'aeci_ie_chan': values_chan['ai'],
+                'seci_ie_chan': values_chan['human'],
                 'pools': pools, 'global_var': float(global_var)}
 
     def calculate_aeci_variance(self):

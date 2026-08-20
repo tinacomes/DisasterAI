@@ -49,6 +49,8 @@ def run_one(params):
     aeci_exploit, aeci_explor                   = [], []
     aeci_ie_exploit, aeci_ie_explor             = [], []
     seci_ie_exploit, seci_ie_explor             = [], []
+    aeci_ie_chan_exploit, aeci_ie_chan_explor   = [], []
+    seci_ie_chan_exploit, seci_ie_chan_explor   = [], []
     ie_pool_ai_exploit, ie_pool_ai_explor       = [], []
     ie_pool_human_exploit, ie_pool_human_explor = [], []
     lockin_exploit, lockin_explor               = [], []
@@ -112,6 +114,14 @@ def run_one(params):
             _sie = model.seci_ie_data[-1] if model.seci_ie_data else (0, float('nan'), float('nan'))
             seci_ie_exploit.append(float(_sie[1]))
             seci_ie_explor.append( float(_sie[2]))
+            # Channel-baseline variant (community served pool vs global served
+            # pool of the same channel — the strict SECI parallel)
+            _iec = model.aeci_ie_chan_data[-1] if model.aeci_ie_chan_data else (0, float('nan'), float('nan'))
+            aeci_ie_chan_exploit.append(float(_iec[1]))
+            aeci_ie_chan_explor.append( float(_iec[2]))
+            _sec = model.seci_ie_chan_data[-1] if model.seci_ie_chan_data else (0, float('nan'), float('nan'))
+            seci_ie_chan_exploit.append(float(_sec[1]))
+            seci_ie_chan_explor.append( float(_sec[2]))
             _ip  = model.ie_pool_data[-1] if model.ie_pool_data else (0,) + (float('nan'),) * 4
             ie_pool_ai_exploit.append(   float(_ip[1]))
             ie_pool_ai_explor.append(    float(_ip[2]))
@@ -162,6 +172,10 @@ def run_one(params):
         'aeci_ie_explor':         aeci_ie_explor,
         'seci_ie_exploit':        seci_ie_exploit,
         'seci_ie_explor':         seci_ie_explor,
+        'aeci_ie_chan_exploit':   aeci_ie_chan_exploit,
+        'aeci_ie_chan_explor':    aeci_ie_chan_explor,
+        'seci_ie_chan_exploit':   seci_ie_chan_exploit,
+        'seci_ie_chan_explor':    seci_ie_chan_explor,
         'ie_pool_ai_exploit':     ie_pool_ai_exploit,
         'ie_pool_ai_explor':      ie_pool_ai_explor,
         'ie_pool_human_exploit':  ie_pool_human_exploit,

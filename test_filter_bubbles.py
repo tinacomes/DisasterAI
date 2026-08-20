@@ -236,6 +236,10 @@ def run_one_sim(params):
     # same on human-delivered levels (consistency check against SECI)
     aeci_ie_exploit, aeci_ie_explor     = [], []
     seci_ie_exploit, seci_ie_explor     = [], []
+    # Channel-baseline variant: community served pool vs global served pool
+    # of the same channel (strict SECI parallel; see calculate_ie_indices)
+    aeci_ie_chan_exploit, aeci_ie_chan_explor   = [], []
+    seci_ie_chan_exploit, seci_ie_chan_explor   = [], []
     ie_pool_ai_exploit, ie_pool_ai_explor       = [], []   # per-community L1+ report-pool sizes
     ie_pool_human_exploit, ie_pool_human_explor = [], []
     lockin_exploit, lockin_explor       = [], []   # AECI-LockIn: negative = AI-heavy beliefs more frozen
@@ -324,6 +328,12 @@ def run_one_sim(params):
             _sie = model.seci_ie_data[-1] if getattr(model, 'seci_ie_data', None) else (0, float('nan'), float('nan'))
             seci_ie_exploit.append(float(_sie[1]))
             seci_ie_explor.append( float(_sie[2]))
+            _iec = model.aeci_ie_chan_data[-1] if getattr(model, 'aeci_ie_chan_data', None) else (0, float('nan'), float('nan'))
+            aeci_ie_chan_exploit.append(float(_iec[1]))
+            aeci_ie_chan_explor.append( float(_iec[2]))
+            _sec = model.seci_ie_chan_data[-1] if getattr(model, 'seci_ie_chan_data', None) else (0, float('nan'), float('nan'))
+            seci_ie_chan_exploit.append(float(_sec[1]))
+            seci_ie_chan_explor.append( float(_sec[2]))
             _ip  = model.ie_pool_data[-1] if getattr(model, 'ie_pool_data', None) else (0,) + (float('nan'),) * 4
             ie_pool_ai_exploit.append(   float(_ip[1]))
             ie_pool_ai_explor.append(    float(_ip[2]))
@@ -539,6 +549,10 @@ def run_one_sim(params):
         'aeci_ie_explor':          aeci_ie_explor,
         'seci_ie_exploit':         seci_ie_exploit,
         'seci_ie_explor':          seci_ie_explor,
+        'aeci_ie_chan_exploit':    aeci_ie_chan_exploit,
+        'aeci_ie_chan_explor':     aeci_ie_chan_explor,
+        'seci_ie_chan_exploit':    seci_ie_chan_exploit,
+        'seci_ie_chan_explor':     seci_ie_chan_explor,
         'ie_pool_ai_exploit':      ie_pool_ai_exploit,
         'ie_pool_ai_explor':       ie_pool_ai_explor,
         'ie_pool_human_exploit':   ie_pool_human_exploit,
@@ -623,6 +637,8 @@ def _aggregate(runs):
     ts_keys = [
         'seci_exploit', 'seci_explor', 'aeci_exploit', 'aeci_explor',
         'aeci_ie_exploit', 'aeci_ie_explor', 'seci_ie_exploit', 'seci_ie_explor',
+        'aeci_ie_chan_exploit', 'aeci_ie_chan_explor',
+        'seci_ie_chan_exploit', 'seci_ie_chan_explor',
         'ie_pool_ai_exploit', 'ie_pool_ai_explor',
         'ie_pool_human_exploit', 'ie_pool_human_explor',
         'lockin_exploit', 'lockin_explor', 'l1pool_exploit', 'l1pool_explor',
@@ -866,6 +882,9 @@ def compute_goldilocks_metrics(all_results):
         # alongside as the consistency check against SECI.
         aeci_ie_m, aeci_ie_s = ms('aeci_ie_exploit', 'aeci_ie_explor')
         seci_ie_m, seci_ie_s = ms('seci_ie_exploit', 'seci_ie_explor')
+        # Channel-baseline variant (strict SECI parallel; M1 validation)
+        aeci_iec_m, aeci_iec_s = ms('aeci_ie_chan_exploit', 'aeci_ie_chan_explor')
+        seci_iec_m, seci_iec_s = ms('seci_ie_chan_exploit', 'seci_ie_chan_explor')
         mae_m,  mae_s  = ms('mae_exploit',  'mae_explor')
         prec_m, prec_s = ms('prec_exploit', 'prec_explor')
         # Per-tick series: use 75-tick window to match SECI cadence
@@ -890,6 +909,10 @@ def compute_goldilocks_metrics(all_results):
             'aeci_ie_runs': runs_pair('aeci_ie_exploit', 'aeci_ie_explor'),
             'seci_ie': seci_ie_m, 'seci_ie_std': seci_ie_s,
             'seci_ie_runs': runs_pair('seci_ie_exploit', 'seci_ie_explor'),
+            'aeci_ie_chan': aeci_iec_m, 'aeci_ie_chan_std': aeci_iec_s,
+            'aeci_ie_chan_runs': runs_pair('aeci_ie_chan_exploit', 'aeci_ie_chan_explor'),
+            'seci_ie_chan': seci_iec_m, 'seci_ie_chan_std': seci_iec_s,
+            'seci_ie_chan_runs': runs_pair('seci_ie_chan_exploit', 'seci_ie_chan_explor'),
             'mae':  mae_m,  'mae_std':  mae_s,  'mae_runs':  runs_pair('mae_exploit',  'mae_explor'),
             'prec': prec_m, 'prec_std': prec_s, 'prec_runs': runs_pair('prec_exploit', 'prec_explor'),
             'unmet': unmet_m, 'unmet_std': unmet_s,
@@ -923,12 +946,14 @@ def compute_goldilocks_metrics(all_results):
     aeci_abs     = [abs(metrics[a]['aeci'])     for a in available]
     aeci_err_abs = [abs(metrics[a]['aeci_err']) for a in available]
     aeci_ie_abs  = [abs(metrics[a]['aeci_ie'])  for a in available]
+    aeci_iec_abs = [abs(metrics[a]['aeci_ie_chan']) for a in available]
     mae_vals     = [metrics[a]['mae']           for a in available]
 
     seci_n     = _norm(seci_abs)
     aeci_n     = _norm(aeci_abs)
     aeci_err_n = _norm(aeci_err_abs)
     aeci_ie_n  = _norm(aeci_ie_abs)
+    aeci_iec_n = _norm(aeci_iec_abs)
     mae_n      = _norm(mae_vals)
 
     for i, alpha in enumerate(available):
@@ -936,7 +961,11 @@ def compute_goldilocks_metrics(all_results):
         metrics[alpha]['aeci_norm']          = aeci_n[i]
         metrics[alpha]['aeci_err_norm']      = aeci_err_n[i]
         metrics[alpha]['aeci_ie_norm']       = aeci_ie_n[i]
+        metrics[alpha]['aeci_ie_chan_norm']  = aeci_iec_n[i]
         metrics[alpha]['mae_norm']           = mae_n[i]
+        # Channel-baseline composite variant (α* sensitivity table)
+        metrics[alpha]['total_bubble_iec_norm'] = seci_n[i] + aeci_iec_n[i]
+        metrics[alpha]['total_score_iec_norm']  = seci_n[i] + aeci_iec_n[i] + mae_n[i]
         # M1 primary composites (AECI-IE — SECI's construct on the served
         # information environment; see calculate_ie_indices)
         metrics[alpha]['total_bubble_ie_norm'] = seci_n[i] + aeci_ie_n[i]
@@ -961,6 +990,8 @@ def compute_goldilocks_metrics(all_results):
 ALPHA_STAR_COMPOSITES = {
     'SECI + AECI-IE (primary)':        'total_bubble_ie_norm',
     'SECI + AECI-IE + MAE (primary)':  'total_score_ie_norm',
+    'SECI + AECI-IE-chan':             'total_bubble_iec_norm',
+    'SECI + AECI-IE-chan + MAE':       'total_score_iec_norm',
     'SECI + AECI-Var (retired)':       'total_bubble_norm',
     'SECI + AECI-Var + MAE (retired)': 'total_score_norm',
     'SECI only':                       'bubble_seci_only_norm',
@@ -1022,6 +1053,10 @@ def write_summary_tables(metrics, save_dir, n_runs=None):
         ('aeci_ie_se',        lambda a, m: m.get('aeci_ie_std', float('nan'))),
         ('seci_ie',           lambda a, m: m.get('seci_ie', float('nan'))),
         ('seci_ie_se',        lambda a, m: m.get('seci_ie_std', float('nan'))),
+        ('aeci_ie_chan',      lambda a, m: m.get('aeci_ie_chan', float('nan'))),
+        ('aeci_ie_chan_se',   lambda a, m: m.get('aeci_ie_chan_std', float('nan'))),
+        ('seci_ie_chan',      lambda a, m: m.get('seci_ie_chan', float('nan'))),
+        ('seci_ie_chan_se',   lambda a, m: m.get('seci_ie_chan_std', float('nan'))),
         ('aeci_var',          lambda a, m: m['aeci']),
         ('aeci_var_se',       lambda a, m: m['aeci_std']),
         ('aeci_err',          lambda a, m: m['aeci_err']),

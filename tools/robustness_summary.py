@@ -47,6 +47,8 @@ COLS = [
     ('SECI_er',    'seci_explor_ss_runs'),
     ('AECI-IE_ex', 'aeci_ie_exploit_ss_runs'),
     ('AECI-IE_er', 'aeci_ie_explor_ss_runs'),
+    ('AECI-IEc_ex', 'aeci_ie_chan_exploit_ss_runs'),
+    ('AECI-IEc_er', 'aeci_ie_chan_explor_ss_runs'),
     ('MAE_ex',     'mae_exploit_ss_runs'),
     ('MAE_er',     'mae_explor_ss_runs'),
     ('Unmet',      'unmet_needs_ss_runs'),

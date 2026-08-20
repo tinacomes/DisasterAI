@@ -66,26 +66,30 @@ _DISPLAY_LABELS = {
 # AECI-Var is retired but kept for the transparency comparison. Both IE
 # columns are NaN for results predating M1.
 RAW_METRICS = [
-    ('SECI',      'seci',     'seci_std'),
-    ('AECI-IE',   'aeci_ie',  'aeci_ie_std'),
-    ('SECI-IE',   'seci_ie',  'seci_ie_std'),
-    ('AECI-Var',  'aeci',     'aeci_std'),
-    ('AECI-Err',  'aeci_err', 'aeci_err_std'),
-    ('MAE',       'mae',      'mae_std'),
-    ('Unmet',     'unmet',    'unmet_std'),
-    ('Precision', 'prec',     'prec_std'),
+    ('SECI',         'seci',         'seci_std'),
+    ('AECI-IE',      'aeci_ie',      'aeci_ie_std'),
+    ('SECI-IE',      'seci_ie',      'seci_ie_std'),
+    ('AECI-IE-chan', 'aeci_ie_chan', 'aeci_ie_chan_std'),
+    ('SECI-IE-chan', 'seci_ie_chan', 'seci_ie_chan_std'),
+    ('AECI-Var',     'aeci',         'aeci_std'),
+    ('AECI-Err',     'aeci_err',     'aeci_err_std'),
+    ('MAE',          'mae',          'mae_std'),
+    ('Unmet',        'unmet',        'unmet_std'),
+    ('Precision',    'prec',         'prec_std'),
 ]
 
 # metrics key of the per-replicate late-run lists (for paired deltas)
 RUNS_KEYS = {
-    'SECI':      'seci_runs',
-    'AECI-IE':   'aeci_ie_runs',
-    'SECI-IE':   'seci_ie_runs',
-    'AECI-Var':  'aeci_runs',
-    'AECI-Err':  'aeci_err_runs',
-    'MAE':       'mae_runs',
-    'Unmet':     'unmet_runs',
-    'Precision': 'prec_runs',
+    'SECI':         'seci_runs',
+    'AECI-IE':      'aeci_ie_runs',
+    'SECI-IE':      'seci_ie_runs',
+    'AECI-IE-chan': 'aeci_ie_chan_runs',
+    'SECI-IE-chan': 'seci_ie_chan_runs',
+    'AECI-Var':     'aeci_runs',
+    'AECI-Err':     'aeci_err_runs',
+    'MAE':          'mae_runs',
+    'Unmet':        'unmet_runs',
+    'Precision':    'prec_runs',
 }
 
 
@@ -212,7 +216,7 @@ def write_md(settings, save_dir):
 
 def plot_comparison(settings, save_dir):
     """Overlay the RAW sweep metrics for every configuration."""
-    fig, axes = plt.subplots(2, 4, figsize=(24, 10))
+    fig, axes = plt.subplots(2, 5, figsize=(28, 10))
     fig.suptitle('Configuration comparison — primary alignment sweep (raw metrics)',
                  fontsize=14, fontweight='bold')
 
@@ -229,20 +233,23 @@ def plot_comparison(settings, save_dir):
                         label=_DISPLAY_LABELS.get(label, label))
 
     titles = {
-        'SECI':      'SECI vs α  (negative = social echo chamber)',
-        'AECI-IE':   'AECI-IE vs α  (M1 primary; negative = AI serves\ncommunities a narrower pool than global beliefs)',
-        'SECI-IE':   'SECI-IE vs α  (human-channel counterpart;\nconsistency check against SECI)',
-        'AECI-Var':  'AECI-Var vs α  (retired; negative = AI echo chamber;\nL1+ beliefs, same pool as SECI)',
-        'AECI-Err':  'AECI-Err vs α  (negative = AI-heavy agents\nmore confidently wrong)',
-        'MAE':       'Belief MAE vs α  (disaster cells; lower = better)',
-        'Unmet':     'Unmet needs vs α  (L3+ cells with zero relief per tick)',
-        'Precision': 'Targeting precision vs α  (relief tokens on L3+ cells)',
+        'SECI':         'SECI vs α  (negative = social echo chamber)',
+        'AECI-IE':      'AECI-IE vs α  (belief baseline; negative = AI serves\ncommunities a narrower pool than global beliefs)',
+        'SECI-IE':      'SECI-IE vs α  (human-channel counterpart;\nconsistency check against SECI)',
+        'AECI-IE-chan': 'AECI-IE-chan vs α  (channel baseline; community\nserved pool vs global served pool — strict SECI parallel)',
+        'SECI-IE-chan': 'SECI-IE-chan vs α  (human channel,\nchannel baseline)',
+        'AECI-Var':     'AECI-Var vs α  (retired; negative = AI echo chamber;\nL1+ beliefs, same pool as SECI)',
+        'AECI-Err':     'AECI-Err vs α  (negative = AI-heavy agents\nmore confidently wrong)',
+        'MAE':          'Belief MAE vs α  (disaster cells; lower = better)',
+        'Unmet':        'Unmet needs vs α  (L3+ cells with zero relief per tick)',
+        'Precision':    'Targeting precision vs α  (relief tokens on L3+ cells)',
     }
     for i, (ax, (name, _, _)) in enumerate(panels):
         ax.set_title(titles[name])
         ax.set_xlabel('AI alignment level (α)')
         ax.set_ylabel(name)
-        if name in ('SECI', 'AECI-IE', 'SECI-IE', 'AECI-Var', 'AECI-Err'):
+        if name in ('SECI', 'AECI-IE', 'SECI-IE', 'AECI-IE-chan',
+                    'SECI-IE-chan', 'AECI-Var', 'AECI-Err'):
             ax.axhline(0, color='k', ls=':', alpha=0.4)
         ax.grid(True, alpha=0.3)
         ax.legend(fontsize=9)

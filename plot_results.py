@@ -60,6 +60,8 @@ def load_and_aggregate(path):
             # handled via run.get below)
             'aeci_ie_exploit', 'aeci_ie_explor',
             'seci_ie_exploit', 'seci_ie_explor',
+            'aeci_ie_chan_exploit', 'aeci_ie_chan_explor',
+            'seci_ie_chan_exploit', 'seci_ie_chan_explor',
             'ie_pool_ai_exploit', 'ie_pool_ai_explor',
             'ie_pool_human_exploit', 'ie_pool_human_explor',
             'mae_exploit',  'mae_explor',  'prec_exploit', 'prec_explor',

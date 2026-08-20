@@ -169,6 +169,38 @@ def test_aeci_ie_converged_caller_alpha1():
     print(f"PASS: AECI-IE ≈ −1 for converged caller at α=1 (value {val:.3f})")
 
 
+def test_aeci_ie_chan_two_converged_communities():
+    """Channel-baseline variant: two same-type communities converged on
+    DIFFERENT levels → each community's served pool has zero variance while
+    the channel's global served pool is diverse → AECI-IE-chan ≈ −1."""
+    model = build_model('individual')          # α=1
+    for agent in model.humans.values():
+        agent.received_report_log = {'human': [], 'ai': []}
+    # communities[0] and [1] share a type by construction (per-type split)
+    (_n0, t0), (_n1, t1) = model.communities[0][:2], model.communities[1][:2]
+    assert t0 == t1, "expected the first two communities to share a type"
+    for comm_idx, level in ((0, 4), (1, 2)):
+        for node in model.communities[comm_idx][0]:
+            agent = model.humans.get(f"H_{node}")
+            if agent is None:
+                continue
+            for cell in agent.beliefs:
+                if isinstance(agent.beliefs[cell], dict):
+                    agent.beliefs[cell]['level'] = level
+                    agent.beliefs[cell]['confidence'] = 0.9
+        _serve_ai_reports_to_community(model, comm_idx)
+    result = model.calculate_ie_indices()
+    key = 'exploitative' if t0 == 'exploitative' else 'exploratory'
+    val = result['aeci_ie_chan'][key]
+    assert not np.isnan(val), "AECI-IE-chan undefined despite served reports"
+    assert val < -0.9, (
+        f"two communities converged on different levels must yield "
+        f"AECI-IE-chan ≈ −1 (zero within-community served variance vs "
+        f"diverse global served pool), got {val:.3f}")
+    print(f"PASS: AECI-IE-chan ≈ −1 for two converged communities at α=1 "
+          f"(value {val:.3f})")
+
+
 def test_aeci_ie_truthful_alpha0():
     """α=0 → AI serves (noisy) truth → served diversity ≈ global belief
     diversity → AECI-IE far from the echo-chamber pole."""
@@ -195,5 +227,6 @@ if __name__ == '__main__':
     test_individual_is_type_agnostic()
     test_consensus_flag_reproduces_legacy_targeting()
     test_aeci_ie_converged_caller_alpha1()
+    test_aeci_ie_chan_two_converged_communities()
     test_aeci_ie_truthful_alpha0()
     print("All confirmation-target smoke tests passed.")
