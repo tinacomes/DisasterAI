@@ -1,0 +1,93 @@
+name: Run Boundary Sweep (M3, high-alpha N=50)
+
+# M3 boundary strengthening: re-run the high-alignment boundary
+# (alpha in {0.8, 0.9, 1.0}) in BOTH configurations with N=50 seeded
+# replications (seeds 0..49 — a superset of the primary sweep's 0..19, so
+# the seed-pairing convention 'replicate i <- seed i' is preserved and the
+# paired deltas remain valid). The collect job computes Holm-corrected
+# paired per-seed deltas (main - control) via tools/boundary_deltas.py —
+# the firm CIs behind Finding 1 and the alpha >= 0.9 claims.
+#
+# Trigger: GitHub → Actions → "Run Boundary Sweep" → Run workflow
+
+on:
+  workflow_dispatch:
+    inputs:
+      n_runs:
+        description: "Replications per (config × alpha) cell"
+        required: false
+        default: "50"
+      ticks:
+        description: "Simulation ticks per run"
+        required: false
+        default: "200"
+      confirmation_target:
+        description: "AI confirmation target (individual = fixed model default)"
+        required: false
+        default: "individual"
+
+env:
+  MPLBACKEND: Agg
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  # ── One worker per (config × boundary alpha) ──────────────────────────────
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      matrix:
+        config: [baseline, switches]
+        alpha: ["0.8", "0.9", "1.0"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11", cache: "pip"}
+      - run: pip install -r requirements.txt
+      - run: |
+          if [ "${{ matrix.config }}" = "switches" ]; then
+            FLAGS="--mobility 1 --network-type spatial_bridged --query-scope network"
+          else
+            FLAGS="--mobility 0 --network-type components --query-scope global"
+          fi
+          mkdir -p out
+          python3 test_filter_bubbles.py \
+            --single-alpha ${{ matrix.alpha }} \
+            --out-file out/bubble_alpha_${{ matrix.alpha }}.json \
+            --ticks ${{ inputs.ticks }} \
+            --n-runs ${{ inputs.n_runs }} \
+            --confirmation-target ${{ inputs.confirmation_target }} \
+            $FLAGS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: boundary-${{ matrix.config }}-${{ matrix.alpha }}
+          path: out/bubble_alpha_${{ matrix.alpha }}.json
+          retention-days: 30
+
+  # ── Paired-delta tables across configs ───────────────────────────────────
+  deltas:
+    needs: sweep
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11", cache: "pip"}
+      - run: pip install -r requirements.txt
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: boundary-*
+          path: boundary/
+      - run: |
+          python3 tools/boundary_deltas.py boundary/ . | tee boundary_deltas.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: boundary-deltas
+          path: |
+            boundary_deltas.txt
+            boundary_deltas.md
+            boundary_deltas.csv
+          retention-days: 30

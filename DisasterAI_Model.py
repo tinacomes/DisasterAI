@@ -104,6 +104,14 @@ class HumanAgent(Agent):
         self.accepted_ai = 0          # per-period counter (reset every 5 ticks for retain metrics)
         self.cum_accepted_ai = 0      # cumulative counter (never reset) used for AECI classification
 
+        # Information-environment log (M1: AECI-IE / SECI-IE). Every report
+        # level RECEIVED from an external channel in seek_information() is
+        # logged as (cell, level) — at delivery, before any acceptance
+        # decision, because the IE indices measure what the channel serves,
+        # not what the agent accepts. Pooled per community every 5 ticks by
+        # DisasterModel.calculate_ie_indices(), then cleared (5-tick window).
+        self.received_report_log = {'human': [], 'ai': []}
+
         # Performance Counters
         self.correct_targets = 0
         self.incorrect_targets = 0
@@ -1610,6 +1618,16 @@ class HumanAgent(Agent):
                     source_id = None
 
 
+            # Information-environment log (M1): record every report level
+            # received from an external channel, regardless of whether it is
+            # later accepted. Self-queries are not an external channel and are
+            # not logged. Levels are logged exactly as delivered (the same
+            # int-rounding applied in the acceptance loop below).
+            if chosen_mode in ("human", "ai") and source_id and reports:
+                _ie_log = self.received_report_log[chosen_mode]
+                for _cell, _val in reports.items():
+                    _ie_log.append((_cell, int(round(_val))))
+
             # Process reports and update beliefs
             belief_updates = 0
             source_trust = self.trust.get(source_id, 0.1) if source_id else 0.1
@@ -2395,7 +2413,10 @@ class DisasterModel(Model):
                  p_bridge=0.15,           # spatial_bridged: probability an agent carries one bridge
                  bridge_decay=2.0,        # spatial_bridged: bridge endpoint prob ∝ (1+d)^-decay
                  n_communities_per_type=4,  # spatial_bridged: community count per agent type
-                 spawn_sigma=2.5          # spatial_bridged: Gaussian spawn spread around centroid
+                 spawn_sigma=2.5,         # spatial_bridged: Gaussian spawn spread around centroid
+                 num_ai=5,                # number of AI agents (information supply; M5 robustness)
+                 ws_k=4,                  # spatial_smallworld: ring-lattice neighbours per node
+                 ws_rewire=0.1            # spatial_smallworld: per-edge rewiring probability
                  ):
         super(DisasterModel, self).__init__()
         self.share_exploitative = share_exploitative
@@ -2403,7 +2424,9 @@ class DisasterModel(Model):
         self.base_trust = initial_trust
         self.base_ai_trust = initial_ai_trust
         self.num_humans = number_of_humans
-        self.num_ai = 5
+        self.num_ai = num_ai
+        self.ws_k = ws_k
+        self.ws_rewire = ws_rewire
         self.share_confirming = share_confirming
         self.width = width
         self.height = height
@@ -2470,6 +2493,19 @@ class DisasterModel(Model):
         self.aeci_data = []         # (tick, avg_AECI_exploit, avg_AECI_explor)
         self.aeci_lockin_data = []  # (tick, exploit, explor); negative = AI-heavy agents' beliefs more frozen
         self.belief_pool_data = []  # (tick, mean # L1+ beliefs per exploit agent, per explor agent)
+        # Information-environment echo indices (M1): SECI's variance-ratio
+        # construct applied to the report levels community members RECEIVE
+        # from a channel during the 5-tick metrics window. Sign convention as
+        # SECI: negative = echo chamber. NaN when a channel served < 2 L1+
+        # levels to every community of a type in the window.
+        self.aeci_ie_data = []      # (tick, exploit, explor) — AI channel, belief baseline
+        self.seci_ie_data = []      # (tick, exploit, explor) — human channel (SECI consistency check)
+        self.aeci_ie_chan_data = [] # (tick, exploit, explor) — AI channel, channel baseline
+                                    # (community served pool vs global served pool)
+        self.seci_ie_chan_data = [] # (tick, exploit, explor) — human channel, channel baseline
+        self.ie_pool_data = []      # (tick, ai_pool_exploit, ai_pool_explor,
+                                    #  human_pool_exploit, human_pool_explor) —
+                                    # mean L1+ report-pool size per community
         self._belief_level_snapshots = {}  # agent_id → belief-level vector at previous metrics tick
         self.retain_aeci_data = []  # (tick, avg_retain_AECI_exploit, avg_retain_AECI_explor)
         self.retain_seci_data = []  # (tick, avg_retain_SECI_exploit, avg_retain_SECI_explor)
@@ -2670,6 +2706,167 @@ class DisasterModel(Model):
 
     def debug_log(self, message, force=False):
         """Log debug messages if debug mode is enabled or forced."""
+
+    @staticmethod
+    def _variance_ratio_index(group_var, global_var, max_possible_var=5.0):
+        """Shared variance-ratio index with asymmetric [-1, +1] normalisation.
+
+        This is SECI's normalisation, factored out so every construct built on
+        it (SECI itself and the information-environment indices AECI-IE /
+        SECI-IE) is guaranteed to use the identical formula:
+
+          group more homogeneous than global → (group_var - global_var) /
+              global_var, floored at -1  (negative = echo chamber)
+          group more diverse than global → (group_var - global_var) /
+              (max_possible_var - global_var), capped at +1  (anti-bubble)
+        """
+        if global_var < 1e-9:
+            return 0.0
+        var_diff = group_var - global_var
+        if var_diff < 0:
+            return max(-1.0, var_diff / global_var)
+        denom = max_possible_var - global_var
+        return min(1.0, var_diff / denom) if denom > 1e-9 else 0.0
+
+    def calculate_ie_indices(self):
+        """AECI-IE / SECI-IE: SECI's construct applied to the information
+        environment (M1) — the report levels community members RECEIVE from a
+        channel, rather than the beliefs they hold.
+
+        SECI compares belief variance inside a social exposure boundary (the
+        community) to global belief variance. The IE indices apply the
+        IDENTICAL variance-ratio formula, asymmetric [-1, 1] normalisation,
+        L1+ filter, per-community pooling, and per-type averaging to the
+        report levels received during the 5-tick metrics window:
+
+          AECI-IE: pool = AI-delivered report levels    (channel 'ai')
+          SECI-IE: pool = human-delivered report levels (channel 'human';
+                   consistency check — should track SECI per type)
+
+        Both use the same baseline as SECI: the global variance of all
+        agents' L1+ beliefs. Properties: at α=0 the AI serves (noisy) truth,
+        whose diversity matches a truth-anchored belief pool → AECI-IE ≈ 0
+        (no truth-convergence confound); at α=1 it serves each caller's own
+        narrow priors → the served pool collapses inside converged
+        communities → AECI-IE strongly negative, capturing individualised
+        confirmation and shared-source convergence alike. Sign convention as
+        SECI: NEGATIVE = echo chamber.
+
+        Two normalisation baselines are computed for each channel (the M1
+        validation showed they differ materially for exploitative callers,
+        whose spatially concentrated queries make their served pool narrow at
+        ANY α when compared against global beliefs):
+
+          belief-baseline (aeci_ie_data / seci_ie_data): community served
+              pool vs the global variance of all agents' L1+ BELIEFS — the
+              PNAS-brief formula ("var(pool) vs var(global beliefs)").
+          channel-baseline (aeci_ie_chan_data / seci_ie_chan_data):
+              community served pool vs the global variance of ALL levels the
+              SAME channel served during the window — the strictly
+              SECI-identical construct (SECI: community beliefs vs global
+              beliefs; here: community served-info vs global served-info),
+              which cancels the query-concentration confound.
+
+        Pool sizes are recorded alongside (ie_pool_data) because — exactly as
+        for SECI — a shrinking L1+ pool can itself read as homogeneity, and
+        because they expose how much information each channel actually
+        delivered (starvation context).
+
+        Observation-only: reads and clears the per-agent received_report_log
+        and never feeds back into behaviour, so adding the metric leaves
+        every trajectory bit-identical on the same seed.
+
+        Returns {'aeci_ie': {...}, 'seci_ie': {...}, 'pools': {...},
+        'global_var': float} and appends to aeci_ie_data / seci_ie_data /
+        ie_pool_data. A type with no community pool of ≥ 2 L1+ levels in the
+        window yields NaN (undefined, not zero).
+        """
+        # Global L1+ belief variance — same baseline as SECI
+        all_belief_levels = [
+            b.get('level', 0)
+            for agent in self.humans.values() if agent.beliefs
+            for b in agent.beliefs.values()
+            if isinstance(b, dict) and b.get('level', 0) >= 1
+        ]
+        global_var = np.var(all_belief_levels) if len(all_belief_levels) > 1 else 1e-6
+
+        values = {}        # belief-baseline indices
+        values_chan = {}   # channel-baseline indices (strict SECI parallel)
+        pools = {}
+        for channel in ('ai', 'human'):
+            comm_vars = {'exploitative': [], 'exploratory': []}
+            pool_sizes = {'exploitative': [], 'exploratory': []}
+            channel_levels = []   # global served pool of this channel (all agents)
+            for agent in self.humans.values():
+                channel_levels.extend(
+                    lvl for _cell, lvl in agent.received_report_log[channel]
+                    if lvl >= 1)
+            channel_var = (np.var(channel_levels)
+                           if len(channel_levels) > 1 else float('nan'))
+            for component_nodes, community_type in self.communities:
+                if len(component_nodes) <= 1:
+                    continue
+                levels = []
+                for n in component_nodes:
+                    agent = self.humans.get(f"H_{n}")
+                    if agent is None:
+                        continue
+                    levels.extend(
+                        lvl for _cell, lvl in agent.received_report_log[channel]
+                        if lvl >= 1)   # L1+ filter, exactly like SECI
+                pool_sizes[community_type].append(len(levels))
+                if len(levels) > 1:
+                    comm_vars[community_type].append(float(np.var(levels)))
+            values[channel] = {
+                t: (self._variance_ratio_index(float(np.mean(comm_vars[t])),
+                                               global_var)
+                    if comm_vars[t] else float('nan'))
+                for t in ('exploitative', 'exploratory')
+            }
+            values_chan[channel] = {
+                t: (self._variance_ratio_index(float(np.mean(comm_vars[t])),
+                                               float(channel_var))
+                    if comm_vars[t] and not np.isnan(channel_var)
+                    else float('nan'))
+                for t in ('exploitative', 'exploratory')
+            }
+            pools[channel] = {
+                t: (float(np.mean(pool_sizes[t])) if pool_sizes[t] else 0.0)
+                for t in ('exploitative', 'exploratory')
+            }
+
+        self.aeci_ie_data.append(
+            (self.tick, values['ai']['exploitative'], values['ai']['exploratory']))
+        self.seci_ie_data.append(
+            (self.tick, values['human']['exploitative'], values['human']['exploratory']))
+        self.aeci_ie_chan_data.append(
+            (self.tick, values_chan['ai']['exploitative'], values_chan['ai']['exploratory']))
+        self.seci_ie_chan_data.append(
+            (self.tick, values_chan['human']['exploitative'], values_chan['human']['exploratory']))
+        self.ie_pool_data.append(
+            (self.tick,
+             pools['ai']['exploitative'], pools['ai']['exploratory'],
+             pools['human']['exploitative'], pools['human']['exploratory']))
+
+        if not hasattr(self, '_last_metrics'):
+            self._last_metrics = {}
+        self._last_metrics['aeci_ie'] = {
+            'tick': self.tick,
+            'exploit': values['ai']['exploitative'],
+            'explor': values['ai']['exploratory']}
+        self._last_metrics['seci_ie'] = {
+            'tick': self.tick,
+            'exploit': values['human']['exploitative'],
+            'explor': values['human']['exploratory']}
+
+        # Close the window: the next aggregation covers only new reports.
+        for agent in self.humans.values():
+            agent.received_report_log = {'human': [], 'ai': []}
+
+        return {'aeci_ie': values['ai'], 'seci_ie': values['human'],
+                'aeci_ie_chan': values_chan['ai'],
+                'seci_ie_chan': values_chan['human'],
+                'pools': pools, 'global_var': float(global_var)}
 
     def calculate_aeci_variance(self):
         """AECI-Var: AI Echo Chamber Index, variance-based, on a [-1, +1] scale.
@@ -2914,7 +3111,9 @@ class DisasterModel(Model):
         num_exploitative = int(self.num_humans * self.share_exploitative)
         num_exploratory = self.num_humans - num_exploitative
 
-        if self.network_type == 'spatial_bridged':
+        if self.network_type in ('spatial_bridged', 'spatial_smallworld'):
+            # spatial_smallworld (M5 robustness): identical spatial embedding
+            # and bridge machinery, but Watts–Strogatz within-community wiring
             return self.initialize_spatial_bridged_network(num_exploitative, num_exploratory)
 
         print(f"Initializing social network with {num_exploitative} exploitative and {num_exploratory} exploratory agents")
@@ -3094,12 +3293,39 @@ class DisasterModel(Model):
                 py = int(round(np.clip(random.gauss(cy, self.spawn_sigma), 0, self.height - 1)))
                 self.agent_spawn_positions[node] = (px, py)
 
-        # --- 2. Within-community Erdős–Rényi edges ---
-        for members in member_lists:
-            for i in range(len(members)):
-                for j in range(i + 1, len(members)):
-                    if random.random() < self.p_within:
-                        self.social_network.add_edge(members[i], members[j])
+        # --- 2. Within-community wiring ---
+        if self.network_type == 'spatial_smallworld':
+            # M5 robustness: Watts–Strogatz small-world generator per community
+            # (ring lattice with ws_k neighbours, each edge rewired with
+            # probability ws_rewire to a random same-community node). Uses the
+            # global `random` stream so seeded runs stay reproducible.
+            for members in member_lists:
+                n = len(members)
+                if n <= 2:
+                    for i in range(n):
+                        for j in range(i + 1, n):
+                            self.social_network.add_edge(members[i], members[j])
+                    continue
+                k_half = max(1, min(self.ws_k, n - 1) // 2)
+                for i in range(n):
+                    for step in range(1, k_half + 1):
+                        u, v = members[i], members[(i + step) % n]
+                        if u == v:
+                            continue
+                        if random.random() < self.ws_rewire:
+                            # Rewire to a random non-self, non-duplicate target
+                            choices = [m for m in members if m != u
+                                       and not self.social_network.has_edge(u, m)]
+                            if choices:
+                                v = random.choice(choices)
+                        self.social_network.add_edge(u, v)
+        else:
+            # spatial_bridged baseline: Erdős–Rényi edges with p_within
+            for members in member_lists:
+                for i in range(len(members)):
+                    for j in range(i + 1, len(members)):
+                        if random.random() < self.p_within:
+                            self.social_network.add_edge(members[i], members[j])
 
         # --- 3. Weak-tie bridges with Kleinberg distance decay ---
         node_community = {}
@@ -3454,16 +3680,9 @@ class DisasterModel(Model):
 
             global_var = np.var(all_belief_levels) if len(all_belief_levels) > 1 else 1e-6
 
-            max_possible_var = 5.0
-            def _seci_val(community_var, gvar):
-                if gvar < 1e-9:
-                    return 0.0
-                var_diff = community_var - gvar
-                if var_diff < 0:  # community more homogeneous than global → echo chamber
-                    return max(-1.0, var_diff / gvar)
-                else:             # community more diverse than global → anti-bubble
-                    denom = max_possible_var - gvar
-                    return min(1.0, var_diff / denom) if denom > 1e-9 else 0.0
+            # Asymmetric [-1, +1] normalisation, shared with the IE indices
+            # (negative = community more homogeneous than global = echo chamber)
+            _seci_val = self._variance_ratio_index
 
             exploit_community_vars = []
             explor_community_vars  = []
@@ -3529,6 +3748,11 @@ class DisasterModel(Model):
                 'tick': self.tick,
                 'exploit': self.belief_pool_data[-1][1],
                 'explor': self.belief_pool_data[-1][2]}
+
+            # --- Information-environment echo indices (M1): AECI-IE / SECI-IE ---
+            # Pools the report levels received from each channel since the
+            # previous metrics tick and clears the per-agent logs.
+            self.calculate_ie_indices()
 
             # --- AECI-LockIn (belief mobility of AI-heavy vs AI-light agents) ---
             self.calculate_aeci_lockin()

@@ -1,0 +1,86 @@
+name: Run Salience Experiment (M7)
+
+# M7 salience decision experiment: salience_weight in {0, 0.5, 1} ×
+# alpha in {0.7, 0.8, 0.9, 1.0}, main-model configuration, N=20 seeded
+# replications. Decides whether C12 (explorers do NOT learn to distrust
+# confirming AI because verification is base-rate dominated) stays a
+# mainline finding (salience_weight=0, recommended) or a salience>0
+# variant is promoted — Finding 3's text depends on it.
+#
+# Key readout: the explorer AI-trust column (AItrust_er) of the collect
+# job's tables — flat in alpha at salience 0 (C12), possibly declining at
+# salience 1 (severity-weighted verification makes confirmation errors
+# costly and detectable).
+#
+# Trigger: GitHub → Actions → "Run Salience Experiment" → Run workflow
+
+on:
+  workflow_dispatch:
+    inputs:
+      n_runs:
+        description: "Replications per condition"
+        required: false
+        default: "20"
+      ticks:
+        description: "Simulation ticks per run"
+        required: false
+        default: "200"
+
+env:
+  MPLBACKEND: Agg
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        salience: ["0", "0.5", "1"]
+        alpha: ["0.7", "0.8", "0.9", "1.0"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11", cache: "pip"}
+      - run: pip install -r requirements.txt
+      - name: Run salience=${{ matrix.salience }} alpha=${{ matrix.alpha }}
+        run: |
+          mkdir -p out
+          python3 test_filter_bubbles.py \
+            --single-alpha ${{ matrix.alpha }} \
+            --out-file out/robust_salience_${{ matrix.salience }}_alpha_${{ matrix.alpha }}.json \
+            --ticks ${{ inputs.ticks }} \
+            --n-runs ${{ inputs.n_runs }} \
+            --salience-weight ${{ matrix.salience }} \
+            --mobility 1 --network-type spatial_bridged --query-scope network
+      - uses: actions/upload-artifact@v4
+        with:
+          name: salience-${{ matrix.salience }}-${{ matrix.alpha }}
+          path: out/robust_*.json
+          retention-days: 30
+
+  collect:
+    needs: sweep
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11", cache: "pip"}
+      - run: pip install -r requirements.txt
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: salience-*
+          path: salience/
+      - run: |
+          python3 tools/robustness_summary.py salience/ . | tee salience_summary.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: salience-tables
+          path: |
+            salience_summary.txt
+            robustness_tables.md
+          retention-days: 30

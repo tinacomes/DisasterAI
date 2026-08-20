@@ -24,14 +24,20 @@ Metrics (unified sign convention: NEGATIVE = echo chamber for all indices):
   * -1 = Strong echo chamber (community beliefs much more homogeneous than global)
   *  0 = No echo chamber effect
   * +1 = Anti-echo chamber (community more diverse than global)
-- AECI — three named constructs (see METHODS):
-  * AECI-Var (-1..+1): belief variance of AI-reliant agents vs global
-      (same variance formula as SECI; enters the Goldilocks composite)
+- AECI — named constructs (see METHODS):
+  * AECI-IE (-1..+1, M1 PRIMARY): SECI's variance-ratio construct applied to
+      the AI-delivered report levels community members receive (information
+      environment); SECI-IE is the same on human-delivered levels
+      (consistency check against SECI). Negative = the AI serves each
+      community a narrower level distribution than the global belief pool.
+  * AECI-Var (-1..+1, retired): belief variance of AI-reliant agents vs
+      global — blind to the individualised own-prior bubble and confounded
+      at the truthful endpoint; kept only in the α* sensitivity table
   * AECI-Err (-1..+1): confidence-weighted belief-error split, AI-heavy vs
       AI-light agents (median split by cum_accepted_ai; shown in time series)
   * AECI-Acc (0..1, unsigned): share of accepted belief updates from AI
       (= retain_aeci; reliance measure, not an echo measure)
-- total_bubble = |SECI| + |AECI-Var|  (minimise both; α* sensitivity to the
+- total_bubble = |SECI| + |AECI-IE|  (minimise both; α* sensitivity to the
   AECI construct choice is reported by alpha_star_sensitivity)
 - Belief MAE: accuracy cost at each alignment level (disaster cells L1+ only)
 - Unmet needs: high-need cells (L3+) that received zero relief tokens that tick
@@ -225,6 +231,17 @@ def run_one_sim(params):
 
     seci_exploit, seci_explor           = [], []
     aeci_exploit, aeci_explor           = [], []
+    # Information-environment echo indices (M1; negative = echo chamber):
+    # AECI-IE = SECI's construct on AI-delivered report levels; SECI-IE = the
+    # same on human-delivered levels (consistency check against SECI)
+    aeci_ie_exploit, aeci_ie_explor     = [], []
+    seci_ie_exploit, seci_ie_explor     = [], []
+    # Channel-baseline variant: community served pool vs global served pool
+    # of the same channel (strict SECI parallel; see calculate_ie_indices)
+    aeci_ie_chan_exploit, aeci_ie_chan_explor   = [], []
+    seci_ie_chan_exploit, seci_ie_chan_explor   = [], []
+    ie_pool_ai_exploit, ie_pool_ai_explor       = [], []   # per-community L1+ report-pool sizes
+    ie_pool_human_exploit, ie_pool_human_explor = [], []
     lockin_exploit, lockin_explor       = [], []   # AECI-LockIn: negative = AI-heavy beliefs more frozen
     l1pool_exploit, l1pool_explor       = [], []   # mean # L1+ beliefs per agent (context for SECI)
     trust_ai_exploit, trust_fri_exploit = [], []
@@ -305,6 +322,23 @@ def run_one_sim(params):
             seci_explor.append( float(model.seci_data[-1][2]) if model.seci_data else float('nan'))
             aeci_exploit.append(float(model.aeci_data[-1][1]) if model.aeci_data else float('nan'))
             aeci_explor.append( float(model.aeci_data[-1][2]) if model.aeci_data else float('nan'))
+            _ie  = model.aeci_ie_data[-1] if getattr(model, 'aeci_ie_data', None) else (0, float('nan'), float('nan'))
+            aeci_ie_exploit.append(float(_ie[1]))
+            aeci_ie_explor.append( float(_ie[2]))
+            _sie = model.seci_ie_data[-1] if getattr(model, 'seci_ie_data', None) else (0, float('nan'), float('nan'))
+            seci_ie_exploit.append(float(_sie[1]))
+            seci_ie_explor.append( float(_sie[2]))
+            _iec = model.aeci_ie_chan_data[-1] if getattr(model, 'aeci_ie_chan_data', None) else (0, float('nan'), float('nan'))
+            aeci_ie_chan_exploit.append(float(_iec[1]))
+            aeci_ie_chan_explor.append( float(_iec[2]))
+            _sec = model.seci_ie_chan_data[-1] if getattr(model, 'seci_ie_chan_data', None) else (0, float('nan'), float('nan'))
+            seci_ie_chan_exploit.append(float(_sec[1]))
+            seci_ie_chan_explor.append( float(_sec[2]))
+            _ip  = model.ie_pool_data[-1] if getattr(model, 'ie_pool_data', None) else (0,) + (float('nan'),) * 4
+            ie_pool_ai_exploit.append(   float(_ip[1]))
+            ie_pool_ai_explor.append(    float(_ip[2]))
+            ie_pool_human_exploit.append(float(_ip[3]))
+            ie_pool_human_explor.append( float(_ip[4]))
             _lk = model.aeci_lockin_data[-1] if getattr(model, 'aeci_lockin_data', None) else (0, None, None)
             lockin_exploit.append(float(_lk[1]) if _lk[1] is not None else float('nan'))
             lockin_explor.append( float(_lk[2]) if _lk[2] is not None else float('nan'))
@@ -511,6 +545,18 @@ def run_one_sim(params):
         'seci_explor':             seci_explor,
         'aeci_exploit':            aeci_exploit,
         'aeci_explor':             aeci_explor,
+        'aeci_ie_exploit':         aeci_ie_exploit,
+        'aeci_ie_explor':          aeci_ie_explor,
+        'seci_ie_exploit':         seci_ie_exploit,
+        'seci_ie_explor':          seci_ie_explor,
+        'aeci_ie_chan_exploit':    aeci_ie_chan_exploit,
+        'aeci_ie_chan_explor':     aeci_ie_chan_explor,
+        'seci_ie_chan_exploit':    seci_ie_chan_exploit,
+        'seci_ie_chan_explor':     seci_ie_chan_explor,
+        'ie_pool_ai_exploit':      ie_pool_ai_exploit,
+        'ie_pool_ai_explor':       ie_pool_ai_explor,
+        'ie_pool_human_exploit':   ie_pool_human_exploit,
+        'ie_pool_human_explor':    ie_pool_human_explor,
         'lockin_exploit':          lockin_exploit,
         'lockin_explor':           lockin_explor,
         'l1pool_exploit':          l1pool_exploit,
@@ -590,6 +636,11 @@ def _aggregate(runs):
     """Compute mean and std across replications for all metrics."""
     ts_keys = [
         'seci_exploit', 'seci_explor', 'aeci_exploit', 'aeci_explor',
+        'aeci_ie_exploit', 'aeci_ie_explor', 'seci_ie_exploit', 'seci_ie_explor',
+        'aeci_ie_chan_exploit', 'aeci_ie_chan_explor',
+        'seci_ie_chan_exploit', 'seci_ie_chan_explor',
+        'ie_pool_ai_exploit', 'ie_pool_ai_explor',
+        'ie_pool_human_exploit', 'ie_pool_human_explor',
         'lockin_exploit', 'lockin_explor', 'l1pool_exploit', 'l1pool_explor',
         'trust_ai_exploit', 'trust_fri_exploit', 'trust_ai_explor', 'trust_fri_explor',
         'ai_query_ratio_exploit', 'ai_query_ratio_explor',
@@ -695,10 +746,19 @@ def _aggregate(runs):
     return result
 
 
+# Global replicate-seed offset (M3 boundary runs): replicate i is seeded with
+# SEED_BASE + i, so a worker dispatched with --seed-base 20 extends an
+# existing N=20 sweep to N=50 without repeating seeds, while the default 0
+# keeps the standard seed-pairing (replicate i ← seed i).
+SEED_BASE = 0
+
+
 def run_replicated(params, n_runs, label=''):
     """Run n_runs independent simulations and return aggregated mean/std dict."""
     print(f"\n{'='*60}")
-    print(f"Running: {label}  ({n_runs} replication{'s' if n_runs > 1 else ''})")
+    print(f"Running: {label}  ({n_runs} replication{'s' if n_runs > 1 else ''}"
+          + (f', seeds {SEED_BASE}..{SEED_BASE + n_runs - 1}' if SEED_BASE else '')
+          + ')')
     print(f"{'='*60}")
     runs = []
     for i in range(n_runs):
@@ -706,8 +766,8 @@ def run_replicated(params, n_runs, label=''):
         # Seed each replicate independently so results are unaffected by N and
         # by what other simulations ran before this call in the same process.
         import random as _random
-        _random.seed(i)
-        np.random.seed(i)
+        _random.seed(SEED_BASE + i)
+        np.random.seed(SEED_BASE + i)
         runs.append(run_one_sim(params))
     result = _aggregate(runs)
     _print_mode_choice_summary(result, params)
@@ -760,13 +820,14 @@ def compute_goldilocks_metrics(all_results):
     series (SECI, AECI, MAE, prec) — equivalent to the last 75 ticks of a 200-tick run.
     Per-tick series (unmet_needs) use a matching 75-tick window for consistency.
 
-    Returns per-α dicts with the primary composite scores:
-      total_bubble      = |SECI| + |AECI-Var|            (raw, unweighted)
-      total_bubble_norm = |SECI|n + |AECI-Var|n          (range-normalised; both metrics
-                          contribute equally regardless of magnitude difference)
-      total_score_norm  = |SECI|n + |AECI-Var|n + MAEn   (operational composite:
-                          also penalises poor belief accuracy)
-    α* from total_bubble_norm is the primary result.
+    Returns per-α dicts with the composite scores:
+      total_bubble_ie      = |SECI| + |AECI-IE|          (raw, M1 PRIMARY — a sum
+                             of two structurally identical constructs)
+      total_bubble_ie_norm = |SECI|n + |AECI-IE|n        (range-normalised)
+      total_score_ie_norm  = |SECI|n + |AECI-IE|n + MAEn (operational composite)
+      total_bubble / total_bubble_norm / total_score_norm — the retired
+                             AECI-Var versions, kept for the sensitivity table
+    α* from total_bubble_ie_norm is the primary result.
 
     SENSITIVITY composites (C5 robustness check — the raw AECI-Var signal is small,
     so range normalisation can let it dominate the location of the minimum):
@@ -785,8 +846,10 @@ def compute_goldilocks_metrics(all_results):
     for alpha, res in zip(ALIGNMENT_SWEEP, all_results):
         def ms(key_e, key_r=None):
             key_r = key_r or key_e.replace('exploit', 'explor')
-            m = (ss(res[f'{key_e}_mean']) + ss(res[f'{key_r}_mean'])) / 2
-            s = (ss(res[f'{key_e}_std'])  + ss(res[f'{key_r}_std']))  / 2
+            # .get() with [] default → NaN for series absent from cached JSONs
+            # written before the metric existed (e.g. aeci_ie_* pre-M1)
+            m = (ss(res.get(f'{key_e}_mean', [])) + ss(res.get(f'{key_r}_mean', []))) / 2
+            s = (ss(res.get(f'{key_e}_std', []))  + ss(res.get(f'{key_r}_std', [])))  / 2
             return m, s / np.sqrt(res.get('n_runs', N_GAP_RUNS))
 
         def runs_pair(key_e, key_r=None):
@@ -813,6 +876,15 @@ def compute_goldilocks_metrics(all_results):
         aeci_s = ss(res['aeci_var_std'],  TICK_WINDOW) / np.sqrt(res.get('n_runs', N_GAP_RUNS))
         # AECI-Err (confidence-weighted error split) — used in sensitivity composites
         aeci_err_m, aeci_err_s = ms('aeci_exploit', 'aeci_explor')
+        # AECI-IE (M1): SECI's variance-ratio construct applied to the
+        # AI-delivered report levels — the paper's AI-side echo index. NaN for
+        # cached results predating the metric. SECI-IE (human channel) kept
+        # alongside as the consistency check against SECI.
+        aeci_ie_m, aeci_ie_s = ms('aeci_ie_exploit', 'aeci_ie_explor')
+        seci_ie_m, seci_ie_s = ms('seci_ie_exploit', 'seci_ie_explor')
+        # Channel-baseline variant (strict SECI parallel; M1 validation)
+        aeci_iec_m, aeci_iec_s = ms('aeci_ie_chan_exploit', 'aeci_ie_chan_explor')
+        seci_iec_m, seci_iec_s = ms('seci_ie_chan_exploit', 'seci_ie_chan_explor')
         mae_m,  mae_s  = ms('mae_exploit',  'mae_explor')
         prec_m, prec_s = ms('prec_exploit', 'prec_explor')
         # Per-tick series: use 75-tick window to match SECI cadence
@@ -833,11 +905,22 @@ def compute_goldilocks_metrics(all_results):
             'aeci': aeci_m, 'aeci_std': aeci_s, 'aeci_runs': res.get('aeci_var_ss_runs', []),
             'aeci_err': aeci_err_m, 'aeci_err_std': aeci_err_s,
             'aeci_err_runs': runs_pair('aeci_exploit', 'aeci_explor'),
+            'aeci_ie': aeci_ie_m, 'aeci_ie_std': aeci_ie_s,
+            'aeci_ie_runs': runs_pair('aeci_ie_exploit', 'aeci_ie_explor'),
+            'seci_ie': seci_ie_m, 'seci_ie_std': seci_ie_s,
+            'seci_ie_runs': runs_pair('seci_ie_exploit', 'seci_ie_explor'),
+            'aeci_ie_chan': aeci_iec_m, 'aeci_ie_chan_std': aeci_iec_s,
+            'aeci_ie_chan_runs': runs_pair('aeci_ie_chan_exploit', 'aeci_ie_chan_explor'),
+            'seci_ie_chan': seci_iec_m, 'seci_ie_chan_std': seci_iec_s,
+            'seci_ie_chan_runs': runs_pair('seci_ie_chan_exploit', 'seci_ie_chan_explor'),
             'mae':  mae_m,  'mae_std':  mae_s,  'mae_runs':  runs_pair('mae_exploit',  'mae_explor'),
             'prec': prec_m, 'prec_std': prec_s, 'prec_runs': runs_pair('prec_exploit', 'prec_explor'),
             'unmet': unmet_m, 'unmet_std': unmet_s,
             'unmet_runs': res.get('unmet_needs_ss_runs', []),
             'total_bubble': abs(seci_m) + abs(aeci_m),
+            # M1 composite: sum of two structurally identical constructs
+            # (SECI on held beliefs, AECI-IE on served information)
+            'total_bubble_ie': abs(seci_m) + abs(aeci_ie_m),
         }
 
     # ── Range-normalise |SECI|, |AECI|, MAE across the sweep ────────────────
@@ -846,29 +929,50 @@ def compute_goldilocks_metrics(all_results):
     # Only normalise over alpha levels that are actually present in metrics
     # (gap-sweep cells with missing CI jobs will have a partial metrics dict).
     def _norm(vals):
-        lo, hi = min(vals), max(vals)
+        # NaN-safe: series absent from cached results (e.g. aeci_ie pre-M1)
+        # normalise to NaN rather than raising, so their composites are NaN
+        # and are skipped by alpha_star_sensitivity.
+        finite = [v for v in vals if not np.isnan(v)]
+        if not finite:
+            return [float('nan')] * len(vals)
+        lo, hi = min(finite), max(finite)
         span = hi - lo
         if span < 1e-9:
-            return [0.5] * len(vals)   # degenerate: all equal → arbitrary midpoint
-        return [(v - lo) / span for v in vals]
+            return [0.5 if not np.isnan(v) else float('nan') for v in vals]
+        return [(v - lo) / span if not np.isnan(v) else float('nan') for v in vals]
 
     available = [a for a in ALIGNMENT_SWEEP if a in metrics]
     seci_abs     = [abs(metrics[a]['seci'])     for a in available]
     aeci_abs     = [abs(metrics[a]['aeci'])     for a in available]
     aeci_err_abs = [abs(metrics[a]['aeci_err']) for a in available]
+    aeci_ie_abs  = [abs(metrics[a]['aeci_ie'])  for a in available]
+    aeci_iec_abs = [abs(metrics[a]['aeci_ie_chan']) for a in available]
     mae_vals     = [metrics[a]['mae']           for a in available]
 
     seci_n     = _norm(seci_abs)
     aeci_n     = _norm(aeci_abs)
     aeci_err_n = _norm(aeci_err_abs)
+    aeci_ie_n  = _norm(aeci_ie_abs)
+    aeci_iec_n = _norm(aeci_iec_abs)
     mae_n      = _norm(mae_vals)
 
     for i, alpha in enumerate(available):
         metrics[alpha]['seci_norm']          = seci_n[i]
         metrics[alpha]['aeci_norm']          = aeci_n[i]
         metrics[alpha]['aeci_err_norm']      = aeci_err_n[i]
+        metrics[alpha]['aeci_ie_norm']       = aeci_ie_n[i]
+        metrics[alpha]['aeci_ie_chan_norm']  = aeci_iec_n[i]
         metrics[alpha]['mae_norm']           = mae_n[i]
-        # Primary composites (AECI-Var)
+        # Channel-baseline composite variant (α* sensitivity table)
+        metrics[alpha]['total_bubble_iec_norm'] = seci_n[i] + aeci_iec_n[i]
+        metrics[alpha]['total_score_iec_norm']  = seci_n[i] + aeci_iec_n[i] + mae_n[i]
+        # M1 primary composites (AECI-IE — SECI's construct on the served
+        # information environment; see calculate_ie_indices)
+        metrics[alpha]['total_bubble_ie_norm'] = seci_n[i] + aeci_ie_n[i]
+        metrics[alpha]['total_score_ie_norm']  = seci_n[i] + aeci_ie_n[i] + mae_n[i]
+        # Retired composites (AECI-Var; kept for the α* sensitivity table —
+        # AECI-Var is blind to the individualised own-prior bubble and is
+        # confounded at the truthful endpoint, see PNAS brief M1)
         metrics[alpha]['total_bubble_norm']  = seci_n[i] + aeci_n[i]
         metrics[alpha]['total_score_norm']   = seci_n[i] + aeci_n[i] + mae_n[i]
         # Sensitivity composites (C5)
@@ -880,15 +984,31 @@ def compute_goldilocks_metrics(all_results):
     return metrics
 
 
-# Composite variants for the α* sensitivity analysis (C5): label → metrics key.
+# Composite variants for the α* sensitivity analysis (C5 + M1): label → metrics key.
+# AECI-IE composites are the paper's primary (M1); AECI-Var composites are
+# retained only as retired variants for the sensitivity table.
 ALPHA_STAR_COMPOSITES = {
-    'SECI + AECI-Var (primary)':       'total_bubble_norm',
+    'SECI + AECI-IE (primary)':        'total_bubble_ie_norm',
+    'SECI + AECI-IE + MAE (primary)':  'total_score_ie_norm',
+    'SECI + AECI-IE-chan':             'total_bubble_iec_norm',
+    'SECI + AECI-IE-chan + MAE':       'total_score_iec_norm',
+    'SECI + AECI-Var (retired)':       'total_bubble_norm',
+    'SECI + AECI-Var + MAE (retired)': 'total_score_norm',
     'SECI only':                       'bubble_seci_only_norm',
     'SECI + AECI-Err':                 'bubble_err_norm',
-    'SECI + AECI-Var + MAE (primary)': 'total_score_norm',
     'SECI + MAE':                      'score_seci_only_norm',
     'SECI + AECI-Err + MAE':           'score_err_norm',
 }
+
+
+def bubble_composite_key(metrics, score=False):
+    """Key of the primary bubble composite for a metrics dict: the M1
+    |SECI|+|AECI-IE| composite when the IE metric is present, else the retired
+    AECI-Var composite (needed to replot cached results predating M1)."""
+    ie_key = 'total_score_ie_norm' if score else 'total_bubble_ie_norm'
+    if any(not np.isnan(m.get(ie_key, float('nan'))) for m in metrics.values()):
+        return ie_key
+    return 'total_score_norm' if score else 'total_bubble_norm'
 
 
 def alpha_star_sensitivity(metrics):
@@ -896,11 +1016,16 @@ def alpha_star_sensitivity(metrics):
 
     If the α* values disagree across variants, the Goldilocks location is
     composite-dependent — report the spread, not just the primary value.
+    Composites that are NaN at every α (metric absent from cached results,
+    e.g. AECI-IE before M1) are reported as (None, nan) rather than raising.
     """
     available = [a for a in ALIGNMENT_SWEEP if a in metrics]
     out = {}
     for label, key in ALPHA_STAR_COMPOSITES.items():
         vals = [metrics[a].get(key, float('nan')) for a in available]
+        if not vals or all(np.isnan(v) for v in vals):
+            out[label] = (None, float('nan'))
+            continue
         idx = int(np.nanargmin(vals))
         out[label] = (available[idx], float(vals[idx]))
     return out
@@ -924,6 +1049,14 @@ def write_summary_tables(metrics, save_dir, n_runs=None):
         ('alpha',             lambda a, m: a),
         ('seci',              lambda a, m: m['seci']),
         ('seci_se',           lambda a, m: m['seci_std']),
+        ('aeci_ie',           lambda a, m: m.get('aeci_ie', float('nan'))),
+        ('aeci_ie_se',        lambda a, m: m.get('aeci_ie_std', float('nan'))),
+        ('seci_ie',           lambda a, m: m.get('seci_ie', float('nan'))),
+        ('seci_ie_se',        lambda a, m: m.get('seci_ie_std', float('nan'))),
+        ('aeci_ie_chan',      lambda a, m: m.get('aeci_ie_chan', float('nan'))),
+        ('aeci_ie_chan_se',   lambda a, m: m.get('aeci_ie_chan_std', float('nan'))),
+        ('seci_ie_chan',      lambda a, m: m.get('seci_ie_chan', float('nan'))),
+        ('seci_ie_chan_se',   lambda a, m: m.get('seci_ie_chan_std', float('nan'))),
         ('aeci_var',          lambda a, m: m['aeci']),
         ('aeci_var_se',       lambda a, m: m['aeci_std']),
         ('aeci_err',          lambda a, m: m['aeci_err']),
@@ -933,8 +1066,11 @@ def write_summary_tables(metrics, save_dir, n_runs=None):
         ('unmet_needs',       lambda a, m: m['unmet']),
         ('precision',         lambda a, m: m['prec']),
         ('seci_norm',         lambda a, m: m.get('seci_norm', float('nan'))),
+        ('aeci_ie_norm',      lambda a, m: m.get('aeci_ie_norm', float('nan'))),
         ('aeci_var_norm',     lambda a, m: m.get('aeci_norm', float('nan'))),
         ('mae_norm',          lambda a, m: m.get('mae_norm', float('nan'))),
+        ('total_bubble_ie_norm', lambda a, m: m.get('total_bubble_ie_norm', float('nan'))),
+        ('total_score_ie_norm',  lambda a, m: m.get('total_score_ie_norm', float('nan'))),
         ('total_bubble_norm', lambda a, m: m.get('total_bubble_norm', float('nan'))),
         ('total_score_norm',  lambda a, m: m.get('total_score_norm', float('nan'))),
     ]
@@ -960,8 +1096,11 @@ def write_summary_tables(metrics, save_dir, n_runs=None):
         f.write('\n## α* sensitivity to composite definition\n\n')
         f.write('| composite | α* | min value |\n|---|---|---|\n')
         for label, (a_star, v_star) in stars.items():
-            f.write(f'| {label} | {a_star} | {v_star:.3f} |\n')
-        star_values = sorted({a for a, _ in stars.values()})
+            if a_star is None:
+                f.write(f'| {label} | n/a | metric absent from these results |\n')
+            else:
+                f.write(f'| {label} | {a_star} | {v_star:.3f} |\n')
+        star_values = sorted({a for a, _ in stars.values() if a is not None})
         if len(star_values) == 1:
             f.write('\nα* is **robust** to the composite choice.\n')
         else:
@@ -985,11 +1124,13 @@ def plot_alpha_star_sensitivity(metrics, save_dir):
     fig, axes = plt.subplots(1, 2, figsize=(14, 5.5))
     families = [
         (axes[0], 'Bubble composites (echo-chamber only)',
-         [('SECI + AECI-Var (primary)', '#1A3A6B', '-o'),
+         [('SECI + AECI-IE (primary)',  '#117733', '-D'),
+          ('SECI + AECI-Var (retired)', '#1A3A6B', '-o'),
           ('SECI only',                 '#888888', '--s'),
           ('SECI + AECI-Err',           '#B45F06', '-.^')]),
         (axes[1], 'Operational composites (+MAE)',
-         [('SECI + AECI-Var + MAE (primary)', '#1A3A6B', '-o'),
+         [('SECI + AECI-IE + MAE (primary)',  '#117733', '-D'),
+          ('SECI + AECI-Var + MAE (retired)', '#1A3A6B', '-o'),
           ('SECI + MAE',                      '#888888', '--s'),
           ('SECI + AECI-Err + MAE',           '#B45F06', '-.^')]),
     ]
@@ -998,8 +1139,10 @@ def plot_alpha_star_sensitivity(metrics, save_dir):
         for label, color, fmt in curves:
             key = ALPHA_STAR_COMPOSITES[label]
             vals = [metrics[a].get(key, float('nan')) for a in available]
-            ax.plot(x, vals, fmt, color=color, linewidth=2, markersize=6, label=label)
             a_star, v_star = stars[label]
+            if a_star is None:
+                continue   # metric absent from these results (e.g. pre-M1 cache)
+            ax.plot(x, vals, fmt, color=color, linewidth=2, markersize=6, label=label)
             ax.scatter([x[available.index(a_star)]], [v_star], s=180, facecolors='none',
                        edgecolors=color, linewidths=2.5, zorder=5)
         ax.set_xlabel('AI Alignment')
@@ -1043,11 +1186,20 @@ def plot_goldilocks(metrics, all_results, save_dir):
     """
     alphas = ALIGNMENT_SWEEP
 
-    # Primary objective: range-normalised bubble composite
-    norm_vals  = [metrics[a]['total_bubble_norm'] for a in alphas]
-    score_vals = [metrics[a]['total_score_norm']  for a in alphas]
-    best_alpha       = alphas[int(np.argmin(norm_vals))]
-    best_alpha_score = alphas[int(np.argmin(score_vals))]
+    # Primary objective (M1): range-normalised |SECI| + |AECI-IE| composite.
+    # Falls back to the retired AECI-Var composite when plotting cached
+    # results that predate the information-environment metric.
+    norm_vals  = [metrics[a].get('total_bubble_ie_norm', float('nan')) for a in alphas]
+    score_vals = [metrics[a].get('total_score_ie_norm', float('nan'))  for a in alphas]
+    ai_index_key, ai_index_label = 'aeci_ie', 'AECI-IE'
+    if all(np.isnan(v) for v in norm_vals):
+        norm_vals  = [metrics[a]['total_bubble_norm'] for a in alphas]
+        score_vals = [metrics[a]['total_score_norm']  for a in alphas]
+        ai_index_key, ai_index_label = 'aeci', 'AECI-Var'
+        print('Note: AECI-IE absent from these results — falling back to the '
+              'retired AECI-Var composite for the Goldilocks figure.')
+    best_alpha       = alphas[int(np.nanargmin(norm_vals))]
+    best_alpha_score = alphas[int(np.nanargmin(score_vals))]
     print(f"\nGoldilocks α* = {best_alpha}  "
           f"(min normalised bubble = {min(norm_vals):.3f})")
     if best_alpha_score != best_alpha:
@@ -1107,9 +1259,14 @@ def plot_goldilocks(metrics, all_results, save_dir):
     eb(axes[0, 0], 'seci', 'b', 'SECI',
        'Social Echo Chamber\n(negative = stronger bubble)', hline=0)
 
-    eb(axes[0, 1], 'aeci', 'r', 'AECI-Var',
-       'AI-Induced Bubble (variance-based)\n(negative = AI users more homogeneous than global)',
-       hline=0)
+    if ai_index_key == 'aeci_ie':
+        eb(axes[0, 1], 'aeci_ie', 'r', 'AECI-IE',
+           'AI Information-Environment Bubble\n(negative = AI-served levels more homogeneous than global beliefs)',
+           hline=0)
+    else:
+        eb(axes[0, 1], 'aeci', 'r', 'AECI-Var',
+           'AI-Induced Bubble (variance-based)\n(negative = AI users more homogeneous than global)',
+           hline=0)
 
     # ── Goldilocks composite panel ──────────────────────────────────────────
     # Shows two normalised objectives so the reader can see whether the bubble-
@@ -1117,10 +1274,10 @@ def plot_goldilocks(metrics, all_results, save_dir):
     # Goldilocks claim is operationally grounded; if they differ it's a nuance.
     ax = axes[0, 2]
     ax.scatter(alphas, norm_vals,  color='purple',     s=80,  zorder=5,
-               label='|SECI|+|AECI| (norm.)')
+               label=f'|SECI|+|{ai_index_label}| (norm.)')
     ax.plot(alphas,    norm_vals,  color='purple',     lw=1,  alpha=0.35, linestyle='--')
     ax.scatter(alphas, score_vals, color='darkorange',  s=60,  zorder=5, marker='s',
-               label='|SECI|+|AECI|+MAE (norm.)')
+               label=f'|SECI|+|{ai_index_label}|+MAE (norm.)')
     ax.plot(alphas,    score_vals, color='darkorange',  lw=1,  alpha=0.35, linestyle=':')
     ax.axvline(best_alpha, color='gold', linestyle='--', linewidth=2,
                label=f'α*(bubble)={best_alpha}')
@@ -1672,8 +1829,9 @@ def plot_spatial_coverage(all_results, metrics, save_dir):
     Yellow star marks the disaster epicenter on each panel.
     """
     alphas = ALIGNMENT_SWEEP
-    best_bubble = alphas[int(np.argmin([metrics[a]['total_bubble_norm'] for a in alphas]))]
-    best_score  = alphas[int(np.argmin([metrics[a]['total_score_norm']  for a in alphas]))]
+    _bk, _sk = bubble_composite_key(metrics), bubble_composite_key(metrics, score=True)
+    best_bubble = alphas[int(np.nanargmin([metrics[a][_bk] for a in alphas]))]
+    best_score  = alphas[int(np.nanargmin([metrics[a][_sk] for a in alphas]))]
 
     # Columns: baseline, both optima, full-alignment endpoint
     show_alphas = [0.0, best_score, best_bubble, 1.0]
@@ -1830,10 +1988,10 @@ def plot_periphery_gap(all_results, metrics, save_dir):
     cells) and full-run cumulative evaluated tokens.
     """
     alphas = ALIGNMENT_SWEEP
-    total_n  = [metrics[a]['total_bubble_norm']  for a in alphas]
-    total_sn = [metrics[a]['total_score_norm']   for a in alphas]
-    best_alpha       = alphas[int(np.argmin(total_n))]   # α*(bubble)
-    best_alpha_score = alphas[int(np.argmin(total_sn))]  # α*(bubble + MAE)
+    total_n  = [metrics[a][bubble_composite_key(metrics)] for a in alphas]
+    total_sn = [metrics[a][bubble_composite_key(metrics, score=True)] for a in alphas]
+    best_alpha       = alphas[int(np.nanargmin(total_n))]   # α*(bubble)
+    best_alpha_score = alphas[int(np.nanargmin(total_sn))]  # α*(bubble + MAE)
 
     def _has_ts(key):
         return all(
@@ -1959,8 +2117,8 @@ def plot_periphery_gap_evolution(all_results, metrics, save_dir):
         return
 
     alphas = ALIGNMENT_SWEEP
-    total_n    = [metrics[a]['total_bubble_norm'] for a in alphas]
-    best_alpha = alphas[int(np.argmin(total_n))]
+    total_n    = [metrics[a][bubble_composite_key(metrics)] for a in alphas]
+    best_alpha = alphas[int(np.nanargmin(total_n))]
     # Ends of the sweep, the midpoint, and α* (deduplicated, sorted)
     show_alphas = sorted({0.0, 0.5, best_alpha, 1.0} & set(alphas)) or alphas[:1]
     colors = plt.cm.viridis(np.linspace(0.0, 0.85, len(show_alphas)))
@@ -2059,16 +2217,22 @@ def plot_gap_sweep(gap_results, save_dir):
                 continue
             metrics_g = compute_goldilocks_metrics(results_g)
             avail = [a for a in ALIGNMENT_SWEEP if a in metrics_g]
-            norm_bubble_vals = [metrics_g[a]['total_bubble_norm'] for a in avail]
-            norm_score_vals  = [metrics_g[a]['total_score_norm']  for a in avail]
-            idx    = int(np.argmin(norm_bubble_vals))
+            _bk_g = bubble_composite_key(metrics_g)
+            _sk_g = bubble_composite_key(metrics_g, score=True)
+            norm_bubble_vals = [metrics_g[a][_bk_g] for a in avail]
+            norm_score_vals  = [metrics_g[a][_sk_g] for a in avail]
+            idx    = int(np.nanargmin(norm_bubble_vals))
             a_star = avail[idx]
             s['g'].append(g)
             s['alpha_star'].append(a_star)
-            s['alpha_score'].append(avail[int(np.argmin(norm_score_vals))])
-            rb = abs(metrics_g[a_star]['seci']) + abs(metrics_g[a_star]['aeci'])
+            s['alpha_score'].append(avail[int(np.nanargmin(norm_score_vals))])
+            # Raw bubble at α*: |SECI| + |AI-side index| — AECI-IE when the
+            # cache carries it, else the retired AECI-Var (pre-M1 caches)
+            _ai_k, _ai_sk = (('aeci_ie', 'aeci_ie_std') if _bk_g == 'total_bubble_ie_norm'
+                             else ('aeci', 'aeci_std'))
+            rb = abs(metrics_g[a_star]['seci']) + abs(metrics_g[a_star][_ai_k])
             rb_se = (metrics_g[a_star]['seci_std'] ** 2 +
-                     metrics_g[a_star]['aeci_std'] ** 2) ** 0.5
+                     metrics_g[a_star][_ai_sk] ** 2) ** 0.5
             s['raw_bubble'].append(rb)
             s['raw_bubble_se'].append(rb_se)
             s['seci'].append(metrics_g[a_star]['seci'])
@@ -2240,7 +2404,9 @@ def _factor_key(v):
 # uses NEGATIVE = echo chamber, matching SECI and AECI-Var. Files WITHOUT this
 # marker were written before the 2026-07 sign unification (positive = echo) and
 # are auto-converted on load by _normalize_result_conventions.
-CONVENTIONS = {'aeci_err_sign': 'negative_echo'}
+# ie_sign documents that the M1 information-environment indices (aeci_ie_*,
+# seci_ie_*) were born with negative = echo chamber — no flipping ever needed.
+CONVENTIONS = {'aeci_err_sign': 'negative_echo', 'ie_sign': 'negative_echo'}
 
 
 def _flip_aeci_err_series(res):
@@ -2448,10 +2614,38 @@ if __name__ == '__main__':
              '0 = immobile agents (default baseline).',
     )
     parser.add_argument(
-        '--network-type', choices=['components', 'spatial_bridged'], default=None,
+        '--network-type',
+        choices=['components', 'spatial_bridged', 'spatial_smallworld'],
+        default=None,
         help="'spatial_bridged' = spatially embedded communities with weak-tie "
              "bridges (brokers exist by construction); 'components' = disconnected "
-             "type-homogeneous communities (default baseline).",
+             "type-homogeneous communities (default baseline); "
+             "'spatial_smallworld' = spatial_bridged with Watts–Strogatz "
+             "within-community wiring (M5 robustness generator).",
+    )
+    parser.add_argument(
+        '--seed-base', type=int, default=None, metavar='S',
+        help='Offset for replicate seeds: replicate i uses seed S+i (default 0). '
+             'M3 boundary runs extend an N=20 sweep to N=50 by dispatching a '
+             'second worker with --seed-base 20 --n-runs 30.',
+    )
+    parser.add_argument(
+        '--n-humans', type=int, default=None, metavar='N',
+        help='Override population size (default: 100). M5 robustness sweep '
+             'uses {100, 300, 500}; community count scales as ~N_type/25 for '
+             'the components network and stays at n_communities_per_type for '
+             'the spatial networks.',
+    )
+    parser.add_argument(
+        '--num-ai', type=int, default=None, metavar='K',
+        help='Override the number of AI agents (default: 5). M5 robustness '
+             'sweep uses {1, 5, 10} (AI information supply).',
+    )
+    parser.add_argument(
+        '--verification-probability', type=float, default=None, metavar='P',
+        help='Per-attempt arrival probability of external verification for '
+             "explorers' accepted remote reports (default: 0.3). M5 "
+             'robustness sweep uses {0.1, 0.3, 0.5}.',
     )
     parser.add_argument(
         '--query-scope', choices=['global', 'network'], default=None,
@@ -2493,6 +2687,14 @@ if __name__ == '__main__':
         base_params['query_scope'] = args.query_scope
     if args.confirmation_target is not None:
         base_params['confirmation_target'] = args.confirmation_target
+    if args.n_humans is not None:
+        base_params['number_of_humans'] = args.n_humans
+    if args.num_ai is not None:
+        base_params['num_ai'] = args.num_ai
+    if args.verification_probability is not None:
+        base_params['verification_probability'] = args.verification_probability
+    if args.seed_base is not None:
+        SEED_BASE = args.seed_base
     n_runs_primary = args.n_runs if args.n_runs is not None else N_RUNS
     # Factor/gap sweeps use at most half the primary ticks (they measure relative
     # differences, not absolute steady-state values, so shorter runs suffice)
@@ -2896,20 +3098,27 @@ if __name__ == '__main__':
     print('\n' + '=' * 70)
     print('LATE-RUN METRICS SUMMARY  (last 75 ticks)')
     print('=' * 70)
-    print(f"{'α':>6}  {'SECI':>8}  {'AECI-Var':>9}  {'AECI-Err':>9}  {'Bub(norm)':>10}  "
-          f"{'Score(norm)':>12}  {'MAE':>7}  {'Unmet':>7}")
-    print('-' * 84)
-    min_norm  = min(v['total_bubble_norm']  for v in metrics.values())
-    min_score = min(v['total_score_norm']   for v in metrics.values())
+    # Composite columns use the M1 primary (|SECI|+|AECI-IE|), falling back to
+    # the retired AECI-Var composite for cached results predating the metric.
+    _has_ie = not all(np.isnan(v.get('total_bubble_ie_norm', float('nan')))
+                      for v in metrics.values())
+    _bub_key = 'total_bubble_ie_norm' if _has_ie else 'total_bubble_norm'
+    _scr_key = 'total_score_ie_norm'  if _has_ie else 'total_score_norm'
+    print(f"{'α':>6}  {'SECI':>8}  {'AECI-IE':>9}  {'SECI-IE':>9}  {'AECI-Var':>9}  "
+          f"{'Bub(norm)':>10}  {'Score(norm)':>12}  {'MAE':>7}  {'Unmet':>7}")
+    print('-' * 96)
+    min_norm  = np.nanmin([v[_bub_key] for v in metrics.values()])
+    min_score = np.nanmin([v[_scr_key] for v in metrics.values()])
     for alpha in ALIGNMENT_SWEEP:
         m = metrics[alpha]
         tag = ''
-        if abs(m['total_bubble_norm'] - min_norm) < 1e-9:
+        if abs(m[_bub_key] - min_norm) < 1e-9:
             tag += '  ← α*(bubble)'
-        if abs(m['total_score_norm']  - min_score) < 1e-9:
+        if abs(m[_scr_key]  - min_score) < 1e-9:
             tag += '  ← α*(+MAE)' if '← α*(bubble)' not in tag else '+MAE'
-        print(f"{alpha:>6.1f}  {m['seci']:>8.3f}  {m['aeci']:>9.3f}  {m['aeci_err']:>9.3f}  "
-              f"{m['total_bubble_norm']:>10.3f}  {m['total_score_norm']:>12.3f}  "
+        print(f"{alpha:>6.1f}  {m['seci']:>8.3f}  {m.get('aeci_ie', float('nan')):>9.3f}  "
+              f"{m.get('seci_ie', float('nan')):>9.3f}  {m['aeci']:>9.3f}  "
+              f"{m[_bub_key]:>10.3f}  {m[_scr_key]:>12.3f}  "
               f"{m['mae']:>7.3f}  {m['unmet']:>7.1f}{tag}")
 
     # ── α* sensitivity to the composite definition (C5 robustness check) ──
@@ -2917,8 +3126,11 @@ if __name__ == '__main__':
     print('\nα* SENSITIVITY TO COMPOSITE DEFINITION')
     print('-' * 60)
     for label, (a_star, v_star) in stars.items():
-        print(f'  {label:<34} α* = {a_star:<4}  (min = {v_star:.3f})')
-    star_values = {a for a, _ in stars.values()}
+        if a_star is None:
+            print(f'  {label:<34} α* = n/a  (metric absent)')
+        else:
+            print(f'  {label:<34} α* = {a_star:<4}  (min = {v_star:.3f})')
+    star_values = {a for a, _ in stars.values() if a is not None}
     if len(star_values) == 1:
         print('  → α* is ROBUST to the composite choice.')
     else:
@@ -2947,10 +3159,13 @@ if __name__ == '__main__':
     print('=' * 70)
     print('\nInterpretation guide (negative = echo chamber for ALL indices):')
     print('  SECI < 0     : social echo chamber (community beliefs more homogeneous than global)')
-    print('  AECI-Var < 0 : AI-induced bubble (AI-reliant agents more homogeneous than global)')
+    print('  AECI-IE < 0  : AI serves communities a narrower level distribution than the global')
+    print('                 belief pool (information-environment echo; M1 primary AI-side index)')
+    print('  SECI-IE      : same construct on human-delivered reports (SECI consistency check)')
+    print('  AECI-Var < 0 : (retired) AI-reliant agents more homogeneous than global')
     print('  AECI-Err < 0 : AI-heavy agents hold more confident-wrong beliefs than AI-light')
     print('  AECI-Acc     : share of accepted updates coming from AI (0..1 reliance, unsigned)')
-    print('  total_bubble : |SECI| + |AECI-Var| — minimise to find Goldilocks α*')
+    print('  total_bubble : |SECI| + |AECI-IE| — minimise to find Goldilocks α*')
     print('  unmet_needs  : cells at disaster L3+ with zero relief that tick — response failure')
     print('  precision    : fraction of relief tokens on cells at L3+ at placement time')
     if not args.plots_only:

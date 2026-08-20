@@ -56,6 +56,14 @@ def load_and_aggregate(path):
                 if key in run:
                     run[key] = [None if v is None else -float(v) for v in run[key]]
     keys = ['seci_exploit', 'seci_explor', 'aeci_exploit', 'aeci_explor',
+            # M1 information-environment indices (absent from older files —
+            # handled via run.get below)
+            'aeci_ie_exploit', 'aeci_ie_explor',
+            'seci_ie_exploit', 'seci_ie_explor',
+            'aeci_ie_chan_exploit', 'aeci_ie_chan_explor',
+            'seci_ie_chan_exploit', 'seci_ie_chan_explor',
+            'ie_pool_ai_exploit', 'ie_pool_ai_explor',
+            'ie_pool_human_exploit', 'ie_pool_human_explor',
             'mae_exploit',  'mae_explor',  'prec_exploit', 'prec_explor',
             'ai_query_ratio_exploit', 'ai_query_ratio_explor',
             'unmet_needs']
@@ -70,7 +78,11 @@ def load_and_aggregate(path):
     for key in keys:
         arrays = []
         for run in runs:
-            arrays.append([float('nan') if v is None else float(v) for v in run[key]])
+            arrays.append([float('nan') if v is None else float(v) for v in run.get(key, [])])
+        if not any(arrays):
+            result[f'{key}_mean'] = []
+            result[f'{key}_std']  = []
+            continue
         min_len = min(len(a) for a in arrays)
         mat = np.array([a[:min_len] for a in arrays], dtype=float)
         result[f'{key}_mean'] = np.nanmean(mat, axis=0).tolist()
@@ -201,15 +213,20 @@ def plot_goldilocks(alpha_r, save_dir):
             result.append(paired)
         return result
 
+    # AI-side echo index: AECI-IE (M1) when present, else AECI-Err (older files)
+    has_ie = all(alpha_r[a].get('aeci_ie_exploit_mean') for a in alphas)
+    ai_key   = 'aeci_ie_exploit' if has_ie else 'aeci_exploit'
+    ai_label = 'AECI-IE' if has_ie else 'AECI-Err'
+
     seci_ms   = ss_pair('seci_exploit', 'seci_explor')
-    aeci_ms   = ss_pair('aeci_exploit', 'aeci_explor')
+    aeci_ms   = ss_pair(ai_key)
     mae_ms    = ss_pair('mae_exploit',  'mae_explor')
     prec_ms   = ss_pair('prec_exploit', 'prec_explor')
     unmet_ms  = [(ss(alpha_r[a]['unmet_needs_mean']),
                   ss(alpha_r[a]['unmet_needs_std'])) for a in alphas]
 
     seci_runs  = ss_runs_pair('seci_exploit', 'seci_explor')
-    aeci_runs  = ss_runs_pair('aeci_exploit', 'aeci_explor')
+    aeci_runs  = ss_runs_pair(ai_key)
     mae_runs   = ss_runs_pair('mae_exploit',  'mae_explor')
     prec_runs  = ss_runs_pair('prec_exploit', 'prec_explor')
     unmet_runs = [alpha_r[a].get('unmet_needs_ss_runs', []) for a in alphas]
@@ -263,7 +280,7 @@ def plot_goldilocks(alpha_r, save_dir):
     ep(axes[0, 0], seci_ms, seci_runs, 'b', 'SECI (-1 to +1)',
        'Social Echo Chamber\n(negative = stronger bubble)', (-1.1, 1.1), hline=0)
 
-    ep(axes[0, 1], aeci_ms, aeci_runs, 'r', 'AECI-Err (-1 to +1)',
+    ep(axes[0, 1], aeci_ms, aeci_runs, 'r', f'{ai_label} (-1 to +1)',
        'AI-Induced Bubble\n(negative = stronger AI bubble)', (-1.1, 1.1), hline=0)
 
     ax = axes[0, 2]
@@ -303,8 +320,11 @@ def plot_timeseries(alpha_r, save_dir):
         return
 
     n_runs = infer_n_runs(alpha_r)
+    _ai_ts = ('aeci_ie_exploit_mean'
+              if all(alpha_r[a].get('aeci_ie_exploit_mean') for a in alphas)
+              else 'aeci_exploit_mean')
     total_vals = [abs(ss(alpha_r[a]['seci_exploit_mean'])) +
-                  abs(ss(alpha_r[a]['aeci_exploit_mean'])) for a in alphas]
+                  abs(ss(alpha_r[a][_ai_ts])) for a in alphas]
     best_alpha = alphas[int(np.nanargmin(total_vals))]
     colors = plt.cm.viridis(np.linspace(0, 1, len(alphas)))
     n_label = f'  (mean ± std, N={n_runs})' if n_runs else ''

@@ -14,6 +14,13 @@ Tests:
   3. consensus (legacy reproduction flag), α=1: exploitative callers receive
      the trusted-network consensus where defined (conf >= 0.2), their own
      prior otherwise; exploratory callers always receive their own prior.
+  4. AECI-IE (M1 information-environment index) construct checks:
+     a. α=1 with a fully converged community (all members hold the same
+        level everywhere): the AI serves back that single level, the served
+        pool has zero variance → AECI-IE ≈ −1 for that community's type.
+     b. α=0: the AI serves (noisy) truth at scattered interest points; the
+        served pool carries the truth's diversity → |AECI-IE| stays far from
+        the echo-chamber pole (no truth-convergence confound).
 
 Run: python3 test_confirmation_target.py
 """
@@ -111,8 +118,115 @@ def test_consensus_flag_reproduces_legacy_targeting():
           f"({n_consensus} consensus-targeted cells)")
 
 
+def _serve_ai_reports_to_community(model, community_idx=0, n_points=8):
+    """Have every member of one stored community receive real AI reports at
+    scattered interest points, logging them exactly as seek_information does.
+    Returns the community's type label."""
+    ai = next(iter(model.ais.values()))
+    nodes, community_type = model.communities[community_idx]
+    # Scattered interest points spanning the grid (deterministic pattern)
+    pts = [(3 + 5 * (i % 5), 3 + 5 * (i // 5)) for i in range(n_points)]
+    for node in nodes:
+        agent = model.humans.get(f"H_{node}")
+        if agent is None:
+            continue
+        for p in pts:
+            report = ai.report_beliefs(p, query_radius=2, caller=agent)
+            for cell, level in report.items():
+                agent.received_report_log['ai'].append((cell, int(round(level))))
+    return community_type
+
+
+def _ie_value_for_type(result, community_type):
+    key = 'exploitative' if community_type == 'exploitative' else 'exploratory'
+    return result['aeci_ie'][key]
+
+
+def test_aeci_ie_converged_caller_alpha1():
+    """α=1 + fully converged community → AI serves one level → AECI-IE ≈ −1."""
+    model = build_model('individual')          # BASE has ai_alignment_level=1.0
+    nodes, community_type = model.communities[0]
+    # Clear residual logs everywhere so only the served community contributes
+    # to its type's per-community average
+    for agent in model.humans.values():
+        agent.received_report_log = {'human': [], 'ai': []}
+    # Converge every member's beliefs on a single level everywhere
+    for node in nodes:
+        agent = model.humans.get(f"H_{node}")
+        if agent is None:
+            continue
+        for cell in agent.beliefs:
+            if isinstance(agent.beliefs[cell], dict):
+                agent.beliefs[cell]['level'] = 3
+                agent.beliefs[cell]['confidence'] = 0.9
+    _serve_ai_reports_to_community(model, 0)
+    result = model.calculate_ie_indices()
+    val = _ie_value_for_type(result, community_type)
+    assert not np.isnan(val), "AECI-IE undefined despite served reports"
+    assert val < -0.95, (
+        f"α=1 with a converged community must yield AECI-IE ≈ −1 "
+        f"(served pool has zero variance), got {val:.3f}")
+    print(f"PASS: AECI-IE ≈ −1 for converged caller at α=1 (value {val:.3f})")
+
+
+def test_aeci_ie_chan_two_converged_communities():
+    """Channel-baseline variant: two same-type communities converged on
+    DIFFERENT levels → each community's served pool has zero variance while
+    the channel's global served pool is diverse → AECI-IE-chan ≈ −1."""
+    model = build_model('individual')          # α=1
+    for agent in model.humans.values():
+        agent.received_report_log = {'human': [], 'ai': []}
+    # communities[0] and [1] share a type by construction (per-type split)
+    (_n0, t0), (_n1, t1) = model.communities[0][:2], model.communities[1][:2]
+    assert t0 == t1, "expected the first two communities to share a type"
+    for comm_idx, level in ((0, 4), (1, 2)):
+        for node in model.communities[comm_idx][0]:
+            agent = model.humans.get(f"H_{node}")
+            if agent is None:
+                continue
+            for cell in agent.beliefs:
+                if isinstance(agent.beliefs[cell], dict):
+                    agent.beliefs[cell]['level'] = level
+                    agent.beliefs[cell]['confidence'] = 0.9
+        _serve_ai_reports_to_community(model, comm_idx)
+    result = model.calculate_ie_indices()
+    key = 'exploitative' if t0 == 'exploitative' else 'exploratory'
+    val = result['aeci_ie_chan'][key]
+    assert not np.isnan(val), "AECI-IE-chan undefined despite served reports"
+    assert val < -0.9, (
+        f"two communities converged on different levels must yield "
+        f"AECI-IE-chan ≈ −1 (zero within-community served variance vs "
+        f"diverse global served pool), got {val:.3f}")
+    print(f"PASS: AECI-IE-chan ≈ −1 for two converged communities at α=1 "
+          f"(value {val:.3f})")
+
+
+def test_aeci_ie_truthful_alpha0():
+    """α=0 → AI serves (noisy) truth → served diversity ≈ global belief
+    diversity → AECI-IE far from the echo-chamber pole."""
+    random.seed(42)
+    np.random.seed(42)
+    model = DisasterModel(confirmation_target='individual',
+                          **{**BASE, 'ai_alignment_level': 0.0})
+    for _ in range(8):
+        model.step()
+    for agent in model.humans.values():
+        agent.received_report_log = {'human': [], 'ai': []}
+    community_type = _serve_ai_reports_to_community(model, 0)
+    result = model.calculate_ie_indices()
+    val = _ie_value_for_type(result, community_type)
+    assert not np.isnan(val), "AECI-IE undefined despite served reports"
+    assert val > -0.5, (
+        f"α=0 (truthful AI) must not read as a deep AI echo chamber; "
+        f"expected AECI-IE well above −0.5, got {val:.3f}")
+    print(f"PASS: AECI-IE stays near 0 for truthful AI at α=0 (value {val:.3f})")
+
+
 if __name__ == '__main__':
     test_individual_alpha1_confirms_own_prior()
     test_individual_is_type_agnostic()
     test_consensus_flag_reproduces_legacy_targeting()
+    test_aeci_ie_converged_caller_alpha1()
+    test_aeci_ie_chan_two_converged_communities()
+    test_aeci_ie_truthful_alpha0()
     print("All confirmation-target smoke tests passed.")

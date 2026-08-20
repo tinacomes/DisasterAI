@@ -47,6 +47,12 @@ def run_one(params):
 
     seci_exploit, seci_explor                   = [], []
     aeci_exploit, aeci_explor                   = [], []
+    aeci_ie_exploit, aeci_ie_explor             = [], []
+    seci_ie_exploit, seci_ie_explor             = [], []
+    aeci_ie_chan_exploit, aeci_ie_chan_explor   = [], []
+    seci_ie_chan_exploit, seci_ie_chan_explor   = [], []
+    ie_pool_ai_exploit, ie_pool_ai_explor       = [], []
+    ie_pool_human_exploit, ie_pool_human_explor = [], []
     lockin_exploit, lockin_explor               = [], []
     l1pool_exploit, l1pool_explor               = [], []
     mae_exploit,  mae_explor                    = [], []
@@ -99,6 +105,28 @@ def run_one(params):
             seci_explor.append( float(model.seci_data[-1][2]) if model.seci_data else float('nan'))
             aeci_exploit.append(float(model.aeci_data[-1][1]) if model.aeci_data else float('nan'))
             aeci_explor.append( float(model.aeci_data[-1][2]) if model.aeci_data else float('nan'))
+            # Information-environment echo indices (M1): AECI-IE (AI channel)
+            # and SECI-IE (human channel, SECI consistency check), plus the
+            # per-community L1+ report-pool sizes (shrinkage context)
+            _ie  = model.aeci_ie_data[-1] if model.aeci_ie_data else (0, float('nan'), float('nan'))
+            aeci_ie_exploit.append(float(_ie[1]))
+            aeci_ie_explor.append( float(_ie[2]))
+            _sie = model.seci_ie_data[-1] if model.seci_ie_data else (0, float('nan'), float('nan'))
+            seci_ie_exploit.append(float(_sie[1]))
+            seci_ie_explor.append( float(_sie[2]))
+            # Channel-baseline variant (community served pool vs global served
+            # pool of the same channel — the strict SECI parallel)
+            _iec = model.aeci_ie_chan_data[-1] if model.aeci_ie_chan_data else (0, float('nan'), float('nan'))
+            aeci_ie_chan_exploit.append(float(_iec[1]))
+            aeci_ie_chan_explor.append( float(_iec[2]))
+            _sec = model.seci_ie_chan_data[-1] if model.seci_ie_chan_data else (0, float('nan'), float('nan'))
+            seci_ie_chan_exploit.append(float(_sec[1]))
+            seci_ie_chan_explor.append( float(_sec[2]))
+            _ip  = model.ie_pool_data[-1] if model.ie_pool_data else (0,) + (float('nan'),) * 4
+            ie_pool_ai_exploit.append(   float(_ip[1]))
+            ie_pool_ai_explor.append(    float(_ip[2]))
+            ie_pool_human_exploit.append(float(_ip[3]))
+            ie_pool_human_explor.append( float(_ip[4]))
             # AECI-LockIn (negative = AI-heavy agents' beliefs more frozen) and
             # per-type L1+ belief pool size (context for SECI)
             _lk = model.aeci_lockin_data[-1] if model.aeci_lockin_data else (0, None, None)
@@ -140,6 +168,18 @@ def run_one(params):
         'seci_explor':            seci_explor,
         'aeci_exploit':           aeci_exploit,
         'aeci_explor':            aeci_explor,
+        'aeci_ie_exploit':        aeci_ie_exploit,
+        'aeci_ie_explor':         aeci_ie_explor,
+        'seci_ie_exploit':        seci_ie_exploit,
+        'seci_ie_explor':         seci_ie_explor,
+        'aeci_ie_chan_exploit':   aeci_ie_chan_exploit,
+        'aeci_ie_chan_explor':    aeci_ie_chan_explor,
+        'seci_ie_chan_exploit':   seci_ie_chan_exploit,
+        'seci_ie_chan_explor':    seci_ie_chan_explor,
+        'ie_pool_ai_exploit':     ie_pool_ai_exploit,
+        'ie_pool_ai_explor':      ie_pool_ai_explor,
+        'ie_pool_human_exploit':  ie_pool_human_exploit,
+        'ie_pool_human_explor':   ie_pool_human_explor,
         'lockin_exploit':         lockin_exploit,
         'lockin_explor':          lockin_explor,
         'l1pool_exploit':         l1pool_exploit,
@@ -225,8 +265,11 @@ def main():
         'condition': {k: params[k] for k in params},
         'n_runs': args.n_runs,
         # aeci_* series use NEGATIVE = echo chamber (unified 2026-07 convention);
-        # plot_results.py flips files that lack this marker.
-        'conventions': {'aeci_err_sign': 'negative_echo'},
+        # plot_results.py flips files that lack this marker. The M1
+        # information-environment indices (aeci_ie_*, seci_ie_*) were born
+        # with the negative = echo convention — no flipping ever needed.
+        'conventions': {'aeci_err_sign': 'negative_echo',
+                        'ie_sign': 'negative_echo'},
         'runs': runs,
     }
 
