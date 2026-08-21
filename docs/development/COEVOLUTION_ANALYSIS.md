@@ -1,5 +1,19 @@
 # SECI/AECI co-evolution and the social→AI bubble handover
 
+> **SUPERSEDED IN PART (2026-08-21).** Section 2's per-type table came from
+> a 4-seed / 150-tick zoom and does **not** replicate at N=20 / 200 ticks
+> (`results-final/`, run 32412891328). At N=20 the AECI-IE dose–response
+> belongs to the **exploiters** (−0.18 at α=0, deepest −0.46 at α=0.5,
+> reverting to −0.16 at α=1.0) while **explorers are flat near zero** in the
+> main model (|AECI-IE| ≤ 0.09 at every α). Two conclusions below survive
+> unchanged, now on N=20 evidence: the exploiter AI-channel bubble
+> **dissolves under unrestricted access and persists under network-gated
+> access** at α≥0.9 (−0.02/−0.01 vs −0.22/−0.16; paired Δ −0.201
+> [−0.340,−0.063] and −0.154 [−0.266,−0.042]), which is Finding 1 reproduced
+> on the AI channel; and the **rounding-saturation** diagnosis (delivered
+> confirmation = 1.00 at α≥0.9). Section 1's high-α analysis and the
+> effective-α mechanism are unaffected.
+
 Analysis of the author's hypothesis: *at low α, explorers are AI-reliant
 and thereby form a (shared-source) bubble; exploiters do the opposite —
 they migrate from a social bubble to an AI-induced bubble as α rises.*

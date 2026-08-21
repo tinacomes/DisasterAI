@@ -199,7 +199,30 @@ trajectories verified bit-identical on pinned seeds before and after.
    `results-final/`; Fig. 2 and Fig. 3a require new panel layouts
    (`comparison_configs_pertype.png`, `goldilocks_pnas.png`).
 
-**Two findings from validation that affect the text** (details in
+**Corrected on the N=20 data (2026-08-21).** Two conclusions previously
+recorded from 3–4-seed local runs do not replicate on `results-final/` and
+have been annotated as superseded in `docs/development/`:
+
+- **The AECI-IE dose–response belongs to the confirmation-seekers, not the
+  accuracy-seekers.** Main model: exploiter AECI-IE −0.183±0.037 at α=0,
+  deepening seed-robustly to −0.457 at α=0.5 (paired within-config contrasts
+  vs α=0 exclude zero at every level 0.1–0.8), then reverting to −0.164 at
+  α=1.0 as delivery saturates. Explorer AECI-IE is flat within 0.09 of zero
+  at every α; their harm runs through pool collapse, which a variance ratio
+  over a shrinking pool cannot register. In the *control*, explorer AECI-IE
+  collapses to −0.377/−0.351 at α≥0.9.
+- **α\* is NOT interior under the M1 primary composite.** |SECI|+|AECI-IE|
+  is minimised at α\*=0 in the main model. Removing AECI-Var's
+  truth-convergence confound removes the artifact that produced the interior
+  minimum. **The interior optimum survives on raw operational outcomes**:
+  unmet needs fall from 1.11/tick at α=0 to 0.38–0.67 for α∈[0.4,0.7]
+  (paired deltas −0.44…−0.73, CIs exclude zero) and rise to 2.72/3.08 at
+  α≥0.9; the control shows the same shape (2.17 → 0.49–1.23 → 9.94/10.53).
+  Finding 2 in the manuscript is re-grounded on these outcome contrasts
+  rather than on the normalised composite. **This is an author-level
+  reframing of the Goldilocks claim and needs your sign-off.**
+
+**Two mechanism findings that affect the text** (details in
 `docs/development/`):
 
 - The belief-baseline AECI-IE collapses onto SECI for exploiters at

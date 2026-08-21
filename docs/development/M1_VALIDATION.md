@@ -1,5 +1,25 @@
 # M1 validation — AECI-IE / SECI-IE (information-environment echo indices)
 
+> **SUPERSEDED IN PART (2026-08-21).** The per-type verdict below was
+> derived from local runs of 3–4 seeds at 150 ticks. It does **not**
+> replicate on the citable N=20 / 200-tick dataset (`results-final/`,
+> run 32412891328), and the N=20 result is authoritative. Corrected
+> per-type picture, main model, AECI-IE (belief baseline):
+>
+> | | α=0 | deepest | α=0.9 | α=1.0 |
+> |---|---|---|---|---|
+> | exploit | −0.183±0.037 | **−0.457** (α=0.5) | −0.222 | −0.164 |
+> | explor  | −0.020±0.017 | −0.089 (α=0.5) | −0.065 | −0.055 |
+>
+> So the dose–response lives in the **confirmation-seekers** (seed-robustly
+> below their own α=0 value at every level 0.1–0.8, paired within-config
+> CIs excluding zero), reverting at α≥0.9 where delivery saturates — the
+> reverse of the assignment stated below. Accuracy-seekers are flat near
+> zero in the main model; in the control they collapse to −0.377/−0.351 at
+> α≥0.9. Section 4's decision question stands, but option (a) must be read
+> with the types swapped. The mechanism analysis in sections 3 and the
+> smoke-test results are unaffected.
+
 **Status: implementation complete and verified observation-only; the
 validation criteria pass per-type for explorers and for the SECI-IE
 consistency check, but FAIL for exploiters under both normalization
