@@ -160,3 +160,54 @@ reward-channel fixes, not to the targeting.
 
 Full provenance and per-directory READMEs: `results/README.md`,
 `results-verification/README.md`, `results-ablation-consensus/README.md`.
+
+## 9. Status update (2026-08-21) — M1–M7 implemented, runs completed
+
+**Code (all on `claude/pnas-paper-implementation-aqryq7`, merged through
+PR #77 plus follow-ups).** M1 metrics (AECI-IE, SECI-IE, the channel- and
+community-relative variants), the co-evolution series (AI reliance share,
+delivered/effective α), M4 `tools/sweep_regression.py`, M6
+`experiments/dyadic_docking.py`, `tools/coevolution.py`, and the
+M2/M3/M5/M7 workflows and CLI flags. All metrics are observation-only:
+trajectories verified bit-identical on pinned seeds before and after.
+
+**Runs.**
+
+| Purpose | Run | Status |
+|---|---|---|
+| N=20 paired sweep, M1 columns | 32404133354 | success; superseded |
+| **N=20 paired sweep + co-evolution columns** | **32412891328** | **success — `results-final` candidate** |
+| M2 cognitive-gap sweep (132 cells, main model) | 32425907960 | success (Fig. 3b input) |
+
+**Author actions to close the loop.**
+
+1. Archive run **32412891328** as `results-final/` and run **32425907960**
+   as `results-gap-sweep-fixed/` (*Archive Run Artifacts*, `dest=` each).
+   Artifact/CDN hosts are unreachable from the sandboxed agent
+   environment, so archiving is the only route by which those numbers
+   become extractable in-repo.
+2. Extract the **per-type AECI-IE endpoints** from `results-final/`
+   (`tools/coevolution.py`) and fill the five `\fillnum{}` placeholders in
+   `DisasterAIFilter_PNAS.tex`. The compare workflow reports AECI-IE
+   type-averaged only, and type-averaging cancels the two type-specific
+   trends (see `docs/development/COEVOLUTION_ANALYSIS.md`).
+3. **M1 metric decision** (`docs/development/M1_VALIDATION.md` §4) and
+   **M7 salience decision**; both change manuscript text.
+4. **M3** (N=50 boundary) and **M5** (robustness envelope) are dispatchable
+   now that the workflows are on `main`.
+5. **M8** figure regeneration: Figs. 2–4 need per-type panels from
+   `results-final/`; Fig. 2 and Fig. 3a require new panel layouts
+   (`comparison_configs_pertype.png`, `goldilocks_pnas.png`).
+
+**Two findings from validation that affect the text** (details in
+`docs/development/`):
+
+- The belief-baseline AECI-IE collapses onto SECI for exploiters at
+  α ≥ 0.8 (per-seed r = 0.89–0.95), so it is not an independent AI-side
+  measurement there. Report it per type; the exploiter handover claim
+  rides on AECI-IE-rel → 0 plus flat-high reliance plus flat MAE.
+- Integer rounding of served reports makes delivered confirmation a step
+  function of α that saturates at α ≥ 0.9 (α=0.9 and α=1.0 are identical
+  at the report level). The operational cliff coincides with this
+  boundary. Probabilistic rounding would linearize the dose but changes
+  trajectories — an author decision, not applied.
