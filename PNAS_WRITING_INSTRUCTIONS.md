@@ -29,18 +29,18 @@ general-interest findings (the salience counterfactual's *social
 retrenchment* — making disconfirmation salient ejects confirmation-seekers
 into their network rather than toward truth — and the
 fragmentation-vs-societal two-layer result). The Lorenz/Becker/Cinelli
-lineage argument still holds. **However**, three things weigh against PNAS
-Direct Submission today: (i) this is a pure-simulation paper whose only
-external-validity anchor — the M6 dyadic docking against Glickman & Sharot
-— has not yet been run; (ii) the supporting envelope (M2 re-run, M3 N=50
+lineage argument still holds. **However**, two things still weigh against PNAS
+Direct Submission today: (i) the supporting envelope (M2 re-run, M3 N=50
 boundary, M4 statistics, M5 robustness) is still outstanding, and PNAS
-reviewers of ABM work reliably probe exactly there; (iii) the model and
+reviewers of ABM work reliably probe exactly there; (ii) the model and
 metrics went through several late revisions, so the paper needs the full
 ablation chain in the SI to be credible, which pushes against the 6-page
-format. **Recommendation: draft to the PNAS format but target PNAS Nexus.**
-Escalate to PNAS Direct Submission only if the M6 docking qualitatively
-reproduces Glickman & Sharot AND M2–M5 hold; that combination is the one
-configuration in which the stretch is justified. Drop NHB as a target: it
+format. *(Update 2026-08-25: the M6 docking gate is **satisfied** —
+`results-docking/` reproduces Glickman & Sharot's dyadic amplification
+qualitatively for both agent types.)* **Recommendation: draft to the PNAS
+format but target PNAS Nexus.** Escalate to PNAS Direct Submission only if
+M2–M5 also hold; with M6 passed, that combination is the one configuration
+in which the stretch is justified. Drop NHB as a target: it
 is harder than PNAS for this genre and the manuscript has moved away from
 the NHB framing. The word budget, display-item limits, and style rules
 below are PNAS-family rules and apply unchanged to Nexus.

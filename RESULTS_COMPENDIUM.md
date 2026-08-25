@@ -158,7 +158,8 @@ immobile control (structural null holds under the revised model).
 
 ## 4. What must still (re-)run before submission
 
-1. **M2 re-run** — cognitive-gap sweep under `30f89e0` (the archived
+1. **M2 re-run — IN PROGRESS** (run 32866377905, dispatched 2026-08-25):
+   cognitive-gap sweep under the revised model (the archived
    `results-gap-sweep-fixed/` is pre-revision and its surface was flattened
    by the step-function dose; the smooth dose may restore the gradient).
 2. **M3** — N=50 boundary cells (α ∈ {0.8, 0.9, 1.0}) on the revised model.
@@ -167,9 +168,13 @@ immobile control (structural null holds under the revised model).
 4. **M5** — robustness envelope (population, topology, AI supply,
    verification probability): `docs/robustness_summary.md` is still
    **PENDING RUNS**.
-5. **M6** — dyadic docking vs Glickman & Sharot
-   (`experiments/dyadic_docking.py`) — not yet run; this is the paper's
-   main external-validity anchor.
+5. **M6 — DONE, PASS** ([`results-docking/`](results-docking/README.md),
+   run 32866369049): the dyad qualitatively reproduces Glickman & Sharot's
+   human–AI amplification for both agent types (false belief corrected
+   under truthful AI, fully preserved under confirming AI, smooth
+   gradient; aligned AI retains more bias than a human partner). The
+   external-validity anchor is in place; the venue escalation now hinges
+   on M2–M5.
 
 ## 5. Documents to check (author)
 
