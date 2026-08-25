@@ -314,10 +314,11 @@ only; all numbers below are from **`results-mechfix/`** (verified against
    **Where:** cites **Fig. 2d** (unmet needs vs α, both configurations),
    **Fig. S3** (AI query share and trust trajectories per type; the C12
    flat explorer-trust curve is panel S3b), **Table S8** (salience cells,
-   from `results-salience/`); cognitive-gap dependence of the optimum
-   cites **Fig. 3b** (from the M2 RE-RUN — do not draft this sentence
-   until it exists). Inline numbers: query-share endpoints, unmet-needs
-   contrast, the two salience contrasts.
+   from `results-salience/`); the optimum's robustness to the
+   population's cognitive profile cites **Fig. 3b** (M2 re-run: interior
+   α\* in every (g, d_mid) cell — a robustness claim, NOT a dependence
+   claim; see the Fig. 3b spec in §4). Inline numbers: query-share
+   endpoints, unmet-needs contrast, the two salience contrasts.
 4. *Harms concentrate on the spatial periphery* (compendium H8). Key
    message: spatial MAE gap +0.12→+0.33 and aid gap −1.8→−6.6 with α in
    the main model; ≈0 at all α in the immobile control (structural null);
@@ -391,7 +392,14 @@ Main text (4 items, all figures; no main-text tables — every table is SI):
   composite overlaid, and the control's curve for contrast (both now
   interior — the caption notes the old corner solution was a dose
   artifact, citing the rounding ablation); **(b)** cognitive-gap sweep
-  (from the **M2 RE-RUN** — placeholder until it exists).
+  (from `results-gap-sweep-mechfix/`, all 132 cells) — **REFRAMED as a
+  robustness panel**: α\* (population bubble and unmet-needs) across the
+  (g, d_mid) grid, showing the interior optimum is invariant to the
+  population's cognitive profile (0.6–0.8 in every cell). Do NOT claim
+  the optimum's location depends on the cognitive profile — the M2 re-run
+  does not support it at the population/operational level; the per-type
+  drift with g (0.2–0.5 → 0.6–0.7) may be mentioned as suggestive only
+  with M4 CIs.
 - **Fig. 4 — Periphery** two panels: **(a)** spatial MAE gap (far − near
   quartile) vs α, main vs control; **(b)** aid-contribution gap vs α, same
   overlay; basis `periphery_gap.png` from `results-mechfix/`.

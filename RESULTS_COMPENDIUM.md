@@ -158,10 +158,16 @@ immobile control (structural null holds under the revised model).
 
 ## 4. What must still (re-)run before submission
 
-1. **M2 re-run — IN PROGRESS** (run 32866377905, dispatched 2026-08-25):
-   cognitive-gap sweep under the revised model (the archived
-   `results-gap-sweep-fixed/` is pre-revision and its surface was flattened
-   by the step-function dose; the smooth dose may restore the gradient).
+1. **M2 re-run — DONE**
+   ([`results-gap-sweep-mechfix/`](results-gap-sweep-mechfix/README.md),
+   run 32866377905, all 132 cells): the interior optimum holds in **every**
+   (g, d_mid) cell (unmet α\* = 0.6–0.7; population bubble α\* = 0.6–0.8;
+   explorer MAE ≈0.55→1.75 everywhere). The intended "optimum location
+   depends on the cognitive profile" claim is NOT supported at the
+   population/operational level — reframe Fig. 3b as a **robustness**
+   result (the optimum is structural, not a knife-edge of the D/δ mix);
+   only the per-type channel composite drifts with the gap (suggestive,
+   needs M4 CIs).
 2. **M3** — N=50 boundary cells (α ∈ {0.8, 0.9, 1.0}) on the revised model.
 3. **M4** — mixed-model regressions + Holm-corrected contrasts
    (`tools/sweep_regression.py`) over `results-mechfix/`.
