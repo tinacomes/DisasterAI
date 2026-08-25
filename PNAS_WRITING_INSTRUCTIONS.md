@@ -1,19 +1,49 @@
-# Writing Instructions — PNAS Manuscript (DisasterAIFilter)
+# Writing Instructions — PNAS-family Manuscript (DisasterAIFilter)
 
-Instructions for drafting `DisasterAIFilter_PNAS.tex` from the existing NHB
-manuscript (`DisasterAIFilter_NHB.tex`; the ~3,000-word version at commit
-`2c2a09e` on branch `claude/latex-merge-restructure-0x2rhf` is the preferred
-base). **All results statements must be based on the fixed-model verification
-run** (`results-verification/`, run 32298278561) — never on the legacy numbers
-in `results/`. Companion document: `RESULTS_OVERVIEW.md` (citable numbers).
+*Revised 2026-08-25 after the mechanism revision (`30f89e0`) and its
+ablation/counterfactual chain.*
 
-## 1. Target journals
+Instructions for drafting the manuscript from the existing NHB draft
+(`DisasterAIFilter_NHB.tex`; the ~3,000-word version at commit `2c2a09e` on
+branch `claude/latex-merge-restructure-0x2rhf` is the preferred base).
+**All results statements must be based on the revised-model canonical run**
+(`results-mechfix/`, run 32821105202) — never on `results-final/`,
+`results-verification/`, or legacy `results/` numbers (those appear only in
+the SI transparency chain). Companion documents:
+**`RESULTS_COMPENDIUM.md`** (every claim → dataset/figure/table) and
+`RESULTS_OVERVIEW.md` §0.
 
-| Priority | Journal | Route | Rationale |
+## 1. Target venue — assessment and recommendation
+
+| Priority | Journal | Route | Verdict |
 |---|---|---|---|
-| 1 | **PNAS** | Direct Submission; Social Sciences → Psychological and Cognitive Sciences; optional dual classification Physical Sciences → Computer Sciences | Theory-building simulation without new empirical data is a PNAS genre; the paper's closest methodological ancestors (Lorenz et al. 2011; Becker et al. 2017) and its echo-chamber measurement reference (Cinelli et al. 2021) are PNAS papers |
-| 2 | PNAS Nexus | Direct submission | Same audience and format family; faster; accepts transfers |
-| 3 | Nature Human Behaviour | Full resubmission (previous target) | Fits the Glickman & Sharot (2024) lineage; requires reverting to NHB format |
+| 1 | **PNAS Nexus** | Direct submission (PNAS format family) | **Recommended primary target** — see assessment below |
+| 2 | PNAS | Direct Submission; Social Sciences → Psychological and Cognitive Sciences | Keep as stretch option, contingent on M6 docking + M2–M5 coming back clean |
+| 3 | Journal of Computational Social Science / JASSS | Direct | Safety net; format rework is minor from the PNAS draft |
+
+**Honest fit assessment (2026-08-25).** The scientific story is now
+stronger than when PNAS Direct Submission was chosen: the interior optimum
+is composite-robust (α\*=0.6, 7/12 definitions), attributable
+(single-mechanism ablations), and accompanied by two genuinely
+general-interest findings (the salience counterfactual's *social
+retrenchment* — making disconfirmation salient ejects confirmation-seekers
+into their network rather than toward truth — and the
+fragmentation-vs-societal two-layer result). The Lorenz/Becker/Cinelli
+lineage argument still holds. **However**, three things weigh against PNAS
+Direct Submission today: (i) this is a pure-simulation paper whose only
+external-validity anchor — the M6 dyadic docking against Glickman & Sharot
+— has not yet been run; (ii) the supporting envelope (M2 re-run, M3 N=50
+boundary, M4 statistics, M5 robustness) is still outstanding, and PNAS
+reviewers of ABM work reliably probe exactly there; (iii) the model and
+metrics went through several late revisions, so the paper needs the full
+ablation chain in the SI to be credible, which pushes against the 6-page
+format. **Recommendation: draft to the PNAS format but target PNAS Nexus.**
+Escalate to PNAS Direct Submission only if the M6 docking qualitatively
+reproduces Glickman & Sharot AND M2–M5 hold; that combination is the one
+configuration in which the stretch is justified. Drop NHB as a target: it
+is harder than PNAS for this genre and the manuscript has moved away from
+the NHB framing. The word budget, display-item limits, and style rules
+below are PNAS-family rules and apply unchanged to Nexus.
 
 Format constraints to write to (verify against the current PNAS author
 guidelines at submission): main text ≈ **4,000–4,500 words** fitting the
@@ -28,12 +58,43 @@ compilable during drafting with a header comment noting the swap to
 `pnas-new.cls` at submission. All citation keys must resolve against
 `References.bib` in `tinacomes/DisasterAIFilterPaper`; add no new references.
 
-## 2. Remaining modelling steps (M1–M8) — complete before drafting Results
+## 2. Modelling steps — status after the 2026-08-25 mechanism revision
 
-Ordered plan; M1 defines the final citable dataset and gates everything else.
-M2/M3 can run in parallel after M1; M4 consumes M1+M3; M5–M7 are SI material;
-M8 is last. All runs use the fixed model (`55d4b2b`+, `confirmation_target=
-individual` default) with the standard seed-pairing (replicate *i* ← seed *i*).
+The list below preserves the original M1–M8 plan for traceability, with the
+**current status** prepended per step. All remaining runs use the revised
+model (`30f89e0`+: `confirmation_reference=network`,
+`report_rounding=stochastic`, `confirmation_target=individual`) with the
+standard seed-pairing (replicate *i* ← seed *i*).
+
+- **M0′ (new, DONE)** — mechanism revision + attribution: exploiter
+  network confirmation reference; stochastic report rounding (delivered
+  dose linear in α); salience extended to the confirmation channel;
+  population-level metric layer. Canonical dataset **`results-mechfix/`**;
+  single-mechanism ablations `results-ablation-ownref/` (inert) and
+  `results-ablation-detround/` (dose linearisation drives the robust
+  interior α\*). Cite from `RESULTS_COMPENDIUM.md`.
+- **M1 (RESOLVED, differently than planned)** — the belief-baseline
+  AECI-IE did NOT validate as the primary AI-side index (≈0 for explorers
+  in the main model pre-revision; exploiter series confounded; magnitude
+  aggregation-fragile). The paper's AI-side pair is the **channel-baseline
+  AECI-IE-chan (per type) + AECI-IE-chan-pop (population)**, with
+  AECI-LockIn + L1+ pool as individual-lock-in evidence. The original M1
+  spec below stands as design history only.
+- **M2 (RE-RUN REQUIRED)** — the archived `results-gap-sweep-fixed/` is
+  pre-revision; the step-function dose flattened the surface. Re-dispatch
+  `run-gap-sweep.yml` on `30f89e0`+ before Fig. 3b exists.
+- **M3, M4, M5, M6 (PENDING)** — unchanged in intent; run against
+  `results-mechfix/` seeds and the revised model. M6 (dyadic docking) now
+  also gates the venue decision (§1).
+- **M7 (DECIDED, `results-salience/`)** — `salience_weight=0` stays
+  mainline; C12 robust at every salience level; NEW finding: at s=1 the
+  exploiter capture gradient vanishes via social retrenchment (chamber
+  deepens −0.52 vs −0.37 at α=0; precision falls 0.43 vs 0.57). Goes to
+  Finding 3 + Discussion, with **Table S8** (salience cells).
+- **M8** — final figures from `results-mechfix/` (+ M2 re-run for
+  Fig. 3b); Zenodo DOI over all results directories.
+
+--- Original plan (design history; supersede numbers with the compendium) ---
 
 **M1 — Metric revision: a SECI-comparable AI echo index (highest priority).**
 Verdict on the current AECI family: **AECI-Var is inadequate** as the AI-side
@@ -199,58 +260,84 @@ named citation keys (all resolve in `References.bib`):
   "confirmation of the beliefs held by the querier's community" with
   "confirmation of the querier's own prior beliefs".
 
-**Results — the four findings: key messages and exactly what goes where.**
-Each subsection cites its own display material only; numbers below are from
-`results-verification/` and must be re-extracted from `results-final/` after
-M1 (expected identical for existing metrics; AECI-IE values are new).
+**Results — four findings plus the societal layer: key messages and
+exactly what goes where.** Each subsection cites its own display material
+only; all numbers below are from **`results-mechfix/`** (verified against
+`RESULTS_COMPENDIUM.md` §2 — re-check there before quoting).
 
-1. *Network-bounded access is the structural precondition* (§F1 of
-   RESULTS_OVERVIEW). Key message: under unrestricted access, high alignment
-   *dissolves* the confirmation-seekers' community echo chamber (SECI ≈ +0.02);
-   under network-gated access it persists (−0.27/−0.31); paired ΔSECI_exploit
-   −0.29/−0.34 at α=0.9/1.0, CI excluding zero. Report SECI **per agent
-   type** — the combined index conceals that the α-gradient is explorer-driven
-   and the configuration contrast exploiter-driven.
+1. *Network-bounded access is the structural precondition* (compendium H3).
+   Key message: under unrestricted access, high alignment *dissolves* the
+   confirmation-seekers' community echo chamber (SECI_exploit −0.45 →
+   **+0.05**); under network-gated access it persists at every α (−0.39 …
+   −0.18); the explorer chamber deepens 0 → −0.33 in both configurations.
+   Combined paired ΔSECI at α=1: −0.140 [−0.211, −0.069] (per-type paired
+   deltas from M4 replace this once available). Report SECI **per agent
+   type** — the combined index conceals that the α-gradient is
+   explorer-driven and the configuration contrast exploiter-driven.
    **Where:** cites **Fig. 2a** (exploiter SECI vs α, both configurations —
    the dissolution-vs-persistence crossing IS this figure's job) and
    **Fig. 2b** (explorer SECI, both configurations, showing the shared
    deepening); paired deltas with Holm-corrected CIs in **Table S1**
-   (from M4); lifecycle in **Fig. S1**. Inline numbers: the two SECI_exploit
-   endpoints, the two paired deltas with CIs.
-2. *Confirming AI harms through starvation, not persuasion* (§F2). Key
-   message: the accuracy cost of alignment falls entirely on accuracy-seekers
-   (explorer MAE 0.55→1.75; exploiter MAE flat ≈1.8); mechanism: L1+ belief
-   pool collapse 114→27 per agent; the AI-channel echo index (AECI-IE, M1)
-   deepens with α while ≈0 at the truthful endpoint. Interior optimum:
-   α* ∈ [0.3, 0.6] across composites in the main model; in the control,
-   bubble-only composites select α*=1.0 — state interiority with this
-   qualifier.
-   **Where:** cites **Fig. 2c** (per-type MAE vs α, both configurations) and
-   **Fig. 3a** (composite vs α with the α* spread band; control curve
-   overlaid); the starvation mechanism cites **Fig. S2** (L1+ pool + LockIn
-   vs α); α* sensitivity across composite variants (including the retired
-   AECI-Var variant for transparency) in **Table S2**. Inline numbers: MAE
-   endpoints per type, pool collapse 114→27, α* spread.
-3. *The feedback loop: capture and lock-in* (§F3). Key message: exploiters'
-   AI query share rises 0.47→0.70 (capture); AI-heavy explorers' beliefs
-   freeze (LockIn −0.04→−0.16); explorers do NOT discriminate against
-   confirming AI at high α because verification is base-rate dominated
-   (finding C12) — a substantive finding about why accuracy-seeking fails,
-   not a limitation. Network-bounded access buffers the operational collapse
-   (unmet needs 3.1 vs 10.3 at α=1; exploiter precision 0.37 vs 0.22).
-   **Where:** cites **Fig. 2d** (unmet needs vs α, both configurations) and
-   **Fig. S3** (AI query share and AI trust trajectories per type; the C12
-   flat explorer-trust curve is panel S3b); cognitive-gap dependence of the
-   optimum cites **Fig. 3b** (from M2). Inline numbers: query-share
-   endpoints, unmet-needs contrast, explorer trust at α=1.
-4. *Harms concentrate on the spatial periphery* (§F4). Key message: spatial
-   MAE gap +0.13→+0.32 and aid gap −1.8→−6.6 with α in the main model; ≈0 in
-   the immobile control (structural null); betweenness/broker gaps small —
-   the periphery is spatial, not graph-positional, under mobility.
-   **Where:** cites **Fig. 4a** (spatial MAE gap vs α, both configurations)
-   and **Fig. 4b** (aid-contribution gap vs α); within-run gap evolution in
-   **Fig. S4**; network-centrality decomposition in **Table S3**. Inline
-   numbers: the two gap endpoints per configuration.
+   (from M4); lifecycle/evolution in **Fig. S1** (basis:
+   `population_evolution.png`, per-type columns). Inline numbers: the two
+   SECI_exploit endpoints, the paired delta with CI.
+2. *Confirming AI harms through starvation, not persuasion* (compendium
+   H4 + H1). Key message: the accuracy cost of alignment falls entirely on
+   accuracy-seekers (explorer MAE 0.54→1.74; exploiter MAE flat ≈1.8), and
+   the dose–response is smooth in α (delivered dose linear — cite
+   `effective_alpha` once); mechanism: L1+ belief pool collapse 113→29 per
+   agent. Interior optimum: **α\* = 0.6 for 7/12 composite definitions**
+   in the main model (spread [0.1, 0.6]); control bubble composites
+   0.8–0.9 — interior in BOTH configurations (the old control corner
+   solution was a dose artifact; state this in one sentence with the
+   ablation citation).
+   **Where:** cites **Fig. 2c** (per-type MAE vs α, both configurations)
+   and **Fig. 3a** (composite vs α with the α\* marks; population
+   composite as the headline curve, per-type composite overlaid); the
+   starvation mechanism cites **Fig. S2** (L1+ pool + LockIn vs α); α\*
+   sensitivity across all 12 variants (incl. retired AECI-Var and the two
+   single-mechanism ablations) in **Table S2**. Inline numbers: MAE
+   endpoints per type, pool collapse 113→29, α\*=0.6 with the 7/12 count.
+3. *The feedback loop: capture, lock-in — and the retrenchment
+   counterfactual* (compendium H5 + H6). Key message: exploiters' AI query
+   share rises 0.54→0.69 (capture) while their AI trust stays flat ≈0.47;
+   AI-heavy explorers' beliefs freeze (LockIn −0.01→−0.13); explorers do
+   NOT discriminate against confirming AI at high α because verification
+   is base-rate dominated (C12: trust 0.88→0.84, and 0.90→0.82 even under
+   full salience — robust). NEW counterfactual result: making
+   disconfirmation salient (s=1) eliminates the capture gradient (AI share
+   flat ≈0.5) but produces **social retrenchment**, not accuracy — at the
+   truthful endpoint the exploiter chamber deepens (SECI −0.52 vs −0.37)
+   and precision falls (0.43 vs 0.57). Network-bounded access buffers the
+   operational collapse (unmet needs 2.86 vs 10.18 at α=1; explorer
+   precision 0.62 vs 0.20).
+   **Where:** cites **Fig. 2d** (unmet needs vs α, both configurations),
+   **Fig. S3** (AI query share and trust trajectories per type; the C12
+   flat explorer-trust curve is panel S3b), **Table S8** (salience cells,
+   from `results-salience/`); cognitive-gap dependence of the optimum
+   cites **Fig. 3b** (from the M2 RE-RUN — do not draft this sentence
+   until it exists). Inline numbers: query-share endpoints, unmet-needs
+   contrast, the two salience contrasts.
+4. *Harms concentrate on the spatial periphery* (compendium H8). Key
+   message: spatial MAE gap +0.12→+0.33 and aid gap −1.8→−6.6 with α in
+   the main model; ≈0 at all α in the immobile control (structural null);
+   betweenness/broker gaps small — the periphery is spatial, not
+   graph-positional, under mobility.
+   **Where:** cites **Fig. 4a** (spatial MAE gap vs α, both
+   configurations) and **Fig. 4b** (aid-contribution gap vs α); within-run
+   gap evolution in **Fig. S4**; network-centrality decomposition in
+   **Table S3**. Inline numbers: the two gap endpoints per configuration.
+5. *The societal layer* (compendium H7) — woven into Findings 1–2, not a
+   separate subsection: (a) one sentence in Finding 1 that the
+   population-level SECI **masks** the per-type crossing (−0.22 → 0.00 in
+   the control) — the fragmentation lens is not optional; (b) one sentence
+   in Finding 2 that the population information-environment index
+   (AECI-IE-chan-pop) is U-shaped in α in both configurations (shallowest
+   ≈ α=0.7), aligning the served-information evidence with the operational
+   optimum; the population composites are also the most ablation-robust
+   α\* definition (0.6 in all three revised-model datasets). **Where:**
+   both sentences cite **Fig. S5** (basis: `population_evolution.png`,
+   population column).
 
 **Discussion.** (a) The mechanism synthesis: sycophantic AI *captures*
 confirmation-seekers and *starves* accuracy-seekers; social structure decides
@@ -265,12 +352,18 @@ hazard, N=100, exogenous verification channel, single uniform AI policy;
 cognitive-gap sweep caveat for transferring α* across populations.
 
 **Materials & Methods (main text, concise).** Agent types (D/δ, learning
-rates, evaluation channels), the alignment formula r = (1−α)t + αb with **b =
-the querier's own current belief for both types**, network/mobility switches,
-metrics (SECI, AECI-IE with its SECI-IE consistency check, LockIn, L1+ pool, AECI-Err as secondary, MAE, unmet needs, precision),
+rates, evaluation channels — including that exploiters score confirmation
+against their **trusted-network consensus** when defined, own prior
+otherwise: `confirmation_reference=network`), the alignment formula
+r = (1−α)t + αb with **b = the querier's own current belief for both
+types** and **stochastic rounding of the delivered report** (dose linear
+in α; manipulation check `effective_alpha`), network/mobility switches,
+metrics (SECI per type + population; AECI-IE-chan per type + population
+with the SECI-IE-chan consistency check; LockIn; L1+ pool; MAE; unmet
+needs; precision; AECI-Err/AECI-Var as retired variants in the SI),
 experimental design (11 α × 20 seed-paired replications × 200 ticks × 2
-configurations). Full ODD-style specification, calibration table, and metric
-definitions go to the SI Appendix.
+configurations). Full ODD-style specification, calibration table, and
+metric definitions go to the SI Appendix.
 
 ## 4. Display items — panel-level specifications
 
@@ -284,47 +377,58 @@ Main text (4 items, all figures; no main-text tables — every table is SI):
   windows D/δ, confirmation vs accuracy rewards, external verification);
   outcomes box lists SECI, AECI-IE (replacing AECI), MAE, unmet needs,
   precision. Keep the Gap badges and the two-configuration contrast.
-- **Fig. 2 — Configuration comparison** (from `results-final/`; basis
+- **Fig. 2 — Configuration comparison** (from **`results-mechfix/`**; basis
   `comparison_configs.png` rebuilt with per-type panels). Four panels:
   **(a)** SECI_exploit vs α, main vs control — the dissolution/persistence
   contrast; **(b)** SECI_explor vs α, main vs control — the shared
   deepening; **(c)** MAE per type vs α, both configurations (exploiter
   flatness visible); **(d)** unmet needs vs α, both configurations. Shared
   α-axis; seed-robust α-levels marked; sign convention in the caption.
-- **Fig. 3 — Goldilocks** two panels: **(a)** total_bubble and total_score
-  vs α (main model) with the α* spread band [0.3, 0.6] and the control's
-  bubble-composite curve overlaid (α*=1.0 divergence visible), computed with
-  the M1 composite (|SECI| + |AECI-IE|); **(b)** cognitive-gap sweep (from
-  M2): Goldilocks-range location as a function of the population's cognitive
-  profile.
+- **Fig. 3 — Goldilocks** two panels: **(a)** composite vs α (main model)
+  computed with the **population composite |SECI-pop| + |AECI-IE-chan-pop|**
+  as the headline curve (the most ablation-robust definition, α\*=0.6 in
+  all three revised-model datasets), the per-type channel-baseline
+  composite overlaid, and the control's curve for contrast (both now
+  interior — the caption notes the old corner solution was a dose
+  artifact, citing the rounding ablation); **(b)** cognitive-gap sweep
+  (from the **M2 RE-RUN** — placeholder until it exists).
 - **Fig. 4 — Periphery** two panels: **(a)** spatial MAE gap (far − near
   quartile) vs α, main vs control; **(b)** aid-contribution gap vs α, same
-  overlay; basis `periphery_gap.png` from `results-final/`.
+  overlay; basis `periphery_gap.png` from `results-mechfix/`.
 
-SI Appendix numbering (fixed here so Results can cite it; existing S1–S9
-content keeps its identity where possible):
+SI Appendix numbering (fixed here so Results can cite it):
 
-- **Fig. S1** echo-chamber lifecycle (formation/persistence/recovery).
+- **Fig. S1** echo-chamber lifecycle/evolution (basis:
+  `population_evolution.png` per-type columns + `echo_chamber_lifecycle.png`).
 - **Fig. S2** starvation mechanism: L1+ belief pool per type and AECI-LockIn
   vs α, both configurations.
 - **Fig. S3** feedback loop: (a) AI query share per type vs α; (b) AI trust
   per type vs α (the C12 flat explorer curve).
 - **Fig. S4** periphery gap evolution within runs.
-- **Fig. S5** dyadic docking (M6). **Fig. S6+** robustness sweeps (M5).
+- **Fig. S5** population vs per-type bubble evolution (the societal layer;
+  basis: `population_evolution.png`, all three rows).
+- **Fig. S6** dyadic docking (M6). **Fig. S7+** robustness sweeps (M5).
 - **Table S1** paired per-seed deltas (main − control) with Holm-corrected
   CIs, all outcomes (M4).
-- **Table S2** α* sensitivity across composite variants, both configurations,
-  including the retired AECI-Var variant for transparency.
+- **Table S2** α* sensitivity across all 12 composite variants, both
+  configurations, PLUS the two single-mechanism ablation columns
+  (own-reference; deterministic rounding) — the attribution table.
 - **Table S3** network-centrality/broker decomposition.
 - **Table S4** ablation: consensus − individual paired deltas + verdict
-  paragraph.
-- **Table S5** legacy-vs-fixed transparency table (RESULTS_OVERVIEW §7).
+  paragraph (AI-side targeting; unchanged).
+- **Table S5** transparency chain: legacy → type-agnostic fix → mechanism
+  revision, one row per headline quantity (extend RESULTS_OVERVIEW §7 with
+  a `results-mechfix` column).
 - **Table S6** regression table (M4). **Table S7** calibration table
-  (parameter → empirical source). **Table S10** promises/perils (kept).
+  (parameter → empirical source).
+- **Table S8** salience experiment cells (s × α; from
+  `results-salience/salience-tables/robustness_tables.md`) — supports the
+  C12-robustness and social-retrenchment sentences.
+- **Table S10** promises/perils (kept).
 - ODD-protocol model description as the SI's Methods complement.
 
 Regeneration: dispatch **Compare Baseline vs Network/Mobility Switches**
-(defaults now reproduce the fixed model) or **Replot Primary Sweep** from the
+(defaults reproduce the revised model) or **Replot Primary Sweep** from the
 archived JSONs; never hand-edit figure data.
 
 ## 5. Style guidelines (carried over from the NHB draft, plus additions)
@@ -364,18 +468,34 @@ archived JSONs; never hand-edit figure data.
 3. **Do not** use AECI-Var as evidence for (or against) an individualized AI
    bubble — it is structurally blind to own-prior confirmation and is most
    negative at the truthful endpoint (truth-convergence confound). The
-   AI-side echo construct in the paper is **AECI-IE** (M1); AECI-Var appears
-   only in the α* sensitivity table as a retired variant. Capture claims use
-   LockIn, query share, trust, and acceptance share; AECI-Err only with its
+   AI-side echo construct in the paper is **AECI-IE-chan (channel
+   baseline), per type and population** — NOT the belief-baseline AECI-IE,
+   which failed its own validation for exploiters and is aggregation-fragile
+   (see M1 status in §2); belief-baseline AECI-IE may be cited only for the
+   explorer dose–response in the control. AECI-Var appears only in the α*
+   sensitivity table as a retired variant. Capture claims use LockIn, query
+   share, trust, and acceptance share; AECI-Err only with its
    heavy/light-split construct spelled out.
 4. **Do not** present SECI deepening without the L1+ pool context: part of
    the explorer deepening is pool shrinkage (belief starvation), not
    convergence on a shared false narrative. Say so explicitly once.
-5. **Do not** quote legacy-run numbers in the main text (they differ in AI
-   usage levels); the legacy run appears only in the SI transparency table.
-6. **Do not** report a single α*: report the composite spread ([0.3, 0.6]
-   main model) and the sensitivity table; never compare range-normalized
+5. **Do not** quote numbers from `results/`, `results-verification/`, or
+   `results-final/` in the main text — all main-text numbers come from
+   `results-mechfix/` (check against `RESULTS_COMPENDIUM.md`); the older
+   runs appear only in the SI transparency chain (Table S5).
+6. **Do not** report a single naked α*: report **α\*=0.6 with its 7/12
+   composite count and the [0.1, 0.6] sensitivity spread**, plus the
+   ablation attribution (Table S2); never compare range-normalized
    composites across configurations (use raw paired deltas).
+6b. **Do not** describe the old control-configuration corner solution
+   (α\*=1.0, "full confirmation minimises the bubble indices") as a model
+   property — the ablations show it was a dose-delivery artifact of
+   deterministic rounding; both configurations are interior under the
+   linear dose.
+6c. **Do not** present the salience counterfactual as a remedy: at s=1 the
+   capture gradient disappears via social retrenchment (deeper chamber,
+   worse precision at the truthful endpoint), not via truth-seeking. Frame
+   as a boundary condition of the capture mechanism.
 7. **Do not** frame the interior optimum as a recommendation to build mildly
    confirming AI (Discussion must carry the explicit disclaimer and the
    non-confirmation adoption routes).
@@ -392,13 +512,19 @@ archived JSONs; never hand-edit figure data.
 
 ## 7. Submission checklist (author actions)
 
-1. Approve Significance wording; complete Acknowledgements and Funding.
-2. Mint the Zenodo DOI (code + `results/`, `results-verification/`,
-   `results-ablation-consensus/`); add to Data/Code availability.
-3. Cover letter: lead with "extends the dyadic human–AI feedback-loop
+1. Decide the venue per §1 (recommended: PNAS Nexus; escalate to PNAS only
+   if M6 docking reproduces Glickman & Sharot and M2–M5 hold).
+2. Approve Significance wording; complete Acknowledgements and Funding.
+3. Mint the Zenodo DOI (code + ALL results directories:
+   `results-mechfix/`, `results-ablation-ownref/`,
+   `results-ablation-detround/`, `results-salience/`, plus the historical
+   chain `results/`, `results-verification/`,
+   `results-ablation-consensus/`, `results-final/`); add to Data/Code
+   availability.
+4. Cover letter: lead with "extends the dyadic human–AI feedback-loop
    findings (Glickman & Sharot, NHB 2024) to networked populations; closest
    methodological ancestors Lorenz 2011 / Becker 2017 (both PNAS)"; suggest
    3–5 reviewers from computational social science / collective intelligence
    / crisis informatics.
-4. Verify current PNAS limits (title/abstract/significance/pages) and swap in
-   `pnas-new.cls`.
+5. Verify current PNAS/Nexus limits (title/abstract/significance/pages) and
+   swap in the journal class at submission.
