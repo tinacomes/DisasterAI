@@ -535,13 +535,21 @@ class HumanAgent(Agent):
             else:
                 accuracy_score = -0.6  # Large error
 
-            # Calculate CONFIRMATION score: how close was reported level to agent's PRIOR belief
-            # Use stored prior from tuple if available (uncontaminated by query update)
+            # Calculate CONFIRMATION score: how close was the reported level to the
+            # confirmation target. For exploiters (confirmation_reference='network',
+            # default) the target is the trusted-network consensus when defined —
+            # same rule as evaluate_pending_info; fallback: the agent's stored
+            # prior (uncontaminated by the query update).
             if len(item) >= 6:
                 prior_level = item[4]  # stored_prior_level
             else:
                 prior_belief = self.beliefs.get(cell, {})
                 prior_level = prior_belief.get('level', 0) if isinstance(prior_belief, dict) else 0
+            if (self.agent_type == "exploitative"
+                    and getattr(self.model, 'confirmation_reference', 'network') == 'network'):
+                net_level, net_conf = self.get_network_consensus(cell)
+                if net_level is not None and net_conf >= 0.3:
+                    prior_level = net_level
             prior_error = abs(reported_level - prior_level)
             if prior_error == 0:
                 confirmation_score = 1.0   # Perfect confirmation of prior
@@ -669,9 +677,13 @@ class HumanAgent(Agent):
         """
         Compute the confidence-weighted mean belief of trusted friends about a cell.
 
-        Used by exploiters as a reference in evaluate_pending_info instead of their own
-        (potentially contaminated) belief. The network may share the same wrong beliefs —
-        the filter bubble is preserved — but the reference is:
+        Used by exploiters as their CONFIRMATION TARGET in evaluate_pending_info /
+        evaluate_information_quality (confirmation_reference='network', default):
+        their confirmation reward scores sources against what the trusted network
+        believes, falling back to their own stored prior when fewer than 2 trusted
+        friends have data. Also used as the evaluation reference. The network may
+        share the same wrong beliefs — the filter bubble is preserved — but the
+        reference is:
           - Built from multiple independent data points (less noise)
           - Not contaminated by this agent's own interaction with the source being evaluated
           - Architecturally consistent: exploiters trust their network, so the network IS
@@ -887,8 +899,32 @@ class HumanAgent(Agent):
             else:
                 accuracy_score = -0.6
 
-            # --- Confirmation score: reported vs STORED prior (uncontaminated) ---
+            # --- Confirmation score: reported vs the confirmation target ---
+            # Exploiters (confirmation_reference='network', default): the target
+            # is the trusted-network consensus when defined — they reward sources
+            # that confirm what their social circle believes, not merely their own
+            # idiosyncratic prior (mechanism (ii): confirming information from the
+            # social network). Fallback (fewer than 2 trusted friends with data,
+            # or confirmation_reference='own'): the STORED prior (uncontaminated
+            # by the report being evaluated).
             prior_level = stored_prior_level if stored_prior_level is not None else reference_level
+            if (self.agent_type == "exploitative" and used_network_consensus
+                    and getattr(self.model, 'confirmation_reference', 'network') == 'network'):
+                prior_level = reference_level  # network consensus (set above)
+
+            # Salience weighting for the exploiters' confirmation channel —
+            # symmetric to the explorers' verified-evaluation salience above.
+            # The confirmation reward is base-rate dominated too: most reported
+            # cells are empty and agree with the target at ANY α, so with
+            # salience_weight s > 0 a disagreement about a believed disaster
+            # cell carries up to 6× the weight of agreement about an empty one.
+            # s = 0 (default): exact previous behaviour.
+            if self.agent_type == "exploitative":
+                s = getattr(self.model, 'salience_weight', 0.0)
+                if s > 0.0:
+                    salience = (max(prior_level, reported_level) + 1) / 6.0
+                    confidence_scaling *= (1.0 - s) + s * salience
+
             prior_error = abs(reported_level - prior_level)
             if prior_error == 0:
                 confirmation_score = 1.0
@@ -2318,7 +2354,20 @@ class AIAgent(Agent):
         alignment_strength = self.model.ai_alignment_level
 
         belief_differences = human_vals - sensed_vals
-        corrected = np.round(sensed_vals + alignment_strength * belief_differences)
+        raw = sensed_vals + alignment_strength * belief_differences
+        if getattr(self.model, 'report_rounding', 'stochastic') == 'stochastic':
+            # Probabilistic rounding: E[corrected] = (1-α)·truth + α·belief exactly,
+            # so the DELIVERED confirmation dose is linear in α. Deterministic
+            # np.round turned the sweep into a near step function of α (delivered
+            # confirmation ≈0 for α<=0.4, saturated at 1.0 for α>=0.9), because
+            # |belief - truth| is small (0-5 integer scale) and the fractional
+            # adjustment α·diff was rounded away below ~0.5 and saturated above.
+            base = np.floor(raw)
+            frac = raw - base
+            corrected = base + (np.random.random(len(raw)) < frac)
+        else:
+            # 'deterministic': legacy behaviour, kept to reproduce archived sweeps.
+            corrected = np.round(raw)
         corrected = np.clip(corrected, 0, 5)  # Keep values in valid range
 
         # Build the report dictionary with aligned values
@@ -2409,6 +2458,29 @@ class DisasterModel(Model):
                                           #   version, commit 0e05139 — later fixes to reward
                                           #   scoring and Q-update batching apply under both
                                           #   flag values.)
+                 confirmation_reference='network',
+                                          # Reference the EXPLOITERS' confirmation reward is scored
+                                          # against in evaluate_pending_info / evaluate_information_quality:
+                                          # 'network' (default): the trusted-network consensus when
+                                          #   defined (>= 2 trusted friends with data), falling back
+                                          #   to the agent's own stored prior — exploiters reward
+                                          #   sources that confirm what their social circle believes
+                                          #   (mechanism (ii): confirming information from the
+                                          #   social network).
+                                          # 'own': legacy behaviour — confirmation is always scored
+                                          #   against the agent's own stored prior; kept to
+                                          #   reproduce the pre-change sweeps.
+                 report_rounding='stochastic',
+                                          # How the AI's aligned report (1-α)·truth + α·belief is
+                                          # discretised to integer levels:
+                                          # 'stochastic' (default): probabilistic rounding, so the
+                                          #   DELIVERED confirmation dose is linear in α in
+                                          #   expectation. Deterministic np.round made effective α
+                                          #   a near step function (≈0 for α<=0.4, saturated 1.0
+                                          #   for α>=0.9), so half the sweep delivered almost no
+                                          #   treatment.
+                                          # 'deterministic': legacy np.round, kept to reproduce
+                                          #   the archived sweeps.
                  p_within=0.5,            # spatial_bridged: within-community edge probability
                  p_bridge=0.15,           # spatial_bridged: probability an agent carries one bridge
                  bridge_decay=2.0,        # spatial_bridged: bridge endpoint prob ∝ (1+d)^-decay
@@ -2459,6 +2531,8 @@ class DisasterModel(Model):
         self.confirmation_target = confirmation_target
         self.network_type = network_type
         self.query_scope = query_scope
+        self.confirmation_reference = confirmation_reference
+        self.report_rounding = report_rounding
         self.p_within = p_within
         self.p_bridge = p_bridge
         self.bridge_decay = bridge_decay
@@ -2506,6 +2580,20 @@ class DisasterModel(Model):
         self.ie_pool_data = []      # (tick, ai_pool_exploit, ai_pool_explor,
                                     #  human_pool_exploit, human_pool_explor) —
                                     # mean L1+ report-pool size per community
+        # Population-level (type-pooled) variants of the bubble indices.
+        # Per-type series show FRAGMENTATION between the two cognitive styles;
+        # the population series answer the societal question (how well does
+        # society as a whole do, fragmented or not). Same constructs, same
+        # sign convention (negative = echo chamber), pooled over ALL
+        # communities regardless of type.
+        self.seci_pop_data = []         # (tick, SECI over all communities)
+        self.aeci_ie_pop_data = []      # (tick, belief-baseline, channel-baseline) — AI channel
+        self.seci_ie_pop_data = []      # (tick, belief-baseline, channel-baseline) — human channel
+        self.aeci_lockin_pop_data = []  # (tick, lock-in over whole population). CAVEAT: the
+                                        # population median split reintroduces the C11
+                                        # type-composition confound (which type self-selects
+                                        # into AI use varies with α); read alongside the
+                                        # per-type series, which are the causal contrast.
         self._belief_level_snapshots = {}  # agent_id → belief-level vector at previous metrics tick
         self.retain_aeci_data = []  # (tick, avg_retain_AECI_exploit, avg_retain_AECI_explor)
         self.retain_seci_data = []  # (tick, avg_retain_SECI_exploit, avg_retain_SECI_explor)
@@ -2830,6 +2918,17 @@ class DisasterModel(Model):
                     else float('nan'))
                 for t in ('exploitative', 'exploratory')
             }
+            # Population level: identical construct pooled over ALL communities
+            # regardless of type (societal signal; per-type shows fragmentation)
+            _all_comm_vars = comm_vars['exploitative'] + comm_vars['exploratory']
+            values[channel]['population'] = (
+                self._variance_ratio_index(float(np.mean(_all_comm_vars)), global_var)
+                if _all_comm_vars else float('nan'))
+            values_chan[channel]['population'] = (
+                self._variance_ratio_index(float(np.mean(_all_comm_vars)),
+                                           float(channel_var))
+                if _all_comm_vars and not np.isnan(channel_var)
+                else float('nan'))
             pools[channel] = {
                 t: (float(np.mean(pool_sizes[t])) if pool_sizes[t] else 0.0)
                 for t in ('exploitative', 'exploratory')
@@ -2847,6 +2946,10 @@ class DisasterModel(Model):
             (self.tick,
              pools['ai']['exploitative'], pools['ai']['exploratory'],
              pools['human']['exploitative'], pools['human']['exploratory']))
+        self.aeci_ie_pop_data.append(
+            (self.tick, values['ai']['population'], values_chan['ai']['population']))
+        self.seci_ie_pop_data.append(
+            (self.tick, values['human']['population'], values_chan['human']['population']))
 
         if not hasattr(self, '_last_metrics'):
             self._last_metrics = {}
@@ -2994,8 +3097,11 @@ class DisasterModel(Model):
             self._belief_level_snapshots[agent_id] = levels
 
         def _lockin_for(type_label):
+            # type_label=None → whole population (societal series; C11 caveat:
+            # the population split confounds type self-selection into AI use)
             ags = [(a, mobility[a.unique_id]) for a in self.humans.values()
-                   if a.agent_type == type_label and a.unique_id in mobility
+                   if (type_label is None or a.agent_type == type_label)
+                   and a.unique_id in mobility
                    and hasattr(a, 'cum_accepted_ai')]
             if len(ags) < 4:
                 return None
@@ -3011,6 +3117,8 @@ class DisasterModel(Model):
         lockin_ex = _lockin_for("exploitative")
         lockin_er = _lockin_for("exploratory")
         self.aeci_lockin_data.append((self.tick, lockin_ex, lockin_er))
+        lockin_pop = _lockin_for(None)
+        self.aeci_lockin_pop_data.append((self.tick, lockin_pop))
         self._last_metrics['aeci_lockin'] = {
             'tick': self.tick, 'exploit': lockin_ex, 'explor': lockin_er}
         return lockin_ex, lockin_er
@@ -3715,6 +3823,15 @@ class DisasterModel(Model):
             seci_exploit_mean = _seci_val(mean_exploit_community_var, global_var)
             seci_explor_mean  = _seci_val(mean_explor_community_var,  global_var)
 
+            # Population-level SECI: identical construct pooled over ALL
+            # communities regardless of type — the societal echo-chamber signal
+            # (per-type series above show the fragmentation between styles).
+            _all_community_vars = exploit_community_vars + explor_community_vars
+            seci_pop_mean = _seci_val(
+                np.mean(_all_community_vars) if _all_community_vars else 1e-6,
+                global_var)
+            self.seci_pop_data.append((self.tick, seci_pop_mean))
+
             # Store results with proper checks
             if True:
 
@@ -3722,7 +3839,8 @@ class DisasterModel(Model):
                 self._last_metrics['seci'] = {
                     'tick': self.tick,
                     'exploit': seci_exploit_mean,
-                    'explor': seci_explor_mean
+                    'explor': seci_explor_mean,
+                    'population': seci_pop_mean
                 }
 
                 self.seci_data.append((self.tick, seci_exploit_mean, seci_explor_mean))

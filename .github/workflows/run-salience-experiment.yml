@@ -1,16 +1,19 @@
 name: Run Salience Experiment (M7)
 
 # M7 salience decision experiment: salience_weight in {0, 0.5, 1} ×
-# alpha in {0.7, 0.8, 0.9, 1.0}, main-model configuration, N=20 seeded
-# replications. Decides whether C12 (explorers do NOT learn to distrust
-# confirming AI because verification is base-rate dominated) stays a
-# mainline finding (salience_weight=0, recommended) or a salience>0
-# variant is promoted — Finding 3's text depends on it.
-#
-# Key readout: the explorer AI-trust column (AItrust_er) of the collect
-# job's tables — flat in alpha at salience 0 (C12), possibly declining at
-# salience 1 (severity-weighted verification makes confirmation errors
-# costly and detectable).
+# alpha in {0.0, 0.3, 0.7, 0.8, 0.9, 1.0}, main-model configuration, N=20
+# seeded replications. Since commit 30f89e0, salience_weight also scales
+# the EXPLOITERS' confirmation-channel learning rate, so this experiment
+# now decides two things:
+#  (1) C12 (explorers do NOT learn to distrust confirming AI because
+#      verification is base-rate dominated) — mainline salience_weight=0
+#      vs a salience>0 variant; Finding 3's text depends on it. Readout:
+#      explorer AI trust (AItrust_er), high-alpha cells.
+#  (2) The exploiter confirmation trap at the truthful endpoint — with
+#      salience>0, disagreement about believed-disaster cells outweighs
+#      base-rate agreement on empty cells, so a truthful AI should now be
+#      clearly punished. Readout: exploiter AI query share / AI trust in
+#      the LOW-alpha cells (0.0, 0.3), which were added for this purpose.
 #
 # Trigger: GitHub → Actions → "Run Salience Experiment" → Run workflow
 
@@ -38,7 +41,7 @@ jobs:
       fail-fast: false
       matrix:
         salience: ["0", "0.5", "1"]
-        alpha: ["0.7", "0.8", "0.9", "1.0"]
+        alpha: ["0.0", "0.3", "0.7", "0.8", "0.9", "1.0"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

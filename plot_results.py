@@ -64,6 +64,10 @@ def load_and_aggregate(path):
             'seci_ie_chan_exploit', 'seci_ie_chan_explor',
             'ie_pool_ai_exploit', 'ie_pool_ai_explor',
             'ie_pool_human_exploit', 'ie_pool_human_explor',
+            'lockin_exploit', 'lockin_explor',
+            # Population-level (type-pooled) series — societal signal
+            'seci_pop', 'aeci_ie_pop', 'aeci_ie_chan_pop',
+            'seci_ie_pop', 'seci_ie_chan_pop', 'lockin_pop',
             'mae_exploit',  'mae_explor',  'prec_exploit', 'prec_explor',
             'ai_query_ratio_exploit', 'ai_query_ratio_explor',
             'unmet_needs']
@@ -425,6 +429,72 @@ def plot_timeseries(alpha_r, save_dir):
 
 
 # ---------------------------------------------------------------------------
+# population_evolution.png
+# ---------------------------------------------------------------------------
+
+def plot_population_evolution(alpha_r, save_dir):
+    """3×3 timeseries: bubble-index evolution at population level and per type.
+
+    Rows: SECI, AECI-IE-chan (channel-baseline AI index — strict SECI
+    parallel), AECI-LockIn. Columns: population (societal signal),
+    exploitative, exploratory (fragmentation). One line per α. The α* tables
+    aggregate the late-run window; this figure keeps the full trajectory
+    visible so formation/dissolution dynamics are not aggregated away.
+    """
+    alphas = sorted(alpha_r)
+    if not alphas:
+        return
+    rows = [
+        ('SECI',         'seci_pop',         'seci_exploit',         'seci_explor'),
+        ('AECI-IE-chan', 'aeci_ie_chan_pop', 'aeci_ie_chan_exploit', 'aeci_ie_chan_explor'),
+        ('AECI-LockIn',  'lockin_pop',       'lockin_exploit',       'lockin_explor'),
+    ]
+    col_titles = ['Population (societal)', 'Exploitative', 'Exploratory']
+    colors = plt.cm.viridis(np.linspace(0, 1, len(alphas)))
+    band_alphas = {alphas[0], alphas[-1]}
+
+    fig, axes = plt.subplots(3, 3, figsize=(18, 13), sharex=True)
+    fig.suptitle('Filter-Bubble Evolution — population level vs per type\n'
+                 '(negative = echo chamber)', fontsize=13, fontweight='bold')
+    for r, (row_label, *keys) in enumerate(rows):
+        for c, key in enumerate(keys):
+            ax = axes[r, c]
+            plotted = False
+            for color, alpha in zip(colors, alphas):
+                res = alpha_r[alpha]
+                mean = np.array(res.get(f'{key}_mean', []), dtype=float)
+                if mean.size == 0 or np.all(np.isnan(mean)):
+                    continue
+                std = np.array(res.get(f'{key}_std', []), dtype=float)
+                ticks = np.array(res['metric_ticks'][:len(mean)])
+                valid = ~np.isnan(mean)
+                ax.plot(ticks[valid], mean[valid], color=color, linewidth=1.6,
+                        label=f'α={alpha}')
+                if alpha in band_alphas and std.size == mean.size:
+                    ax.fill_between(ticks[valid], (mean - std)[valid],
+                                    (mean + std)[valid], color=color, alpha=0.12)
+                plotted = True
+            ax.axhline(0, color='gray', linestyle=':', linewidth=1)
+            if r == 0:
+                ax.set_title(col_titles[c])
+            if c == 0:
+                ax.set_ylabel(f'{row_label} (−1 to +1)')
+            if r == 2:
+                ax.set_xlabel('Simulation tick')
+            ax.set_ylim(-1.05, 1.05)
+            ax.grid(True, alpha=0.3)
+            if not plotted:
+                ax.text(0.5, 0.5, 'series not in results', transform=ax.transAxes,
+                        ha='center', va='center', fontsize=9, color='gray')
+    axes[0, 0].legend(fontsize=7, ncol=2, loc='lower left')
+    plt.tight_layout()
+    path = os.path.join(save_dir, 'population_evolution.png')
+    plt.savefig(path, dpi=150, bbox_inches='tight')
+    plt.close()
+    print(f'Saved: {path}')
+
+
+# ---------------------------------------------------------------------------
 # factor_comparison.png
 # ---------------------------------------------------------------------------
 
@@ -525,6 +595,7 @@ def main():
     if alpha_r:
         plot_goldilocks(alpha_r, args.save_dir)
         plot_timeseries(alpha_r, args.save_dir)
+        plot_population_evolution(alpha_r, args.save_dir)
     else:
         print('Warning: no alpha_*.json files found — skipping primary plots.')
 

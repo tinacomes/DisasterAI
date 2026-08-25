@@ -1,8 +1,16 @@
-# Final Sweep — citable dataset for the PNAS manuscript
+# Final Sweep — pre-revision dataset (superseded 2026-08-25)
+
+> **Status update (2026-08-25):** this archive records the model **before**
+> the mechanism revision of commit `30f89e0` (exploiter network
+> confirmation reference; stochastic report rounding, which removes the
+> effective-α step function documented in caveat 2 below). The
+> current-model record is **`results-mechfix/`** (run 32821105202), which
+> restores a composite-robust interior α* = 0.6 in the main model. Keep
+> this directory for the pre-revision comparison and the ablation chain.
 
 Results of the **primary alignment sweep on the fixed, type-agnostic model**,
 extended with the M1 information-environment metrics and the co-evolution
-series. This directory is the dataset all main-text numbers are drawn from.
+series.
 
 - **Run**: [32412891328](https://github.com/tinacomes/DisasterAI/actions/runs/32412891328),
   2026-08-20, workflow **Compare Baseline vs Network/Mobility Switches**.
@@ -26,9 +34,15 @@ series. This directory is the dataset all main-text numbers are drawn from.
 
 ## What is new relative to `results-verification/`
 
-Because the M1 metrics are **observation-only**, every pre-existing series
-reproduces on the same seeds; the run adds columns rather than changing
-behaviour. New per-type series in `experiment_results.json`:
+The M1 metrics are observation-only in code (they read and clear a log that
+feeds nothing else), but **this run does NOT reproduce the verification run
+bit-exactly on the same seeds**: the accompanying infrastructure changes in
+commit `19619ee` altered the RNG consumption order, so every per-seed series
+drifted (e.g. per-seed |ΔSECI| up to 0.45), while all aggregates agree
+within replication noise (combined SECI at α=1: −0.312 vs −0.300; explorer
+MAE 0.54 → 1.74 in both). Treat this run as a statistically equivalent
+re-run with added columns, not a bit-exact reproduction. New per-type
+series in `experiment_results.json`:
 
 | Series | Construct |
 |---|---|

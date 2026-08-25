@@ -46,6 +46,14 @@ on:
         description: "AI confirmation target: individual (type-agnostic, default) or consensus (legacy pre-fix behaviour, reproduction only)"
         required: false
         default: "individual"
+      confirmation_reference:
+        description: "Exploiters' confirmation-reward target: network (default, trusted-network consensus) or own (legacy own-prior, ablation)"
+        required: false
+        default: "network"
+      report_rounding:
+        description: "AI report rounding: stochastic (default, delivered dose linear in alpha) or deterministic (legacy np.round step function)"
+        required: false
+        default: "stochastic"
 
 env:
   MPLBACKEND: Agg
@@ -78,7 +86,9 @@ jobs:
             --mobility ${{ inputs.mobility }} \
             --network-type ${{ inputs.network_type }} \
             --query-scope ${{ inputs.query_scope }} \
-            --confirmation-target ${{ inputs.confirmation_target }}
+            --confirmation-target ${{ inputs.confirmation_target }} \
+            --confirmation-reference ${{ inputs.confirmation_reference }} \
+            --report-rounding ${{ inputs.report_rounding }}
       - uses: actions/upload-artifact@v4
         with:
           name: primary-alpha-${{ matrix.alpha }}

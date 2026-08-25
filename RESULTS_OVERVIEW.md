@@ -1,18 +1,78 @@
-# Results Overview — Fixed Model (2026-08-20)
+# Results Overview — Fixed Model + Mechanism Revision (2026-08-25)
 
-Consolidated overview of the current results after the model correction of
-2026-08-19, for author review. All headline numbers below come from the
-**fixed, type-agnostic model** (verification sweep); the legacy and ablation
-runs are reported for comparison. Steady state = mean over the last 75 ticks;
-N = 20 seed-paired replications per α level; 200 ticks per run.
+Consolidated overview for author review. Steady state = mean over the last
+75 ticks; N = 20 seed-paired replications per α level; 200 ticks per run.
 
-## 1. The three runs
+## 0. Update 2026-08-25 — mechanism revision restores the interior optimum
+
+Commit `30f89e0` revised two mechanisms (defaults; legacy behaviour behind
+flags) and added a population-level metric layer; the new head-to-head sweep
+is archived in **`results-mechfix/`** (run 32821105202), which supersedes
+`results-final/` as the current-model record.
+
+**What changed and why.** (1) `confirmation_reference='network'`:
+exploiters' confirmation reward now targets the **trusted-network
+consensus** (fallback: own stored prior). The previously documented
+"confirm the social network" reference was dead code — the consensus fed
+only the accuracy channel, which exploiters never use. (2)
+`report_rounding='stochastic'`: probabilistic rounding of the AI's aligned
+report makes the **delivered** confirmation dose linear in α; the legacy
+`np.round` was a near step function (≈0 for α≤0.4, saturated for α≥0.9), so
+half the sweep delivered almost no treatment and the α=0.9 "cliff" was a
+delivery artifact. (3) `salience_weight` now also covers the exploiters'
+confirmation channel (neutral at the mainline default 0). (4) New
+population-level series (`seci_pop`, `aeci_ie_pop`, `lockin_pop`,
+population composites, `population_evolution.png`): per-type series show
+the **fragmentation** between cognitive styles; the population series
+answer the **societal** question, and the full trajectories are plotted so
+formation/dissolution dynamics are no longer hidden by the late-run window.
+
+**Headline results (results-mechfix).**
+
+- **Interior α\* is back and composite-robust in the main model**:
+  α\* = **0.6** for 7 of 12 composites (including both population
+  composites, SECI + AECI-IE-chan ± MAE, and SECI-only); remaining
+  variants 0.1–0.3. Control: bubble composites 0.8–0.9 — the pre-revision
+  corner solution (α\* = 1.0) is gone.
+- **Smooth dose–response**: combined MAE rises gradually at every α step
+  (1.17 → 1.82 main; 1.25 → 1.96 control); no α=0.5 jump, no α=0.9 cliff.
+- **Per type**: the exploitative chamber persists at all α under
+  network-bounded access (SECI_exploit −0.39 … −0.18) and dissolves under
+  global access (−0.45 → +0.05); the explorer series deepens 0 → −0.33 in
+  both configurations; explorer MAE 0.54 → 1.74 — Findings 1 and 2 carry
+  over qualitatively with a cleaner gradient.
+- **Population**: SECI-pop in the control runs −0.22 → 0.00, masking the
+  exploiter-dissolve/explorer-deepen crossover (why both levels are
+  reported). AECI-IE-chan-pop is **U-shaped in α in both configurations**
+  (shallowest at α≈0.7): the served information environment is most
+  diverse at intermediate alignment.
+- **Operational U-shape intact**: unmet needs 1.59 → **0.25 (α=0.6)** →
+  2.86 (main); 2.23 → 0.49 (α=0.6) → 10.18 (control). The switches
+  configuration dominates the control on MAE and precision at every α
+  (paired CIs exclude 0) and cuts unmet needs by −7.3 cells at α=1.
+
+Attribution (settled by the single-mechanism ablations, 2026-08-25): the
+**stochastic-rounding dose linearisation drives the restored interior α\***
+— reverting only the rounding (`results-ablation-detround/`) fragments α\*
+to spread [0.2, 0.6] (4/12 composites at 0.6), while reverting only the
+network confirmation reference (`results-ablation-ownref/`) leaves the
+result essentially unchanged (8/12 at 0.6, all series within seed noise).
+The network reference matters for mechanism-(ii) coherence, not for the
+aggregate curves. Population composites are α\* = 0.6 in all three
+datasets — the most ablation-robust definition.
+Sections 1–8 below describe the pre-revision record and remain valid as
+the ablation/history chain; numbers there refer to `results-verification/`
+unless stated.
+
+## 1. The runs
 
 | Run | Directory | Code | AI confirmation target | Purpose |
 |---|---|---|---|---|
 | 32040117179 (2026-08-17/18) | `results/` | `0e05139` (legacy) | consensus for exploitative callers | Legacy record; basis of the NHB draft |
-| **32298278561 (2026-08-19)** | **`results-verification/`** | **`55d4b2b` (fixed)** | **caller's own prior, both types** | **Canonical results for the PNAS paper** |
-| 32338797843 (2026-08-20) | `results-ablation-consensus/` | `55d4b2b` (fixed) | consensus (legacy rule re-enabled) | Ablation isolating the confirmation target |
+| 32298278561 (2026-08-19) | `results-verification/` | `55d4b2b` (fixed) | caller's own prior, both types | Verification of the type-agnostic fix |
+| 32338797843 (2026-08-20) | `results-ablation-consensus/` | `55d4b2b` (fixed) | consensus (legacy rule re-enabled) | Ablation isolating the AI confirmation target |
+| 32412891328 (2026-08-20) | `results-final/` | `36891da` | caller's own prior | Pre-revision record + M1 metrics (superseded) |
+| **32821105202 (2026-08-25)** | **`results-mechfix/`** | **`30f89e0`** | **caller's own prior** (exploiters *evaluate* vs network consensus) | **Current-model record — candidate canonical dataset** |
 
 **What was fixed** (commit `55d4b2b`): (i) the AI no longer conditions its
 response on the caller's cognitive type — it targets the caller's own revealed
@@ -65,14 +125,15 @@ per-type data never supported it.
   starvation*. Part of the SECI deepening is this pool shrinkage (SECI
   conditions on L1+ beliefs), which is why the L1+ pool is now always
   reported alongside SECI.
-- **Interior α\***: in the main model all six composite definitions give an
-  interior optimum, spread **[0.3, 0.6]** (tighter than the legacy run). In
-  the control, the bubble-only composites (SECI, SECI+AECI-Var) select α*=1.0
-  — full confirmation minimises the *echo indices* because the exploiter
-  chamber dissolves — while accuracy-including composites stay interior
-  (0.3–0.7). The claim "the alignment optimum is interior only under
-  network-bounded access" holds for the bubble composites and should be
-  stated with that qualifier.
+- **Interior α\*** (verification run, AECI-Var composites): in the main
+  model all six composite definitions gave an interior optimum, spread
+  **[0.3, 0.6]**. *Caution:* this statement did **not** survive the switch
+  to the AECI-IE primary composites in `results-final/` (α\* jumped to the
+  corners: 1.0 control / 0.0 main), which was one trigger for the
+  2026-08-25 mechanism revision. Under the revised model
+  (`results-mechfix/`) the interior optimum is restored and
+  composite-robust: α\* = 0.6 for 7/12 composites in the main model — see
+  §0. Use §0's numbers for the paper.
 
 ## 4. Finding 3 — The feedback loop: capture, lock-in, and operational buffering
 
@@ -118,12 +179,19 @@ consensus [0.2–0.4] vs individual [0.3–0.6], both interior.
 
 Why: the network consensus differs from the caller's own prior on only
 ~10–18% of exploiter-reported cells (≈1.5 levels when it does), is no more
-accurate, and exploiters score confirmation against their *own stored prior*
-regardless of what the AI reports. Consequences: (i) every headline finding is
-invariant to the confirmation target, so the epistemically defensible
-type-agnostic rule costs nothing; (ii) all differences between the fixed and
-legacy runs (mainly overall AI-usage levels, ≈ +0.1 share) trace to the
-reward-channel fixes, not to the targeting.
+accurate, and — in the pre-revision code — exploiters scored confirmation
+against their *own stored prior* regardless of what the AI reports.
+Consequences: (i) every headline finding is invariant to the AI-side
+confirmation target, so the epistemically defensible type-agnostic rule
+costs nothing; (ii) all differences between the fixed and legacy runs
+(mainly overall AI-usage levels, ≈ +0.1 share) trace to the reward-channel
+fixes, not to the targeting.
+
+*Terminology guard:* this ablation concerns the **AI's** targeting
+(`confirmation_target`, individual vs consensus — what the AI serves). It
+is distinct from the 2026-08-25 `confirmation_reference` revision, which
+concerns the **exploiters' own evaluation** (what they score confirmation
+against). The AI remains type-agnostic and individual-targeting throughout.
 
 ## 7. What changed vs the legacy run (for transparency in the SI)
 
@@ -137,26 +205,39 @@ reward-channel fixes, not to the targeting.
 
 ## 8. Open items before submission (details: PNAS_WRITING_INSTRUCTIONS §2, M1–M8)
 
-1. **M1 — Metric revision (highest priority).** AECI-Var is judged
-   inadequate as the AI-side counterpart of SECI: it is blind to the
-   individualized (own-prior) bubble and is *most* negative at the truthful
-   endpoint (truth-convergence confound) — it is not α-monotone in the
-   direction the construct claims. Replacement: **AECI-IE**, SECI's exact
-   variance-ratio formula applied to the report levels community members
-   *receive from the AI channel* per window (with SECI-IE over the human
-   channel as consistency check). Observation-only → the re-run reproduces
-   all existing series on the same seeds and becomes the final citable
-   dataset (`results-final/`).
+1. **M1 — Metric revision: status after `results-mechfix/`.** AECI-Var
+   remains retired (blind to the individualized bubble; truth-convergence
+   confound at α=0). The belief-baseline **AECI-IE** did not deliver the
+   intended dose–response at N=20 in the pre-revision run (explorer series
+   ≈0 in the main model; exploiter series anti-monotone) and its magnitude
+   is aggregation-fragile (NaN-ragged 5-tick pools). Under the revised
+   model the workable AI-side indices are: explorer AECI-IE in the control
+   (+0.03 → −0.36, ≈0 at the truthful endpoint), the **channel-baseline
+   AECI-IE-chan per type**, and the **population AECI-IE-chan-pop**
+   (U-shaped in α, both configurations). Recommended primary for the
+   paper: the channel-baseline pair (per-type + population), with
+   AECI-LockIn and the L1+ pool as the individual-lock-in evidence.
 2. **M2** cognitive-gap sweep on the fixed model (Fig. 3b). **M3** N=50
    boundary cells α∈{0.8, 0.9, 1.0}. **M4** mixed-model regressions with
    Holm-corrected contrasts.
 3. **M5** robustness envelope (population, topology, AI supply,
    verification probability). **M6** dyadic docking (Glickman–Sharot).
-4. **M7** salience decision experiment — keep `salience_weight=0` mainline
-   (C12 as a *finding*) or promote a salience>0 variant; Finding 3's text
-   depends on this author decision.
-5. **M8** final figures from `results-final/`; Zenodo DOI; resolve the
-   flagged placeholder reference; Significance Statement approval.
+4. **M7 — DECIDED (2026-08-25, `results-salience/`).** Keep
+   `salience_weight=0` mainline: C12 stands at every salience level
+   (explorer AI trust 0.90 → 0.82 across α even at s=1). Bonus finding for
+   Finding 3: at s=1 the exploiter capture gradient disappears (AI share
+   flat ≈0.5 at all α) — but by **social retrenchment**, not truth-seeking:
+   at α=0 the exploiter chamber deepens (SECI −0.52 vs −0.37) and their
+   precision falls (0.43 vs 0.57). Making disconfirmation salient ejects
+   confirmation-seekers from the truthful channel into the social bubble.
+5. **M8** final figures from `results-mechfix/` (or its successor once the
+   single-mechanism ablations are in); Zenodo DOI; resolve the flagged
+   placeholder reference; Significance Statement approval.
+6. **New (2026-08-25):** single-mechanism ablations of the revision
+   (`confirmation_reference=own`; `report_rounding=deterministic`) to
+   attribute the restored interior α\*; optional `salience_weight>0` sweep
+   now that salience covers both agent types' channels.
 
 Full provenance and per-directory READMEs: `results/README.md`,
-`results-verification/README.md`, `results-ablation-consensus/README.md`.
+`results-verification/README.md`, `results-ablation-consensus/README.md`,
+`results-final/README.md`, `results-mechfix/README.md`.
