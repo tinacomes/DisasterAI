@@ -244,6 +244,11 @@ def run_one_sim(params):
     ie_pool_human_exploit, ie_pool_human_explor = [], []
     lockin_exploit, lockin_explor       = [], []   # AECI-LockIn: negative = AI-heavy beliefs more frozen
     l1pool_exploit, l1pool_explor       = [], []   # mean # L1+ beliefs per agent (context for SECI)
+    # Population-level (type-pooled) bubble indices — the societal series;
+    # per-type series show the fragmentation between the cognitive styles
+    seci_pop, lockin_pop                = [], []
+    aeci_ie_pop, aeci_ie_chan_pop       = [], []
+    seci_ie_pop, seci_ie_chan_pop       = [], []
     trust_ai_exploit, trust_fri_exploit = [], []
     trust_ai_explor,  trust_fri_explor  = [], []
     ai_query_ratio_exploit              = []   # per-tick fraction of queries sent to AI
@@ -345,6 +350,17 @@ def run_one_sim(params):
             _bp = model.belief_pool_data[-1] if getattr(model, 'belief_pool_data', None) else (0, float('nan'), float('nan'))
             l1pool_exploit.append(float(_bp[1]))
             l1pool_explor.append( float(_bp[2]))
+            # Population-level series (societal signal)
+            seci_pop.append(float(model.seci_pop_data[-1][1])
+                            if getattr(model, 'seci_pop_data', None) else float('nan'))
+            _iep = model.aeci_ie_pop_data[-1] if getattr(model, 'aeci_ie_pop_data', None) else (0, float('nan'), float('nan'))
+            aeci_ie_pop.append(     float(_iep[1]))
+            aeci_ie_chan_pop.append(float(_iep[2]))
+            _sep = model.seci_ie_pop_data[-1] if getattr(model, 'seci_ie_pop_data', None) else (0, float('nan'), float('nan'))
+            seci_ie_pop.append(     float(_sep[1]))
+            seci_ie_chan_pop.append(float(_sep[2]))
+            _lkp = model.aeci_lockin_pop_data[-1] if getattr(model, 'aeci_lockin_pop_data', None) else (0, None)
+            lockin_pop.append(float(_lkp[1]) if _lkp[1] is not None else float('nan'))
 
             ex_errors, er_errors = [], []
             _g_mae = {'near': [], 'far': [], 'lobetw': [], 'hibetw': []}
@@ -561,6 +577,12 @@ def run_one_sim(params):
         'lockin_explor':           lockin_explor,
         'l1pool_exploit':          l1pool_exploit,
         'l1pool_explor':           l1pool_explor,
+        'seci_pop':                seci_pop,
+        'aeci_ie_pop':             aeci_ie_pop,
+        'aeci_ie_chan_pop':        aeci_ie_chan_pop,
+        'seci_ie_pop':             seci_ie_pop,
+        'seci_ie_chan_pop':        seci_ie_chan_pop,
+        'lockin_pop':              lockin_pop,
         'trust_ai_exploit':        trust_ai_exploit,
         'trust_fri_exploit':       trust_fri_exploit,
         'trust_ai_explor':         trust_ai_explor,
@@ -642,6 +664,8 @@ def _aggregate(runs):
         'ie_pool_ai_exploit', 'ie_pool_ai_explor',
         'ie_pool_human_exploit', 'ie_pool_human_explor',
         'lockin_exploit', 'lockin_explor', 'l1pool_exploit', 'l1pool_explor',
+        'seci_pop', 'aeci_ie_pop', 'aeci_ie_chan_pop',
+        'seci_ie_pop', 'seci_ie_chan_pop', 'lockin_pop',
         'trust_ai_exploit', 'trust_fri_exploit', 'trust_ai_explor', 'trust_fri_explor',
         'ai_query_ratio_exploit', 'ai_query_ratio_explor',
         'aeci_var',
@@ -885,6 +909,9 @@ def compute_goldilocks_metrics(all_results):
         # Channel-baseline variant (strict SECI parallel; M1 validation)
         aeci_iec_m, aeci_iec_s = ms('aeci_ie_chan_exploit', 'aeci_ie_chan_explor')
         seci_iec_m, seci_iec_s = ms('seci_ie_chan_exploit', 'seci_ie_chan_explor')
+        # Population-level (type-pooled) series — the societal composites
+        seci_pop_m     = ss(res.get('seci_pop_mean', []))
+        aeci_iec_pop_m = ss(res.get('aeci_ie_chan_pop_mean', []))
         mae_m,  mae_s  = ms('mae_exploit',  'mae_explor')
         prec_m, prec_s = ms('prec_exploit', 'prec_explor')
         # Per-tick series: use 75-tick window to match SECI cadence
@@ -917,6 +944,10 @@ def compute_goldilocks_metrics(all_results):
             'prec': prec_m, 'prec_std': prec_s, 'prec_runs': runs_pair('prec_exploit', 'prec_explor'),
             'unmet': unmet_m, 'unmet_std': unmet_s,
             'unmet_runs': res.get('unmet_needs_ss_runs', []),
+            'seci_pop': seci_pop_m,
+            'aeci_ie_chan_pop': aeci_iec_pop_m,
+            'seci_pop_runs': res.get('seci_pop_ss_runs', []),
+            'aeci_ie_chan_pop_runs': res.get('aeci_ie_chan_pop_ss_runs', []),
             'total_bubble': abs(seci_m) + abs(aeci_m),
             # M1 composite: sum of two structurally identical constructs
             # (SECI on held beliefs, AECI-IE on served information)
@@ -947,6 +978,8 @@ def compute_goldilocks_metrics(all_results):
     aeci_err_abs = [abs(metrics[a]['aeci_err']) for a in available]
     aeci_ie_abs  = [abs(metrics[a]['aeci_ie'])  for a in available]
     aeci_iec_abs = [abs(metrics[a]['aeci_ie_chan']) for a in available]
+    seci_pop_abs = [abs(metrics[a]['seci_pop'])         for a in available]
+    aeci_pop_abs = [abs(metrics[a]['aeci_ie_chan_pop']) for a in available]
     mae_vals     = [metrics[a]['mae']           for a in available]
 
     seci_n     = _norm(seci_abs)
@@ -954,6 +987,8 @@ def compute_goldilocks_metrics(all_results):
     aeci_err_n = _norm(aeci_err_abs)
     aeci_ie_n  = _norm(aeci_ie_abs)
     aeci_iec_n = _norm(aeci_iec_abs)
+    seci_pop_n = _norm(seci_pop_abs)
+    aeci_pop_n = _norm(aeci_pop_abs)
     mae_n      = _norm(mae_vals)
 
     for i, alpha in enumerate(available):
@@ -966,6 +1001,13 @@ def compute_goldilocks_metrics(all_results):
         # Channel-baseline composite variant (α* sensitivity table)
         metrics[alpha]['total_bubble_iec_norm'] = seci_n[i] + aeci_iec_n[i]
         metrics[alpha]['total_score_iec_norm']  = seci_n[i] + aeci_iec_n[i] + mae_n[i]
+        # Population-level (societal) composites: the paper's societal question
+        # — how well does society as a whole do, fragmented or not — asked of
+        # the type-pooled indices (channel-baseline AI index, SECI construct)
+        metrics[alpha]['seci_pop_norm']         = seci_pop_n[i]
+        metrics[alpha]['aeci_ie_chan_pop_norm'] = aeci_pop_n[i]
+        metrics[alpha]['total_bubble_pop_norm'] = seci_pop_n[i] + aeci_pop_n[i]
+        metrics[alpha]['total_score_pop_norm']  = seci_pop_n[i] + aeci_pop_n[i] + mae_n[i]
         # M1 primary composites (AECI-IE — SECI's construct on the served
         # information environment; see calculate_ie_indices)
         metrics[alpha]['total_bubble_ie_norm'] = seci_n[i] + aeci_ie_n[i]
@@ -992,6 +1034,8 @@ ALPHA_STAR_COMPOSITES = {
     'SECI + AECI-IE + MAE (primary)':  'total_score_ie_norm',
     'SECI + AECI-IE-chan':             'total_bubble_iec_norm',
     'SECI + AECI-IE-chan + MAE':       'total_score_iec_norm',
+    'SECI-pop + AECI-IE-chan-pop (population)':       'total_bubble_pop_norm',
+    'SECI-pop + AECI-IE-chan-pop + MAE (population)': 'total_score_pop_norm',
     'SECI + AECI-Var (retired)':       'total_bubble_norm',
     'SECI + AECI-Var + MAE (retired)': 'total_score_norm',
     'SECI only':                       'bubble_seci_only_norm',
@@ -1688,6 +1732,81 @@ def plot_aeci_evolution(all_results, save_dir):
     plt.savefig(path, dpi=150, bbox_inches='tight')
     plt.close()
     print(f"AECI evolution figure saved: {path}")
+
+
+# ---------------------------------------------------------------------------
+# Population vs per-type bubble evolution figure
+# ---------------------------------------------------------------------------
+
+def plot_population_evolution(all_results, save_dir):
+    """3×3 timeseries figure: bubble-index EVOLUTION at population level and
+    per type, one line per alignment level.
+
+    Rows: SECI (social channel), AECI-IE-chan (AI channel, channel baseline —
+    the strict SECI parallel), AECI-LockIn (belief freeze of AI-heavy agents).
+    Columns: population (societal question: how does society as a whole fare),
+    exploitative, exploratory (fragmentation between the cognitive styles).
+
+    Motivation: the α* tables aggregate the last 75 ticks, which hides the
+    lifecycle (chambers that form mid-run and dissolve — or deepen — by the
+    end read as weak steady-state values). This figure keeps the full
+    trajectory visible alongside the per-type split. Series absent from
+    cached JSONs predating the population metrics are skipped panel-wise.
+    """
+    rows = [
+        ('SECI',        'seci_pop',         'seci_exploit',         'seci_explor'),
+        ('AECI-IE-chan', 'aeci_ie_chan_pop', 'aeci_ie_chan_exploit', 'aeci_ie_chan_explor'),
+        ('AECI-LockIn', 'lockin_pop',       'lockin_exploit',       'lockin_explor'),
+    ]
+    col_titles = ['Population (societal)', 'Exploitative', 'Exploratory']
+    colors = plt.cm.viridis(np.linspace(0, 1, len(ALIGNMENT_SWEEP)))
+    _BAND_ALPHAS = {ALIGNMENT_SWEEP[0], ALIGNMENT_SWEEP[-1]}
+
+    fig, axes = plt.subplots(3, 3, figsize=(18, 13), sharex=True)
+    fig.suptitle('Filter-Bubble Evolution — population level vs per type\n'
+                 '(negative = echo chamber; population = societal signal, '
+                 'per-type columns = fragmentation)',
+                 fontsize=13, fontweight='bold')
+
+    for r, (row_label, *keys) in enumerate(rows):
+        for c, key in enumerate(keys):
+            ax = axes[r, c]
+            plotted = False
+            for color, (res, alpha) in zip(colors, zip(all_results, ALIGNMENT_SWEEP)):
+                mean = np.array(res.get(f'{key}_mean', []), dtype=float)
+                if mean.size == 0 or np.all(np.isnan(mean)):
+                    continue
+                std = np.array(res.get(f'{key}_std', []), dtype=float)
+                ticks = np.array(res.get('metric_ticks', range(len(mean))))[:len(mean)]
+                valid = ~np.isnan(mean)
+                ax.plot(ticks[valid], mean[valid], color=color, linewidth=1.6,
+                        label=f'α={alpha}')
+                if alpha in _BAND_ALPHAS and std.size == mean.size:
+                    ax.fill_between(ticks[valid], (mean - std)[valid],
+                                    (mean + std)[valid], color=color, alpha=0.12)
+                plotted = True
+            ax.axhline(0, color='gray', linestyle=':', linewidth=1)
+            if r == 0:
+                ax.set_title(col_titles[c])
+            if c == 0:
+                ax.set_ylabel(f'{row_label} (−1 to +1)')
+            if r == 2:
+                ax.set_xlabel('Simulation tick')
+            ax.set_ylim(-1.05, 1.05)
+            ax.grid(True, alpha=0.3)
+            if not plotted:
+                ax.text(0.5, 0.5, 'series not in cached results',
+                        transform=ax.transAxes, ha='center', va='center',
+                        fontsize=9, color='gray')
+    axes[0, 0].legend(fontsize=7, ncol=2, loc='lower left')
+
+    _panel_letters(axes.ravel())
+    plt.tight_layout()
+    os.makedirs(save_dir, exist_ok=True)
+    path = os.path.join(save_dir, 'population_evolution.png')
+    plt.savefig(path, dpi=150, bbox_inches='tight')
+    plt.close()
+    print(f"Population/fragmentation evolution figure saved: {path}")
 
 
 # ---------------------------------------------------------------------------
@@ -2661,6 +2780,20 @@ if __name__ == '__main__':
              "exploitative callers), kept only to reproduce the archived sweeps.",
     )
     parser.add_argument(
+        '--confirmation-reference', choices=['network', 'own'], default=None,
+        help="Exploiters' confirmation-reward target: 'network' (model default) "
+             "= trusted-network consensus when defined, fallback own prior "
+             "(mechanism (ii): confirming information from the social network); "
+             "'own' = legacy own-prior confirmation, kept for ablation.",
+    )
+    parser.add_argument(
+        '--report-rounding', choices=['stochastic', 'deterministic'], default=None,
+        help="AI report discretisation: 'stochastic' (model default) = "
+             "probabilistic rounding so the delivered confirmation dose is "
+             "linear in alpha; 'deterministic' = legacy np.round (near step "
+             "function of alpha), kept to reproduce archived sweeps.",
+    )
+    parser.add_argument(
         '--collect-spatial-and-plot', action='store_true',
         help='Load per-alpha spatial JSONs (spatial_alpha_*.json) from --results-dir, '
              'compute metrics, and generate spatial_coverage.png + periphery_gap.png. '
@@ -2687,6 +2820,10 @@ if __name__ == '__main__':
         base_params['query_scope'] = args.query_scope
     if args.confirmation_target is not None:
         base_params['confirmation_target'] = args.confirmation_target
+    if args.confirmation_reference is not None:
+        base_params['confirmation_reference'] = args.confirmation_reference
+    if args.report_rounding is not None:
+        base_params['report_rounding'] = args.report_rounding
     if args.n_humans is not None:
         base_params['number_of_humans'] = args.n_humans
     if args.num_ai is not None:
@@ -3147,6 +3284,7 @@ if __name__ == '__main__':
         print("Factor comparison skipped (no factor-sweep data).")
     plot_transition_timing(all_results, save_dir)
     plot_aeci_evolution(all_results, save_dir)
+    plot_population_evolution(all_results, save_dir)
     plot_echo_chamber_lifecycle(all_results, save_dir)
     plot_spatial_coverage(all_results, metrics, save_dir)
     plot_periphery_gap(all_results, metrics, save_dir)

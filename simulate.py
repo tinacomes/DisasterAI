@@ -55,6 +55,11 @@ def run_one(params):
     ie_pool_human_exploit, ie_pool_human_explor = [], []
     lockin_exploit, lockin_explor               = [], []
     l1pool_exploit, l1pool_explor               = [], []
+    # Population-level (type-pooled) bubble indices: the societal series
+    # (per-type series show fragmentation between the cognitive styles)
+    seci_pop, lockin_pop                        = [], []
+    aeci_ie_pop, aeci_ie_chan_pop               = [], []
+    seci_ie_pop, seci_ie_chan_pop               = [], []
     mae_exploit,  mae_explor                    = [], []
     prec_exploit, prec_explor                   = [], []
     ai_query_ratio_exploit, ai_query_ratio_explor = [], []
@@ -135,6 +140,17 @@ def run_one(params):
             _bp = model.belief_pool_data[-1] if model.belief_pool_data else (0, float('nan'), float('nan'))
             l1pool_exploit.append(float(_bp[1]))
             l1pool_explor.append( float(_bp[2]))
+            # Population-level series (societal signal; same constructs pooled
+            # over all communities / the whole population)
+            seci_pop.append(float(model.seci_pop_data[-1][1]) if model.seci_pop_data else float('nan'))
+            _iep = model.aeci_ie_pop_data[-1] if model.aeci_ie_pop_data else (0, float('nan'), float('nan'))
+            aeci_ie_pop.append(     float(_iep[1]))
+            aeci_ie_chan_pop.append(float(_iep[2]))
+            _sep = model.seci_ie_pop_data[-1] if model.seci_ie_pop_data else (0, float('nan'), float('nan'))
+            seci_ie_pop.append(     float(_sep[1]))
+            seci_ie_chan_pop.append(float(_sep[2]))
+            _lkp = model.aeci_lockin_pop_data[-1] if model.aeci_lockin_pop_data else (0, None)
+            lockin_pop.append(float(_lkp[1]) if _lkp[1] is not None else float('nan'))
 
             ex_errors, er_errors = [], []
             for agent in model.agent_list:
@@ -184,6 +200,12 @@ def run_one(params):
         'lockin_explor':          lockin_explor,
         'l1pool_exploit':         l1pool_exploit,
         'l1pool_explor':          l1pool_explor,
+        'seci_pop':               seci_pop,
+        'aeci_ie_pop':            aeci_ie_pop,
+        'aeci_ie_chan_pop':       aeci_ie_chan_pop,
+        'seci_ie_pop':            seci_ie_pop,
+        'seci_ie_chan_pop':       seci_ie_chan_pop,
+        'lockin_pop':             lockin_pop,
         'mae_exploit':            mae_exploit,
         'mae_explor':             mae_explor,
         'prec_exploit':           prec_exploit,
@@ -235,6 +257,18 @@ def main():
                              "pre-fix behaviour (network consensus for "
                              "exploitative callers), kept only to reproduce the "
                              "archived sweeps")
+    parser.add_argument('--confirmation_reference', default='network',
+                        choices=['network', 'own'],
+                        help="Exploiters' confirmation-reward target: 'network' "
+                             "(default) = trusted-network consensus when defined "
+                             "(fallback own prior); 'own' = legacy own-prior "
+                             "confirmation, kept for reproduction/ablation")
+    parser.add_argument('--report_rounding', default='stochastic',
+                        choices=['stochastic', 'deterministic'],
+                        help="AI report discretisation: 'stochastic' (default) = "
+                             "probabilistic rounding, delivered confirmation dose "
+                             "linear in alpha; 'deterministic' = legacy np.round "
+                             "(near step function of alpha)")
     args = parser.parse_args()
 
     params = BASE_PARAMS.copy()
@@ -247,6 +281,8 @@ def main():
     params['network_type']        = args.network_type
     params['query_scope']         = args.query_scope
     params['confirmation_target'] = args.confirmation_target
+    params['confirmation_reference'] = args.confirmation_reference
+    params['report_rounding']     = args.report_rounding
 
     print(f'Condition: α={args.alpha}, rumor={args.rumor_probability}, '
           f'disaster={args.disaster_dynamics}, exploit={args.share_exploitative}')
