@@ -168,7 +168,13 @@ immobile control (structural null holds under the revised model).
    result (the optimum is structural, not a knife-edge of the D/δ mix);
    only the per-type channel composite drifts with the gap (suggestive,
    needs M4 CIs).
-2. **M3** — N=50 boundary cells (α ∈ {0.8, 0.9, 1.0}) on the revised model.
+2. **M3 — DONE, PASS**
+   ([`results-boundary-n50/`](results-boundary-n50/README.md), run
+   32894013398): every boundary claim survives at N=50 with Holm
+   correction — ΔSECI_exploit −0.269 [−0.350, −0.189] at α=1
+   (p ≈ 5e-08), Δunmet −6.56 (p ≈ 6e-17), Δprecision_explor +0.33;
+   plus a new per-type AI-channel contrast (bounded access narrows the
+   exploiters' served pool, diversifies the explorers').
 3. **M4** — mixed-model regressions + Holm-corrected contrasts
    (`tools/sweep_regression.py`) over `results-mechfix/`.
 4. **M5** — robustness envelope (population, topology, AI supply,
