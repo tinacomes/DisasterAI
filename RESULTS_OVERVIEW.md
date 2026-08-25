@@ -222,9 +222,14 @@ against). The AI remains type-agnostic and individual-targeting throughout.
    Holm-corrected contrasts.
 3. **M5** robustness envelope (population, topology, AI supply,
    verification probability). **M6** dyadic docking (Glickman–Sharot).
-4. **M7** salience decision experiment — keep `salience_weight=0` mainline
-   (C12 as a *finding*) or promote a salience>0 variant; Finding 3's text
-   depends on this author decision.
+4. **M7 — DECIDED (2026-08-25, `results-salience/`).** Keep
+   `salience_weight=0` mainline: C12 stands at every salience level
+   (explorer AI trust 0.90 → 0.82 across α even at s=1). Bonus finding for
+   Finding 3: at s=1 the exploiter capture gradient disappears (AI share
+   flat ≈0.5 at all α) — but by **social retrenchment**, not truth-seeking:
+   at α=0 the exploiter chamber deepens (SECI −0.52 vs −0.37) and their
+   precision falls (0.43 vs 0.57). Making disconfirmation salient ejects
+   confirmation-seekers from the truthful channel into the social bubble.
 5. **M8** final figures from `results-mechfix/` (or its successor once the
    single-mechanism ablations are in); Zenodo DOI; resolve the flagged
    placeholder reference; Significance Statement approval.
