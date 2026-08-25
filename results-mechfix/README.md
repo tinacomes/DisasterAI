@@ -68,13 +68,26 @@ changed and how to isolate each change.
   deltas: the switches configuration reduces MAE and raises precision at
   every α, and cuts unmet needs by −7.3 cells at α=1 (95% CIs exclude 0).
 
-## Attribution
+## Attribution — settled by the single-mechanism ablations (2026-08-25)
 
-This run changes mechanisms (1) and (2) **jointly** relative to
-`results-final/`. To isolate each, dispatch **Run Primary Alignment Sweep**
-with `confirmation_reference=own` or `report_rounding=deterministic`
-(inputs added in `30f89e0`). The salience counterfactual for the
-confirmation trap (both agent types) is `salience_weight > 0`.
+This run changes mechanisms (1) and (2) jointly relative to
+`results-final/`. The two single-mechanism ablations (main-model
+configuration, same design) attribute the effect:
+
+| Dataset | Reference | Rounding | α* = 0.6 composites | Verdict |
+|---|---|---|---|---|
+| `results-mechfix/` (this run, switches) | network | stochastic | 7/12 | full revision |
+| `results-ablation-ownref/` | **own** | stochastic | 8/12 | ≈ identical to full revision |
+| `results-ablation-detround/` | network | **deterministic** | 4/12 (spread [0.2, 0.6]) | interior α* degrades |
+
+**The stochastic-rounding dose linearisation is the primary driver of the
+restored, composite-robust interior α\*.** The network confirmation
+reference has a negligible aggregate effect (the trusted network's
+consensus mostly coincides with the member's own prior) — its value is the
+theoretical coherence of mechanism (ii), not the curve shapes. The
+population-level composites are the most ablation-robust (α* = 0.6 in all
+three datasets). The salience counterfactual for the confirmation trap
+(both agent types) remains `salience_weight > 0`.
 
 ## Directories
 

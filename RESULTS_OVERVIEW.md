@@ -51,9 +51,15 @@ formation/dissolution dynamics are no longer hidden by the late-run window.
   configuration dominates the control on MAE and precision at every α
   (paired CIs exclude 0) and cuts unmet needs by −7.3 cells at α=1.
 
-Attribution: the revision changes (1) and (2) jointly vs `results-final/`;
-single-mechanism ablations are one dispatch away (`run-primary-sweep`
-inputs `confirmation_reference=own`, `report_rounding=deterministic`).
+Attribution (settled by the single-mechanism ablations, 2026-08-25): the
+**stochastic-rounding dose linearisation drives the restored interior α\***
+— reverting only the rounding (`results-ablation-detround/`) fragments α\*
+to spread [0.2, 0.6] (4/12 composites at 0.6), while reverting only the
+network confirmation reference (`results-ablation-ownref/`) leaves the
+result essentially unchanged (8/12 at 0.6, all series within seed noise).
+The network reference matters for mechanism-(ii) coherence, not for the
+aggregate curves. Population composites are α\* = 0.6 in all three
+datasets — the most ablation-robust definition.
 Sections 1–8 below describe the pre-revision record and remain valid as
 the ablation/history chain; numbers there refer to `results-verification/`
 unless stated.
