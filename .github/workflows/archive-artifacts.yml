@@ -30,12 +30,39 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          run-id: ${{ inputs.run_id }}
-          github-token: ${{ github.token }}
-          pattern: ${{ inputs.pattern }}
-          path: ${{ inputs.dest }}
+      # NOTE: actions/download-artifact@v4's run-id listing truncates at 100
+      # artifacts (observed on the 132-cell gap sweep: only the newest 100
+      # were downloaded, and pattern-filtered retries saw the same page).
+      # Download via the REST API with --paginate instead; supports glob
+      # patterns and {a,b} alternatives (expanded to comma-separated globs).
+      - name: Download artifacts (paginated)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ inputs.run_id }}
+          PATTERN: ${{ inputs.pattern }}
+          DEST: ${{ inputs.dest }}
+        run: |
+          mkdir -p "$DEST"
+          PATS=$(echo "$PATTERN" | tr -d '{}' | tr ',' ' ')
+          n=0
+          gh api "repos/${{ github.repository }}/actions/runs/$RUN_ID/artifacts?per_page=100" \
+            --paginate --jq '.artifacts[] | "\(.id)\t\(.name)"' |
+          while IFS=$'\t' read -r id name; do
+            match=0
+            for p in $PATS; do
+              case "$name" in
+                $p) match=1 ;;
+              esac
+            done
+            if [ "$match" = "1" ]; then
+              echo "Downloading $name ($id)"
+              mkdir -p "$DEST/$name"
+              gh api "repos/${{ github.repository }}/actions/artifacts/$id/zip" > /tmp/artifact.zip
+              unzip -oq /tmp/artifact.zip -d "$DEST/$name"
+              n=$((n+1))
+            fi
+          done
+          echo "Downloaded matching artifacts into $DEST"
       - name: Commit and push
         env:
           DEST: ${{ inputs.dest }}

@@ -29,18 +29,25 @@ general-interest findings (the salience counterfactual's *social
 retrenchment* — making disconfirmation salient ejects confirmation-seekers
 into their network rather than toward truth — and the
 fragmentation-vs-societal two-layer result). The Lorenz/Becker/Cinelli
-lineage argument still holds. **However**, two things still weigh against PNAS
-Direct Submission today: (i) the supporting envelope (M2 re-run, M3 N=50
-boundary, M4 statistics, M5 robustness) is still outstanding, and PNAS
-reviewers of ABM work reliably probe exactly there; (ii) the model and
-metrics went through several late revisions, so the paper needs the full
-ablation chain in the SI to be credible, which pushes against the 6-page
-format. *(Update 2026-08-25: the M6 docking gate is **satisfied** —
-`results-docking/` reproduces Glickman & Sharot's dyadic amplification
-qualitatively for both agent types.)* **Recommendation: draft to the PNAS
-format but target PNAS Nexus.** Escalate to PNAS Direct Submission only if
-M2–M5 also hold; with M6 passed, that combination is the one configuration
-in which the stretch is justified. Drop NHB as a target: it
+lineage argument still holds. **Gate status (2026-08-26): the escalation condition is now FULLY
+SATISFIED.** M6 docking PASS (`results-docking/` — Glickman & Sharot's
+dyadic amplification reproduced for both types); M2 re-run DONE (interior
+optimum in all 132 cognitive-profile cells; Fig. 3b reframed as
+robustness); M3 boundary PASS (every high-α claim seed-robust at N=50
+with Holm correction, `results-boundary-n50/`); M5 robustness PASS (all
+three criteria at all ten perturbation levels, `results-robustness/` +
+`docs/robustness_summary.md`); M7 decided; **M4 DONE**
+(`results-mechfix/regression/` — Table S1/S6 material: significant
+U-curvature on the operational outcomes, configuration main effects ***
+throughout, Holm contrasts consistent with the N=50 boundary table).
+**The full pre-drafting validation program is complete; drafting can
+start.** The one remaining consideration against PNAS Direct Submission
+is presentational: the late mechanism revisions mean the credibility case
+rests on a substantial SI ablation chain, which competes with the 6-page
+format. **Recommendation: with the full gate passed, PNAS Direct
+Submission is now a defensible first target, with PNAS Nexus as the
+transfer/fallback; the choice is the author's.** Draft to the PNAS format
+either way. Drop NHB as a target: it
 is harder than PNAS for this genre and the manuscript has moved away from
 the NHB framing. The word budget, display-item limits, and style rules
 below are PNAS-family rules and apply unchanged to Nexus.
@@ -314,10 +321,11 @@ only; all numbers below are from **`results-mechfix/`** (verified against
    **Where:** cites **Fig. 2d** (unmet needs vs α, both configurations),
    **Fig. S3** (AI query share and trust trajectories per type; the C12
    flat explorer-trust curve is panel S3b), **Table S8** (salience cells,
-   from `results-salience/`); cognitive-gap dependence of the optimum
-   cites **Fig. 3b** (from the M2 RE-RUN — do not draft this sentence
-   until it exists). Inline numbers: query-share endpoints, unmet-needs
-   contrast, the two salience contrasts.
+   from `results-salience/`); the optimum's robustness to the
+   population's cognitive profile cites **Fig. 3b** (M2 re-run: interior
+   α\* in every (g, d_mid) cell — a robustness claim, NOT a dependence
+   claim; see the Fig. 3b spec in §4). Inline numbers: query-share
+   endpoints, unmet-needs contrast, the two salience contrasts.
 4. *Harms concentrate on the spatial periphery* (compendium H8). Key
    message: spatial MAE gap +0.12→+0.33 and aid gap −1.8→−6.6 with α in
    the main model; ≈0 at all α in the immobile control (structural null);
@@ -391,7 +399,14 @@ Main text (4 items, all figures; no main-text tables — every table is SI):
   composite overlaid, and the control's curve for contrast (both now
   interior — the caption notes the old corner solution was a dose
   artifact, citing the rounding ablation); **(b)** cognitive-gap sweep
-  (from the **M2 RE-RUN** — placeholder until it exists).
+  (from `results-gap-sweep-mechfix/`, all 132 cells) — **REFRAMED as a
+  robustness panel**: α\* (population bubble and unmet-needs) across the
+  (g, d_mid) grid, showing the interior optimum is invariant to the
+  population's cognitive profile (0.6–0.8 in every cell). Do NOT claim
+  the optimum's location depends on the cognitive profile — the M2 re-run
+  does not support it at the population/operational level; the per-type
+  drift with g (0.2–0.5 → 0.6–0.7) may be mentioned as suggestive only
+  with M4 CIs.
 - **Fig. 4 — Periphery** two panels: **(a)** spatial MAE gap (far − near
   quartile) vs α, main vs control; **(b)** aid-contribution gap vs α, same
   overlay; basis `periphery_gap.png` from `results-mechfix/`.

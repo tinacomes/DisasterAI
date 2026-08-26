@@ -156,18 +156,43 @@ immobile control (structural null holds under the revised model).
 | AECI-Var, AECI-Err, query-share AECI | retired / secondary | α\* sensitivity table only |
 | Dose manipulation check | `effective_alpha` | Cite once for the rounding rationale |
 
-## 4. What must still (re-)run before submission
+## 4. Supporting-experiment status — ALL COMPLETE (2026-08-26)
 
-1. **M2 re-run — IN PROGRESS** (run 32866377905, dispatched 2026-08-25):
-   cognitive-gap sweep under the revised model (the archived
-   `results-gap-sweep-fixed/` is pre-revision and its surface was flattened
-   by the step-function dose; the smooth dose may restore the gradient).
-2. **M3** — N=50 boundary cells (α ∈ {0.8, 0.9, 1.0}) on the revised model.
-3. **M4** — mixed-model regressions + Holm-corrected contrasts
-   (`tools/sweep_regression.py`) over `results-mechfix/`.
-4. **M5** — robustness envelope (population, topology, AI supply,
-   verification probability): `docs/robustness_summary.md` is still
-   **PENDING RUNS**.
+Every step of the pre-drafting validation program has now run on the
+revised model and passed; drafting can start from §2's headline claims.
+
+1. **M2 re-run — DONE**
+   ([`results-gap-sweep-mechfix/`](results-gap-sweep-mechfix/README.md),
+   run 32866377905, all 132 cells): the interior optimum holds in **every**
+   (g, d_mid) cell (unmet α\* = 0.6–0.7; population bubble α\* = 0.6–0.8;
+   explorer MAE ≈0.55→1.75 everywhere). The intended "optimum location
+   depends on the cognitive profile" claim is NOT supported at the
+   population/operational level — reframe Fig. 3b as a **robustness**
+   result (the optimum is structural, not a knife-edge of the D/δ mix);
+   only the per-type channel composite drifts with the gap (suggestive,
+   needs M4 CIs).
+2. **M3 — DONE, PASS**
+   ([`results-boundary-n50/`](results-boundary-n50/README.md), run
+   32894013398): every boundary claim survives at N=50 with Holm
+   correction — ΔSECI_exploit −0.269 [−0.350, −0.189] at α=1
+   (p ≈ 5e-08), Δunmet −6.56 (p ≈ 6e-17), Δprecision_explor +0.33;
+   plus a new per-type AI-channel contrast (bounded access narrows the
+   exploiters' served pool, diversifies the explorers').
+3. **M4 — DONE**
+   ([`results-mechfix/regression/`](results-mechfix/regression/README.md)):
+   standardized mixed-model coefficients (significant U-curvature for
+   unmet needs, population AECI-IE-chan, explorer precision;
+   configuration main effects *** on every operational outcome) and
+   Holm-corrected per-level contrasts consistent with the N=50 boundary
+   table. Table S1 = these contrasts (α ≤ 0.7) + boundary deltas
+   (α ≥ 0.8); Table S6 = the coefficient table.
+4. **M5 — DONE, PASS**
+   ([`results-robustness/`](results-robustness/README.md), run
+   32894002318): all three criteria hold at every perturbation level
+   (population 100–500, small-world generator, AI supply 1–10,
+   verification 0.1–0.5) with the canonical numbers reproducing almost
+   unchanged; per-sweep verdicts in
+   [`docs/robustness_summary.md`](docs/robustness_summary.md).
 5. **M6 — DONE, PASS** ([`results-docking/`](results-docking/README.md),
    run 32866369049): the dyad qualitatively reproduces Glickman & Sharot's
    human–AI amplification for both agent types (false belief corrected
