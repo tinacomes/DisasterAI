@@ -521,6 +521,30 @@ signature of \citet{glickman2024human}.}\label{fig:s6}
 
 \begin{figure}[h!]
 \centering
+\includegraphics[width=\textwidth]{figS8_timeseries.png}
+\caption{\textbf{Full within-run time series across all eleven alignment
+levels} (main model, mean $\pm$ s.d.\ over $N = 20$; archived plot from
+\texttt{results-mechfix/plots-config-switches/}). Rows: per-type SECI and
+belief MAE; per-type AECI-Err and unmet needs; per-type AI query ratio
+and targeting precision. Three temporal features underlie main-text
+claims that steady-state means cannot show. (i) \emph{Chambers are
+episodes}: both types' SECI series fall, recover, and re-form as the
+non-stationary disaster shifts, and the effect of $\alpha$ is on the
+recovery, not the depth. (ii) \emph{The truthful endpoint is fast but
+stalls}: unmet needs fall steeply under low $\alpha$ (below five cells
+per tick by tick 39 at $\alpha = 0$, against tick 62 at $\alpha = 0.6$
+and tick 121 at $\alpha = 1$) and then flatten on a residue of
+never-served cells ($1.34$ over the final 25 ticks at $\alpha = 0$
+against $0.21$ at $\alpha = 0.6$; $\alpha = 0$ and $\alpha = 1$ never
+cross below one cell per tick, while $\alpha = 0.6$ does at tick
+99)---the herding residue of Table~\ref{tab:s11-allocation}.
+(iii) \emph{Capture is a learned trajectory}: the confirmation-seekers'
+AI query ratio separates by $\alpha$ only after roughly tick 50, once
+the confirmation reward has accumulated.}\label{fig:s8}
+\end{figure}
+
+\begin{figure}[h!]
+\centering
 \includegraphics[width=\textwidth]{figS7_robustness.png}
 \caption{\textbf{Robustness envelope (M5).} Confirmation-seekers' SECI
 (top; the structural-precondition persistence), accuracy-seekers' MAE
@@ -837,6 +861,53 @@ Information sharing & Facilitate access to diverse sources \citep{jeon2024hearhe
 Decision support & Tailored and verified information \citep{zhao2025tailoring}, recommendations, automated decisions & Promoting high alignment \citep{manzini2024should}; (moral) de-skilling \citep{vallor2015moral} & (Group) decisions \citep{comes2024ai}, cognitive biases \citep{paulus2022influence} & Agentic AI \citep{acharya2025agentic}, early warning \citep{reichstein2025early} \\
 \bottomrule
 \end{tabular}
+\end{table}
+
+% ---------- Table S11 ----------
+\begin{table}[h!]
+\centering
+\caption{\textbf{Allocation-concentration diagnostics: why the truthful
+endpoint underperforms} (main model, $N = 20$; computed from the
+run-averaged aid and severity maps and the per-tick unmet-needs
+trajectories of \texttt{results-mechfix/plots-config-switches/}, by
+\texttt{make\_figures.py}; full 11-level grid in
+\texttt{allocation\_diagnostics.csv}). Top-5\% aid share = fraction of
+all relief absorbed by the 45 most-served cells (herding);
+$\rho(\text{aid},\text{severity})$ = correlation between the aid and
+severity maps (targeting signal); near-cell deficit = mean severity
+minus aid on the epicenter-nearest quartile, so negative values are
+oversupply. Reading across: the truthful endpoint concentrates aid
+(top-5\% share 0.23, near-cell oversupply 0.58) and is fastest to a
+low unmet count but never clears the tail; intermediate alignment
+disperses targeting while the signal is intact; full confirmation
+destroys the signal itself.}\label{tab:s11-allocation}
+\small
+\begin{tabular}{@{}lccccccc@{}}
+\toprule
+$\alpha$ & Total aid & Top-5\% aid share & $\rho$(aid, sev.) & Near-cell deficit & Tick to $<5$ unmet & Tick to $<1$ unmet & Residue (last 25 ticks) \\
+\midrule
+0.0 & 403 & 0.234 & 0.679 & $-0.579$ & 39 & --- & 1.34 \\
+0.2 & 402 & 0.222 & 0.691 & $-0.562$ & 39 & 92 & 1.19 \\
+0.4 & 389 & 0.210 & 0.686 & $-0.494$ & 44 & 88 & 0.73 \\
+0.6 & 359 & 0.179 & 0.670 & $-0.325$ & 62 & 99 & \textbf{0.21} \\
+0.8 & 334 & 0.146 & 0.546 & $-0.122$ & 95 & 134 & 0.12 \\
+1.0 & 329 & 0.126 & 0.349 & $+0.001$ & 121 & --- & 1.66 \\
+\bottomrule
+\end{tabular}
+
+\medskip
+\footnotesize
+``---'' marks alignment levels whose unmet-needs trajectory never falls
+below one cell per tick within the 200-tick run. The steady-state
+(last-75-tick) unmet means corresponding to these rows are 1.59, 1.08,
+0.81, 0.25, 0.44, and 2.86; the paired per-seed contrast between
+$\alpha = 0.6$ and $\alpha = 0$ is $-1.34$ $[-1.90, -0.79]$ in the main
+model and $-1.74$ $[-2.29, -1.20]$ in the control, so the truthful
+endpoint's disadvantage is seed-robust in both configurations. Note that
+total dispatched aid \emph{falls} monotonically with $\alpha$ (403 to
+329): the intermediate optimum achieves better coverage with less
+relief, which is what distinguishes a dispersion effect from an effort
+effect.
 \end{table}
 
 \clearpage

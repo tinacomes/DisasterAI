@@ -50,6 +50,65 @@ at population scale is not persuasion but the silent reorganization of
 who learns what from whom — and social network structure, not the AI
 policy alone, decides which failure mode a society gets.**
 
+## Revision 2 (2026-08-26, after author review)
+
+Three objections drove a second pass; each is now load-bearing in the
+draft rather than buried.
+
+1. **"The results are uninteresting — wrong AI leads to wrong
+   assistance."** This was a framing failure, not a results failure. The
+   monotone part of the story (confirmation degrades accuracy) had been
+   put first, and the non-obvious part was left implicit. The headline is
+   now the **truthful endpoint's failure**: a fully truthful AI is
+   *fastest* (below five unmet cells per tick by tick 39 vs. 62 at
+   α=0.6) yet **stalls on a residue it never clears** (1.34 vs. 0.21
+   unmet cells over the final 25 ticks; α=0 never crosses below one cell
+   per tick, α=0.6 does at tick 99). Mechanism: **herding**. A shared
+   truthful source synchronizes beliefs, and beliefs here are allocation
+   decisions — at α=0 the top 5% of cells absorb 23% of all aid and
+   near-epicenter cells are oversupplied by 0.58 severity units, so a
+   tail of need goes uncovered because every agent believes someone else
+   has it. Mild anchoring to each querier's own prior decorrelates
+   targeting (top-5% share 0.18) while the aid–severity correlation is
+   still intact (0.67 vs. 0.68); by α=1 that correlation collapses (0.35)
+   and unmet needs rise again. Paired per-seed: Δunmet(α=0.6 − α=0) =
+   −1.34 [−1.90, −0.79] main, −1.74 [−2.29, −1.20] control. Total
+   dispatched aid *falls* with α (403→329), so this is dispersion, not
+   effort. This is the Lorenz/Becker correlation problem arriving through
+   an AI channel, and it makes the interior optimum a mechanism rather
+   than a curve-fitting artifact. New: Fig. 3b, Table S11,
+   `allocation_diagnostics.csv`.
+2. **"We only look at endpoints of the evolution."** Fixed structurally.
+   Fig. 2 gains panels c,d (within-run SECI evolution per type at
+   α=0/0.6/1) and Fig. 3 gains panel b (unmet-needs trajectories). The
+   new claim these support: **alignment does not deepen chambers, it
+   stops them from dissolving.** Chambers are recurring episodes —
+   communities converge during collective sensemaking, recover, and
+   re-form as the disaster shifts. Peak depth barely varies with α; what
+   changes is recovery (exploiter chambers recover by ticks 40–55 for
+   α≤0.7 but not at α=1; explorer chambers never recover beyond α≈0.7).
+   Cross-sectional means read this as a modest shift in a mean; it is the
+   difference between a self-correcting and a self-sealing information
+   environment. New SI Fig. S8 (full time series, all α).
+3. **"Does the AI not matter at all for the exploiters?"** It matters, but
+   not epistemically — and that is itself the finding. Their MAE is flat
+   ≈1.8 at every α because *both* endpoints fail at their acceptance
+   window: a truthful AI's disconfirming reports fall outside it (dyadic
+   docking: even a fully truthful AI leaves a seeded false belief at 1.97
+   vs. 1.50 for a human partner, whose reports enter through
+   trust-widened acceptance), while a confirming AI's reports are
+   accepted but merely return the prior. The AI is heard by
+   confirmation-seekers exactly to the degree that it stops informing
+   them — the alignment paradox at the level of a single agent. Its
+   leverage over them is entirely behavioral: query capture (0.54→0.69),
+   targeting precision (0.57→0.38), and the community chamber, which is
+   *deepest under the truthful AI they refuse to believe*. Now an explicit
+   paragraph in Finding 2 plus a Discussion sentence.
+
+**Fig. 1** was never missing — it is the TikZ concept diagram drawn
+inline in `DisasterAIFilter_PNAS.tex` (no external file), so it only
+appears once the document is compiled.
+
 ## Main text, paragraph by paragraph
 
 **Title (≤135 chars, declarative, no subtitle):**

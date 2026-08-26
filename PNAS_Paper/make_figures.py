@@ -75,14 +75,18 @@ def sig_marks(ax, alphas, levels, y=None):
 
 
 # ----------------------------------------------------------------------
-# Figure 2 - configuration comparison, per agent type
+# Figure 2 - configuration comparison, per agent type, with dynamics
 # ----------------------------------------------------------------------
+EVO_ALPHAS = [0.0, 0.6, 1.0]
+EVO_COLORS = {0.0: "#4d34a8", 0.6: "#1b9e77", 1.0: "#e6c000"}
+
+
 def fig2():
     alphas, sw = load_sweep("switches")
     _, bl = load_sweep("baseline")
 
-    fig, axes = plt.subplots(2, 2, figsize=(7.0, 5.2))
-    (ax_a, ax_b), (ax_c, ax_d) = axes
+    fig, axes = plt.subplots(3, 2, figsize=(7.0, 7.6))
+    (ax_a, ax_b), (ax_c, ax_d), (ax_e, ax_f) = axes
 
     for cfg, res, color, lbl in [("main", sw, C_MAIN, LBL_MAIN),
                                  ("ctrl", bl, C_CTRL, LBL_CTRL)]:
@@ -94,37 +98,60 @@ def fig2():
                       lw=1.4, capsize=2, label=lbl)
         for typ, ls in [("exploit", "--"), ("explor", "-")]:
             m, se = series(res, f"mae_{typ}")
-            ax_c.errorbar(alphas, m, yerr=se, color=color, ls=ls, marker="o",
+            ax_e.errorbar(alphas, m, yerr=se, color=color, ls=ls, marker="o",
                           ms=2.5, lw=1.2, capsize=2,
                           label=f"{'confirmation' if typ=='exploit' else 'accuracy'}-seekers, "
                                 f"{'main' if cfg=='main' else 'control'}")
         m, se = series(res, "unmet_needs")
-        ax_d.errorbar(alphas, m, yerr=se, color=color, marker="o", ms=3,
+        ax_f.errorbar(alphas, m, yerr=se, color=color, marker="o", ms=3,
                       lw=1.4, capsize=2, label=lbl)
+
+    # panels c, d: within-run evolution of the per-type chambers (main model)
+    ticks = sw[0]["metric_ticks"]
+    n_runs = sw[0]["n_runs"]
+    for a in EVO_ALPHAS:
+        e = sw[alphas.index(a)]
+        for ax, typ in [(ax_c, "exploit"), (ax_d, "explor")]:
+            m = np.asarray(e[f"seci_{typ}_mean"], float)
+            se = np.asarray(e[f"seci_{typ}_std"], float) / np.sqrt(n_runs)
+            ax.plot(ticks, m, color=EVO_COLORS[a], lw=1.5,
+                    label=fr"$\alpha={a:g}$")
+            ax.fill_between(ticks, m - se, m + se, color=EVO_COLORS[a],
+                            alpha=0.18, lw=0)
+    for ax in (ax_c, ax_d):
+        ax.axhline(0, color="0.6", lw=0.7, ls=":")
+        ax.set_xlabel("Tick")
+        ax.set_ylabel("SECI")
+        ax.set_ylim(-0.62, 0.15)
+    ax_c.set_title("Confirmation-seekers: chamber over time (main)")
+    ax_d.set_title("Accuracy-seekers: chamber over time (main)")
+    ax_c.legend(loc="lower right", frameon=False, fontsize=6.5)
 
     for ax in (ax_a, ax_b):
         ax.axhline(0, color="0.6", lw=0.7, ls=":")
         ax.set_ylabel("SECI (negative = echo chamber)")
         ax.set_ylim(-0.55, 0.12)
+        ax.set_xlabel(r"AI alignment $\alpha$")
+        ax.set_xticks([0, 0.2, 0.4, 0.6, 0.8, 1.0])
     ax_a.set_title("Confirmation-seeking communities")
     ax_b.set_title("Accuracy-seeking communities")
-    ax_c.set_title("Belief error by agent type")
-    ax_c.set_ylabel("Belief MAE (disaster cells)")
-    ax_d.set_title("Unmet needs")
-    ax_d.set_ylabel("Unmet high-need cells per tick")
-    for ax in axes.flat:
+    ax_e.set_title("Belief error by agent type")
+    ax_e.set_ylabel("Belief MAE (disaster cells)")
+    ax_f.set_title("Unmet needs")
+    ax_f.set_ylabel("Unmet high-need cells per tick")
+    for ax in (ax_e, ax_f):
         ax.set_xlabel(r"AI alignment $\alpha$")
         ax.set_xticks([0, 0.2, 0.4, 0.6, 0.8, 1.0])
 
     # Holm-significant paired contrasts (N=50 boundary at alpha>=0.8; M4 grid below)
     sig_marks(ax_a, alphas, [0.8, 0.9, 1.0], y=0.05)
     sig_marks(ax_b, alphas, [0.8, 0.9], y=0.05)
-    sig_marks(ax_d, alphas, [0.8, 0.9, 1.0], y=9.7)
+    sig_marks(ax_f, alphas, [0.8, 0.9, 1.0], y=9.7)
 
     ax_a.legend(loc="lower left", frameon=False)
-    ax_c.legend(loc="center left", bbox_to_anchor=(0.0, 0.68), frameon=False,
+    ax_e.legend(loc="center left", bbox_to_anchor=(0.0, 0.68), frameon=False,
                 fontsize=6.5)
-    for ax, letter in zip(axes.flat, "abcd"):
+    for ax, letter in zip(axes.flat, "abcdef"):
         panel_label(ax, letter)
     fig.tight_layout()
     fig.savefig(os.path.join(OUT, "fig2_configuration.png"), bbox_inches="tight")
@@ -179,8 +206,8 @@ def fig3():
     alphas, sw = load_sweep("switches")
     _, bl = load_sweep("baseline")
 
-    fig, (ax_a, ax_b) = plt.subplots(1, 2, figsize=(7.0, 3.0),
-                                     gridspec_kw={"width_ratios": [1, 1.15]})
+    fig, (ax_a, ax_m, ax_b) = plt.subplots(
+        1, 3, figsize=(10.0, 3.1), gridspec_kw={"width_ratios": [1, 1, 1.2]})
 
     pop_sw = composite(sw, ["seci_pop", "aeci_ie_chan_pop"])
     pop_bl = composite(bl, ["seci_pop", "aeci_ie_chan_pop"])
@@ -206,6 +233,23 @@ def fig3():
     ax_a.set_xticks([0, 0.2, 0.4, 0.6, 0.8, 1.0])
     ax_a.legend(loc="upper center", frameon=False, fontsize=6.5)
 
+    # panel: unmet-needs trajectories - speed vs residual coverage
+    for a in EVO_ALPHAS:
+        e = sw[alphas.index(a)]
+        u = np.asarray(e["unmet_needs_mean"], float)
+        ax_m.plot(np.arange(len(u)), u, color=EVO_COLORS[a], lw=1.5,
+                  label=fr"$\alpha={a:g}$")
+    ax_m.axhline(0, color="0.6", lw=0.7, ls=":")
+    ax_m.set_xlabel("Tick")
+    ax_m.set_ylabel("Unmet high-need cells per tick")
+    ax_m.set_title("Fast but incomplete vs.\nslow but complete")
+    ax_m.legend(loc="upper right", frameon=False, fontsize=7)
+    # annotate the residue the truthful endpoint never clears
+    u0 = np.asarray(sw[alphas.index(0.0)]["unmet_needs_mean"], float)
+    ax_m.annotate("residue never cleared", xy=(190, u0[190]),
+                  xytext=(105, 6.0), fontsize=6.5, color="0.3",
+                  arrowprops=dict(arrowstyle="->", color="0.45", lw=0.8))
+
     optima = gap_cell_optima()
     keys = sorted(optima)
     x = np.arange(len(keys))
@@ -229,7 +273,8 @@ def fig3():
     ax_b.legend(loc="lower right", frameon=False, fontsize=6.5)
 
     panel_label(ax_a, "a")
-    panel_label(ax_b, "b")
+    panel_label(ax_m, "b")
+    panel_label(ax_b, "c")
     fig.tight_layout()
     fig.savefig(os.path.join(OUT, "fig3_goldilocks.png"), bbox_inches="tight")
     fig.savefig(os.path.join(OUT, "fig3_goldilocks.pdf"), bbox_inches="tight")
@@ -383,6 +428,51 @@ def fig_s7():
 
 
 # ----------------------------------------------------------------------
+# Allocation-concentration diagnostics (Table S11): computed from the
+# archived run-averaged aid/severity maps and per-alpha unmet series.
+# ----------------------------------------------------------------------
+def allocation_diagnostics():
+    import csv
+    alphas, sw = load_sweep("switches")
+    rows = []
+    for i, a in enumerate(alphas):
+        e = sw[i]
+        aid = np.asarray(e["avg_aid_map_mean"], float).flatten()
+        sev = np.asarray(e["avg_disaster_map_mean"], float).flatten()
+        total = aid.sum()
+        top5 = np.sort(aid)[::-1][: max(1, int(0.05 * aid.size))].sum() / total
+        corr = float(np.corrcoef(aid, sev)[0, 1])
+        near_def = float(np.mean(e["near_cell_deficit_mean"]))
+        far_def = float(np.mean(e["far_cell_deficit_mean"]))
+        unmet, _ = series(sw, "unmet_needs")
+        # speed vs residual coverage, from the per-tick trajectory
+        u = np.asarray(e["unmet_needs_mean"], float)
+
+        def first_below(th):
+            idx = np.where(u < th)[0]
+            return int(idx[0]) if len(idx) else None
+
+        rows.append({"alpha": a, "total_aid": round(total, 1),
+                     "top5pct_aid_share": round(top5, 3),
+                     "corr_aid_severity": round(corr, 3),
+                     "near_cell_deficit": round(near_def, 3),
+                     "far_cell_deficit": round(far_def, 3),
+                     "tick_unmet_below5": first_below(5),
+                     "tick_unmet_below1": first_below(1),
+                     "residue_last25ticks": round(float(u[175:].mean()), 3),
+                     "unmet_needs": round(float(unmet[i]), 3)})
+    path = os.path.join(ROOT, "PNAS_Paper", "allocation_diagnostics.csv")
+    with open(path, "w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=list(rows[0]))
+        w.writeheader()
+        w.writerows(rows)
+    print("Allocation diagnostics written to", path)
+    for r in rows:
+        if r["alpha"] in (0.0, 0.6, 1.0):
+            print(" ", r)
+
+
+# ----------------------------------------------------------------------
 # Copies of archived figures used verbatim in the SI
 # ----------------------------------------------------------------------
 def copy_archived():
@@ -397,6 +487,8 @@ def copy_archived():
         os.path.join(ROOT, "results-docking", "dyadic-docking", "dyadic_results",
                      "dyadic_docking.png"):
             "figS6_dyadic_docking.png",
+        os.path.join(MECHFIX, "plots-config-switches", "bubble_timeseries.png"):
+            "figS8_timeseries.png",
     }
     for src, dst in copies.items():
         shutil.copyfile(src, os.path.join(OUT, dst))
@@ -409,6 +501,7 @@ if __name__ == "__main__":
     fig_s2()
     fig_s3()
     fig_s7()
+    allocation_diagnostics()
     copy_archived()
     print("Sanity checks (must match the archived alpha* tables):")
     print("  population composite alpha*: main =", info["astar_pop_main"],
