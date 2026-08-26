@@ -156,7 +156,10 @@ immobile control (structural null holds under the revised model).
 | AECI-Var, AECI-Err, query-share AECI | retired / secondary | α\* sensitivity table only |
 | Dose manipulation check | `effective_alpha` | Cite once for the rounding rationale |
 
-## 4. What must still (re-)run before submission
+## 4. Supporting-experiment status — ALL COMPLETE (2026-08-26)
+
+Every step of the pre-drafting validation program has now run on the
+revised model and passed; drafting can start from §2's headline claims.
 
 1. **M2 re-run — DONE**
    ([`results-gap-sweep-mechfix/`](results-gap-sweep-mechfix/README.md),
@@ -175,8 +178,14 @@ immobile control (structural null holds under the revised model).
    (p ≈ 5e-08), Δunmet −6.56 (p ≈ 6e-17), Δprecision_explor +0.33;
    plus a new per-type AI-channel contrast (bounded access narrows the
    exploiters' served pool, diversifies the explorers').
-3. **M4** — mixed-model regressions + Holm-corrected contrasts
-   (`tools/sweep_regression.py`) over `results-mechfix/`.
+3. **M4 — DONE**
+   ([`results-mechfix/regression/`](results-mechfix/regression/README.md)):
+   standardized mixed-model coefficients (significant U-curvature for
+   unmet needs, population AECI-IE-chan, explorer precision;
+   configuration main effects *** on every operational outcome) and
+   Holm-corrected per-level contrasts consistent with the N=50 boundary
+   table. Table S1 = these contrasts (α ≤ 0.7) + boundary deltas
+   (α ≥ 0.8); Table S6 = the coefficient table.
 4. **M5 — DONE, PASS**
    ([`results-robustness/`](results-robustness/README.md), run
    32894002318): all three criteria hold at every perturbation level

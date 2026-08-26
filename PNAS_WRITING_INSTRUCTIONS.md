@@ -36,9 +36,12 @@ optimum in all 132 cognitive-profile cells; Fig. 3b reframed as
 robustness); M3 boundary PASS (every high-α claim seed-robust at N=50
 with Holm correction, `results-boundary-n50/`); M5 robustness PASS (all
 three criteria at all ten perturbation levels, `results-robustness/` +
-`docs/robustness_summary.md`); M7 decided. Only **M4** (the
-regression/statistics pass, which consumes these outputs) remains before
-drafting. The one remaining consideration against PNAS Direct Submission
+`docs/robustness_summary.md`); M7 decided; **M4 DONE**
+(`results-mechfix/regression/` — Table S1/S6 material: significant
+U-curvature on the operational outcomes, configuration main effects ***
+throughout, Holm contrasts consistent with the N=50 boundary table).
+**The full pre-drafting validation program is complete; drafting can
+start.** The one remaining consideration against PNAS Direct Submission
 is presentational: the late mechanism revisions mean the credibility case
 rests on a substantial SI ablation chain, which competes with the 6-page
 format. **Recommendation: with the full gate passed, PNAS Direct

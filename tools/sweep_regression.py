@@ -58,6 +58,10 @@ OUTCOMES = [
     ('AECI-IE (explor)',    'aeci_ie_explor_ss_runs'),
     ('AECI-IE-chan (exploit)', 'aeci_ie_chan_exploit_ss_runs'),
     ('AECI-IE-chan (explor)',  'aeci_ie_chan_explor_ss_runs'),
+    # Population-level (societal) series — present since commit 30f89e0;
+    # absent keys degrade to skipped outcomes for older archives.
+    ('SECI (population)',        'seci_pop_ss_runs'),
+    ('AECI-IE-chan (population)', 'aeci_ie_chan_pop_ss_runs'),
     ('MAE (exploit)',       'mae_exploit_ss_runs'),
     ('MAE (explor)',        'mae_explor_ss_runs'),
     ('Unmet needs',         'unmet_needs_ss_runs'),
