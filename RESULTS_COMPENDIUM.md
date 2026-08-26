@@ -177,9 +177,13 @@ immobile control (structural null holds under the revised model).
    exploiters' served pool, diversifies the explorers').
 3. **M4** — mixed-model regressions + Holm-corrected contrasts
    (`tools/sweep_regression.py`) over `results-mechfix/`.
-4. **M5** — robustness envelope (population, topology, AI supply,
-   verification probability): `docs/robustness_summary.md` is still
-   **PENDING RUNS**.
+4. **M5 — DONE, PASS**
+   ([`results-robustness/`](results-robustness/README.md), run
+   32894002318): all three criteria hold at every perturbation level
+   (population 100–500, small-world generator, AI supply 1–10,
+   verification 0.1–0.5) with the canonical numbers reproducing almost
+   unchanged; per-sweep verdicts in
+   [`docs/robustness_summary.md`](docs/robustness_summary.md).
 5. **M6 — DONE, PASS** ([`results-docking/`](results-docking/README.md),
    run 32866369049): the dyad qualitatively reproduces Glickman & Sharot's
    human–AI amplification for both agent types (false belief corrected

@@ -29,18 +29,22 @@ general-interest findings (the salience counterfactual's *social
 retrenchment* — making disconfirmation salient ejects confirmation-seekers
 into their network rather than toward truth — and the
 fragmentation-vs-societal two-layer result). The Lorenz/Becker/Cinelli
-lineage argument still holds. **However**, two things still weigh against PNAS
-Direct Submission today: (i) the supporting envelope (M2 re-run, M3 N=50
-boundary, M4 statistics, M5 robustness) is still outstanding, and PNAS
-reviewers of ABM work reliably probe exactly there; (ii) the model and
-metrics went through several late revisions, so the paper needs the full
-ablation chain in the SI to be credible, which pushes against the 6-page
-format. *(Update 2026-08-25: the M6 docking gate is **satisfied** —
-`results-docking/` reproduces Glickman & Sharot's dyadic amplification
-qualitatively for both agent types.)* **Recommendation: draft to the PNAS
-format but target PNAS Nexus.** Escalate to PNAS Direct Submission only if
-M2–M5 also hold; with M6 passed, that combination is the one configuration
-in which the stretch is justified. Drop NHB as a target: it
+lineage argument still holds. **Gate status (2026-08-26): the escalation condition is now FULLY
+SATISFIED.** M6 docking PASS (`results-docking/` — Glickman & Sharot's
+dyadic amplification reproduced for both types); M2 re-run DONE (interior
+optimum in all 132 cognitive-profile cells; Fig. 3b reframed as
+robustness); M3 boundary PASS (every high-α claim seed-robust at N=50
+with Holm correction, `results-boundary-n50/`); M5 robustness PASS (all
+three criteria at all ten perturbation levels, `results-robustness/` +
+`docs/robustness_summary.md`); M7 decided. Only **M4** (the
+regression/statistics pass, which consumes these outputs) remains before
+drafting. The one remaining consideration against PNAS Direct Submission
+is presentational: the late mechanism revisions mean the credibility case
+rests on a substantial SI ablation chain, which competes with the 6-page
+format. **Recommendation: with the full gate passed, PNAS Direct
+Submission is now a defensible first target, with PNAS Nexus as the
+transfer/fallback; the choice is the author's.** Draft to the PNAS format
+either way. Drop NHB as a target: it
 is harder than PNAS for this genre and the manuscript has moved away from
 the NHB framing. The word budget, display-item limits, and style rules
 below are PNAS-family rules and apply unchanged to Nexus.
