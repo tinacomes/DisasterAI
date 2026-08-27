@@ -777,6 +777,20 @@ def _aggregate(runs):
         dicts = [r[mc_key] for r in runs if r.get(mc_key)]
         if dicts:
             result[mc_key] = _avg_mode_choice(dicts)
+
+    # Per-seed lifecycle scalars (dynamics layer): chamber formation /
+    # episodes / final dissolution / persistence and capture onset, computed
+    # here while the per-run trajectories still exist so the archived sweep
+    # output carries CI-capable lc_*_runs columns. Observation-only: no
+    # simulated series changes. Skipped gracefully if the tools module is
+    # unavailable (e.g. a stripped deployment).
+    try:
+        from tools.lifecycle_metrics import lifecycle_scalars_for_run
+        per_run = [lifecycle_scalars_for_run(r) for r in runs]
+        for k in per_run[0]:
+            result[f'{k}_runs'] = [p[k] for p in per_run]
+    except Exception as exc:
+        print(f'  (per-seed lifecycle scalars skipped: {exc})')
     return result
 
 

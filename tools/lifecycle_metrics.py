@@ -179,6 +179,41 @@ def chamber_lifecycle(seci, metric_ticks, horizon):
     return stats
 
 
+def lifecycle_scalars_for_run(run):
+    """Per-seed lifecycle scalars from one run's trajectory dict.
+
+    Called by ``test_filter_bubbles._aggregate`` on each replicate while the
+    per-run series still exist, so the sweep output carries per-seed
+    lifecycle columns (``lc_*_runs``) next to the ``*_ss_runs`` scalars —
+    the basis for CIs on the formation/dissolution claims. ``run`` uses the
+    per-run key names of ``run_one_sim`` (no ``_mean`` suffix). Metrics are
+    observation-only: adding these columns changes no simulated series.
+
+    Returns a flat dict; ticks are ints, flags 1/0, missing values None.
+    """
+    ticks = run['metric_ticks']
+    horizon = len(run.get('unmet_needs', [])) or (ticks[-1] + 5)
+    out = {}
+    for typ in ('exploit', 'explor', 'pop'):
+        key = f'seci_{typ}' if typ != 'pop' else 'seci_pop'
+        lc = chamber_lifecycle(run[key], ticks, horizon)
+        out[f'lc_{typ}_formation'] = lc['formation_tick']
+        out[f'lc_{typ}_peak_depth'] = lc['peak_depth']
+        out[f'lc_{typ}_n_episodes'] = lc['n_episodes']
+        out[f'lc_{typ}_final_dissolution'] = lc['final_dissolution_tick']
+        out[f'lc_{typ}_dissolved'] = (None if lc['dissolved'] is None
+                                      else int(lc['dissolved']))
+        out[f'lc_{typ}_persistence'] = lc['persistence_frac']
+        out[f'lc_{typ}_end_in_chamber'] = (None if lc['in_chamber_at_end'] is None
+                                           else int(lc['in_chamber_at_end']))
+    for typ in ('exploit', 'explor'):
+        share = _smooth(_arr(run[f'ai_query_ratio_{typ}']))
+        idx = _first_sustained_cross(list(share), CAPTURE_THRESH,
+                                     CAPTURE_SUSTAIN)
+        out[f'lc_capture_onset_{typ}'] = idx if idx < len(share) else None
+    return out
+
+
 def half_crossing(series, ticks, sustain):
     """Tick at which the series first sustainedly crosses halfway from its
     initial value to its steady-state (last SS window) value; None when the
@@ -272,6 +307,86 @@ def analyse_config(data, label):
 
 
 # ------------------------------ output ------------------------------------
+
+def _mean_ci95(vals):
+    """(mean, 95% CI half-width) over non-None values; (None, None) if empty."""
+    a = np.array([v for v in vals if v is not None], dtype=float)
+    a = a[~np.isnan(a)]
+    if len(a) == 0:
+        return None, None
+    hw = 1.96 * a.std(ddof=1) / np.sqrt(len(a)) if len(a) > 1 else float('nan')
+    return float(a.mean()), float(hw)
+
+
+def write_perseed_tables(datasets, outdir):
+    """CI-grade per-seed lifecycle tables from the lc_*_runs columns.
+
+    Only possible on sweeps run with the instrumented ``_aggregate`` (the
+    per-seed lifecycle re-run); returns None when the archive predates the
+    columns, in which case only the mean-trajectory prototype tables exist.
+    """
+    probe = datasets[next(iter(datasets))]['all_results'][0]
+    if 'lc_explor_formation_runs' not in probe:
+        return None
+
+    md_path = os.path.join(outdir, 'lifecycle_perseed.md')
+    with open(md_path, 'w') as f:
+        f.write('# Echo-chamber lifecycle — PER-SEED statistics (CI-grade)\n\n')
+        f.write('Computed from the per-seed lifecycle columns (`lc_*_runs`) '
+                'of the instrumented sweep: each replicate\'s own trajectory '
+                'is classified before aggregation, so fractions are seed '
+                'counts and intervals are across-replication 95% CIs. '
+                'Thresholds as in the prototype layer (formation SECI '
+                f'< {FORM_THRESH}, dissolution sustained > {BREAK_THRESH}).\n\n')
+        for typ, name in (('exploit', 'confirmation-seeking (exploitative)'),
+                          ('explor', 'accuracy-seeking (exploratory)'),
+                          ('pop', 'population (societal)')):
+            f.write(f'## {name} communities\n\n')
+            f.write('| config | alpha | formed | formation tick | peak SECI '
+                    '| dissolved by end | in chamber at end | persistence |\n')
+            f.write('|---|---|---|---|---|---|---|---|\n')
+            for label, data in datasets.items():
+                for alpha, res in zip(data['alignment_sweep'],
+                                      data['all_results']):
+                    form = res[f'lc_{typ}_formation_runs']
+                    n = len(form)
+                    formed = [v for v in form if v is not None]
+                    fm, fh = _mean_ci95(formed)
+                    pm, ph = _mean_ci95(res[f'lc_{typ}_peak_depth_runs'])
+                    dis = [v for v in res[f'lc_{typ}_dissolved_runs']
+                           if v is not None]
+                    endch = [v for v in res[f'lc_{typ}_end_in_chamber_runs']
+                             if v is not None]
+                    sm, sh = _mean_ci95(res[f'lc_{typ}_persistence_runs'])
+                    f.write(
+                        f'| {label} | {alpha} | {len(formed)}/{n} | '
+                        + (f'{fm:.0f} ± {fh:.0f}' if fm is not None else '--')
+                        + ' | '
+                        + (f'{pm:.2f} ± {ph:.2f}' if pm is not None else '--')
+                        + f' | {sum(dis)}/{len(dis)}'
+                        + f' | {sum(endch)}/{len(endch)}'
+                        + ' | '
+                        + (f'{sm:.2f} ± {sh:.2f}' if sm is not None else '--')
+                        + ' |\n')
+            f.write('\n')
+        f.write('## Capture onset (first sustained AI-majority tick)\n\n')
+        f.write('| config | alpha | onset exploit (mean ± CI, n reached) '
+                '| onset explor |\n')
+        f.write('|---|---|---|---|\n')
+        for label, data in datasets.items():
+            for alpha, res in zip(data['alignment_sweep'],
+                                  data['all_results']):
+                cells = []
+                for typ in ('exploit', 'explor'):
+                    vals = [v for v in res[f'lc_capture_onset_{typ}_runs']
+                            if v is not None]
+                    m, h = _mean_ci95(vals)
+                    n = len(res[f'lc_capture_onset_{typ}_runs'])
+                    cells.append(f'{m:.0f} ± {h:.0f} ({len(vals)}/{n})'
+                                 if m is not None else f'-- (0/{n})')
+                f.write(f'| {label} | {alpha} | {cells[0]} | {cells[1]} |\n')
+    return md_path
+
 
 def write_tables(rows, outdir):
     keys = list(rows[0].keys())
@@ -521,6 +636,12 @@ def main():
         rows.extend(analyse_config(data, label))
 
     outputs = list(write_tables(rows, args.outdir))
+    perseed = write_perseed_tables(datasets, args.outdir)
+    if perseed:
+        outputs.append(perseed)
+    else:
+        print('note: no lc_*_runs columns in these archives - per-seed '
+              'tables skipped (prototype mean-trajectory outputs only)')
     outputs.append(plot_timeline(datasets, args.outdir))
     outputs.append(plot_depth_vs_persistence(datasets, args.outdir))
     outputs.append(plot_trajectories(datasets, args.outdir))
