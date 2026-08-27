@@ -184,8 +184,16 @@ def _first_sustained_cross(series, threshold, sustain=5, direction='up'):
     return len(series)
 
 
-def run_one_sim(params):
-    """Run a single simulation and return per-tick metrics dict."""
+def run_one_sim(params, alpha_schedule=None):
+    """Run a single simulation and return per-tick metrics dict.
+
+    alpha_schedule: optional {tick: alpha} dict applied to
+    ``model.ai_alignment_level`` immediately BEFORE the named tick is
+    stepped (0-indexed) — the AI reads the model attribute live at query
+    time, so this switches the policy cleanly mid-run. Used by
+    ``experiments/alpha_reversal.py``; the default None leaves the
+    constant-alpha behaviour bit-identical.
+    """
     model = DisasterModel(**params)
 
     # --- Periphery group membership (fixed for the whole run: agents never
@@ -268,6 +276,8 @@ def run_one_sim(params):
     cum_disaster_grid = np.zeros((W, H), dtype=float)
 
     for tick in range(params['ticks']):
+        if alpha_schedule and tick in alpha_schedule:
+            model.ai_alignment_level = alpha_schedule[tick]
         model.step()
 
         # Accumulate spatial aid and disaster grids

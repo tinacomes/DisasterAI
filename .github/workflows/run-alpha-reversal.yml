@@ -1,0 +1,98 @@
+name: Run Alpha Reversal Experiment (M9)
+
+# M9 hysteresis experiment: does repairing the AI policy mid-run undo the
+# damage built under it? Alpha switches pre -> post at the switch tick
+# (default 100), with constant-alpha anchors on the SAME seeds for
+# seed-paired comparison. Main-model configuration, 300 ticks so the
+# post-switch window (200 ticks) exceeds the longest spontaneous
+# dissolution observed at low alpha (~120 ticks).
+#
+# Conditions: 1.0->0.0 and 0.8->0.0 (policy repair; the irreversibility
+# question), 0.0->1.0 (late-onset probe), anchors 0.0, 0.8, 1.0.
+#
+# Readout: results-<...>/reversal-tables artifact — per-seed post-switch
+# chamber dissolution + endpoint comparison against both anchors
+# (recovery to the truthful anchor = reversible; endpoint at the aligned
+# anchor = hysteresis).
+#
+# Trigger: GitHub → Actions → "Run Alpha Reversal Experiment" → Run workflow
+
+on:
+  workflow_dispatch:
+    inputs:
+      n_runs:
+        description: "Replications per condition"
+        required: false
+        default: "20"
+      ticks:
+        description: "Simulation ticks per run"
+        required: false
+        default: "300"
+      switch_tick:
+        description: "Tick at which alpha switches"
+        required: false
+        default: "100"
+
+env:
+  MPLBACKEND: Agg
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        condition:
+          - "1.0:0.0"
+          - "0.8:0.0"
+          - "0.0:1.0"
+          - "0.0:0.0"
+          - "0.8:0.8"
+          - "1.0:1.0"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11", cache: "pip"}
+      - run: pip install -r requirements.txt
+      - name: Run condition ${{ matrix.condition }}
+        run: |
+          PRE=$(echo "${{ matrix.condition }}" | cut -d: -f1)
+          POST=$(echo "${{ matrix.condition }}" | cut -d: -f2)
+          mkdir -p out
+          python3 experiments/alpha_reversal.py run \
+            --outfile "out/reversal_${PRE}_to_${POST}.json" \
+            --alpha-pre "$PRE" --alpha-post "$POST" \
+            --switch-tick ${{ inputs.switch_tick }} \
+            --ticks ${{ inputs.ticks }} \
+            --n-runs ${{ inputs.n_runs }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: reversal-${{ strategy.job-index }}
+          path: out/reversal_*.json
+          retention-days: 30
+
+  collect:
+    needs: sweep
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11", cache: "pip"}
+      - run: pip install -r requirements.txt
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: reversal-*
+          path: reversal/
+      - run: |
+          python3 experiments/alpha_reversal.py collect \
+            --results-dir reversal/ --save-dir reversal-tables
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: reversal-tables
+          path: reversal-tables/
+          retention-days: 30
