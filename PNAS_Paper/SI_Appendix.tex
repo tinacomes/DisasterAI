@@ -433,9 +433,22 @@ right-censored at the run horizon, and persistence is the fraction of
 the run spent inside a chamber. \emph{Capture onset} is the first tick
 at which a type's AI query share exceeds $0.5$ for 10 consecutive
 ticks. Per-seed lifecycle columns are emitted by the sweep aggregation
-itself (\texttt{tools/lifecycle\_metrics.py}); metrics are
-observation-only, so instrumenting the sweep reproduces every existing
-series bit-identically on the same seeds.
+itself (\texttt{tools/lifecycle\_metrics.py}); the metrics are
+observation-only, so on an unchanged code state instrumenting the sweep
+changes no simulated series. The archived instrumented re-run of the
+full 11-$\alpha$ grid in both configurations
+(\texttt{results-lifecycle/}), executed on the current code head,
+reproduces all canonical aggregates within seed noise (per-seed values
+drift with RNG draw order across intervening code changes, as
+documented for earlier revisions in the transparency chain); all
+endpoint numbers in the main text remain those of the canonical
+archive. Its per-seed grid statistics confirm the anchor values of
+Table~\ref{tab:s11-lifecycle}: accuracy-seeking chambers form in 20 of
+20 replications in every $(\alpha,$ configuration$)$ cell, their
+dissolution by the 200-tick horizon falls from 17/20 at $\alpha = 0$ to
+3/20 at $\alpha = 1$ in the main model (20/20 to 3/20 in the control),
+and the confirmation-seekers' capture onset accelerates from tick $59
+\pm 3$ to $2 \pm 1$.
 
 The alignment-reversal experiment
 (\texttt{experiments/alpha\_reversal.py}, archive

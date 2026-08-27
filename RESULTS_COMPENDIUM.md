@@ -24,6 +24,7 @@ Companion documents: [`RESULTS_OVERVIEW.md`](RESULTS_OVERVIEW.md)
 | [`results-salience/`](results-salience/README.md) | 32852587340 | `bbfb5ec` | M7 salience counterfactual (C12 + exploiter trap), **decided** |
 | [`results-reversal/`](results-reversal/README.md) | 33047514582 | `46204f7` | M9 alpha-reversal (hysteresis): switch vs constant anchors, N=20, 300 ticks |
 | [`results-mechfix/lifecycle/`](results-mechfix/lifecycle/README.md) | (derived) | `8381dde` | Lifecycle dynamics layer — PROTOTYPE (mean-trajectory basis, no CIs) |
+| [`results-lifecycle/`](results-lifecycle/README.md) | 33063104901 | `1f2e7c4` | Per-seed lifecycle grid (lc_\*_runs columns; aggregates reproduce mechfix within seed noise, per-seed RNG drift — endpoints still cite mechfix) |
 | [`results-final/`](results-final/README.md) | 32412891328 | `36891da` | Pre-revision record (superseded; step-function dose) |
 | [`results-ablation-consensus/`](results-ablation-consensus/README.md) | 32338797843 | `55d4b2b` | AI-side confirmation-target ablation (inert — SI transparency) |
 | [`results-verification/`](results-verification/README.md) | 32298278561 | `55d4b2b` | Type-agnostic-fix verification (historical) |
@@ -162,6 +163,24 @@ re-forms) — the harm is front-loaded into the belief-formation phase.
 - Figure: [`results-reversal/reversal-tables/reversal_trajectories.png`](results-reversal/reversal-tables/reversal_trajectories.png)
 - Table: [`results-reversal/reversal-tables/reversal_summary.md`](results-reversal/reversal-tables/reversal_summary.md);
   verdict in [`results-reversal/README.md`](results-reversal/README.md)
+
+### H10 — Per-seed lifecycle grid: formation universal, dissolution collapses with dose, capture onset accelerates ~25×
+
+Full 11-α grid, both configurations, per-seed classification
+(`results-lifecycle/`): explorer chambers form in 20/20 replications in
+every cell (formation tick 22 ± 1 at α=0 → 67 ± 7 at α=1, delayed by
+starvation) with peak depths in a narrow band; dissolution by the
+200-tick horizon falls 17/20 → 15/20 (α=0.6) → 3/20 in the main model
+(20/20 → 3/20 control); the exploiters' chamber is standing at the end
+at α=1 in 16/20 bounded vs 2/20 unrestricted runs; capture onset
+accelerates 59 ± 3 → 2 ± 1. Caveats: aggregates reproduce the canonical
+run within seed noise but per-seed values carry RNG-order drift
+(endpoints cite `results-mechfix/`), and this replication's composite
+α\* table (5/12 at 0.6, population composites still 0.6) belongs in the
+transparency material.
+
+- Tables: [`results-lifecycle/lifecycle/lifecycle_perseed.md`](results-lifecycle/lifecycle/lifecycle_perseed.md);
+  provenance + drift notes in [`results-lifecycle/README.md`](results-lifecycle/README.md)
 
 ## 3. Metric guide (what to cite for what)
 
