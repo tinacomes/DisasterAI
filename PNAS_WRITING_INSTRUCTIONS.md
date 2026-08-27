@@ -422,7 +422,10 @@ SI Appendix numbering (fixed here so Results can cite it):
 - **Fig. S4** periphery gap evolution within runs.
 - **Fig. S5** population vs per-type bubble evolution (the societal layer;
   basis: `population_evolution.png`, all three rows).
-- **Fig. S6** dyadic docking (M6). **Fig. S7+** robustness sweeps (M5).
+- **Fig. S6** dyadic docking (M6). **Fig. S7** robustness sweeps (M5).
+- **Fig. S8** alignment-reversal experiment (M9; basis:
+  `results-reversal/reversal-tables/reversal_trajectories.png`) — the
+  repair/late-onset trajectories against constant anchors.
 - **Table S1** paired per-seed deltas (main − control) with Holm-corrected
   CIs, all outcomes (M4).
 - **Table S2** α* sensitivity across all 12 composite variants, both
@@ -440,6 +443,18 @@ SI Appendix numbering (fixed here so Results can cite it):
   `results-salience/salience-tables/robustness_tables.md`) — supports the
   C12-robustness and social-retrenchment sentences.
 - **Table S10** promises/perils (kept).
+- **Table S11** per-seed lifecycle + reversal statistics (formation,
+  peak, dissolution-by-horizon, capture onset at the M9 anchors;
+  post-switch recovery and endpoint contrasts; from
+  `results-reversal/`). Supports the Finding-2 lifecycle claim, the
+  Finding-3 capture-onset and reversal sentences, and the Discussion's
+  monitoring paragraph. 2026-08-27 dynamics revision: the paper now
+  carries the lifecycle claims ("alignment blocks dissolution, not
+  depth"; capture-onset acceleration; reversal hysteresis + late-onset
+  asymmetry; periphery non-equilibration) — all headline dynamic
+  numbers cite `results-reversal/` (N=20, CI-grade) or SI Fig. S1/S4
+  (mean-trajectory); the full per-seed lifecycle grid lands with the
+  instrumented primary-sweep re-run (lc_*_runs columns).
 - ODD-protocol model description as the SI's Methods complement.
 
 Regeneration: dispatch **Compare Baseline vs Network/Mobility Switches**

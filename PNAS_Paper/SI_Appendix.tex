@@ -138,9 +138,12 @@ minimum 3-tick lag with per-tick probability 0.3, observation noise
 ($\pm 1$ level with probability 0.2), and evaluation against the
 \emph{current} state; unverified reports expire after 30 ticks and
 produce no learning signal. Because most queried cells are truly
-unaffected, per-cell verification is base-rate dominated: a fully
-confirming AI still passes verification on roughly 93\% of cells by
-echoing correct ``no impact'' priors. A salience weight $s \in [0,1]$
+unaffected, per-cell verification is base-rate dominated: in an
+instrumented diagnostic probe (40 agents, 80 ticks, logging every AI
+report delivered to explorer queries), a fully confirming AI still
+passed verification on roughly 93\% of queried cells by echoing correct
+``no impact'' priors, with its errors concentrated on the rare
+high-severity cells. A salience weight $s \in [0,1]$
 (default 0) interpolates both channels toward severity-weighted
 evaluation, where an error about a disaster cell carries up to six times
 the weight of a confirmed empty cell; $s = 1$ is the counterfactual of
@@ -417,6 +420,38 @@ population-level trap in miniature. The gradient saturates early
 population sweeps, not the dyad, carry the fine-grained dose--response.
 Archive: \texttt{results-docking/}.
 
+\subsection{Lifecycle statistics and the alignment-reversal experiment (M9)}
+\label{si:lifecycle}
+Dynamics are quantified per replication from each run's own trajectory.
+A community chamber \emph{forms} when its per-type SECI first drops
+below $-0.1$ and \emph{dissolves} when the series stays above $-0.05$
+for 25 consecutive ticks (a hysteresis pair preventing threshold
+chatter); chambers can be multi-episode (the confirmation-seekers'
+chamber typically forms early, dissolves mid-run, and re-forms), so
+every formation--dissolution episode is recorded, dissolution times are
+right-censored at the run horizon, and persistence is the fraction of
+the run spent inside a chamber. \emph{Capture onset} is the first tick
+at which a type's AI query share exceeds $0.5$ for 10 consecutive
+ticks. Per-seed lifecycle columns are emitted by the sweep aggregation
+itself (\texttt{tools/lifecycle\_metrics.py}); metrics are
+observation-only, so instrumenting the sweep reproduces every existing
+series bit-identically on the same seeds.
+
+The alignment-reversal experiment
+(\texttt{experiments/alpha\_reversal.py}, archive
+\texttt{results-reversal/}) switches the AI policy mid-run---$\alpha =
+1.0 \to 0.0$ and $0.8 \to 0.0$ (repair), $0.0 \to 1.0$ (late
+onset)---at tick 100 of 300, against constant-$\alpha$ anchors on the
+same seeds ($N = 20$ paired replications, main-model configuration).
+Because the AI reads the alignment level at query time, the switch is
+immediate; pre-switch trajectories are bit-identical to the
+corresponding anchors. Outcomes are per-seed post-switch chamber
+dissolution (Table~\ref{tab:s11-lifecycle}) and endpoint comparisons of
+belief error, the informative-belief pool, precision, and the spatial
+gaps against both anchors (Fig.~\ref{fig:s8}): recovery to the
+truthful anchor marks a reversible quantity, an endpoint stuck near the
+aligned anchor marks hysteresis.
+
 % ============================================================
 \section{Transparency chain across model revisions}\label{si:transparency}
 
@@ -530,6 +565,25 @@ size (100/300/500), within-community network generator (small-world),
 AI supply (1/5/10), and verification probability (0.1/0.3/0.5); main
 model, $N = 20$, steady-state means $\pm$ s.e.m. All headline mechanisms
 hold at every perturbation level.}\label{fig:s7}
+\end{figure}
+
+\begin{figure}[h!]
+\centering
+\includegraphics[width=\textwidth]{figS8_reversal.png}
+\caption{\textbf{Alignment-reversal (hysteresis) experiment (M9).}
+Seed-paired mean trajectories ($\pm$ 95\% CI, $N = 20$) for the repair
+switches ($\alpha = 1.0 \to 0.0$ and $0.8 \to 0.0$ at tick 100, dotted
+vertical line), the late-onset probe ($0.0 \to 1.0$), and the
+constant-$\alpha$ anchors (dashed) on the same seeds; main model, 300
+ticks. After the repair, the accuracy-seekers' SECI and the
+confirmation-seekers' AI query share return to the truthful-anchor
+trajectories (the social layer is a property of the ongoing policy),
+while the accuracy-seekers' informative-belief pool and belief error
+trail the truthful anchor for the remaining 200 ticks (the epistemic
+damage outlives the policy). Under the late-onset switch, the informed
+population is buffered: the belief pool stays high and no
+accuracy-seekers' chamber re-forms. Statistics in
+Table~\ref{tab:s11-lifecycle}.}\label{fig:s8}
 \end{figure}
 
 % ============================================================
@@ -837,6 +891,49 @@ Information sharing & Facilitate access to diverse sources \citep{jeon2024hearhe
 Decision support & Tailored and verified information \citep{zhao2025tailoring}, recommendations, automated decisions & Promoting high alignment \citep{manzini2024should}; (moral) de-skilling \citep{vallor2015moral} & (Group) decisions \citep{comes2024ai}, cognitive biases \citep{paulus2022influence} & Agentic AI \citep{acharya2025agentic}, early warning \citep{reichstein2025early} \\
 \bottomrule
 \end{tabular}
+\end{table}
+
+% ---------- Table S11 ----------
+\begin{table}[h!]
+\centering
+\caption{\textbf{Echo-chamber lifecycle and alignment-reversal
+statistics (per-seed; $N = 20$, main model, 300-tick runs of the M9
+experiment).} Top: accuracy-seekers' chamber lifecycle and
+confirmation-seekers' capture onset under constant policies (mean $\pm$
+95\% CI over replications; dissolution thresholds in
+Sec.~\ref{si:lifecycle}). A chamber forms in every replication at every
+level with similar peak depth; what alignment removes is dissolution.
+Bottom: post-switch outcomes of the reversal conditions; endpoint
+values are last-75-tick means. Archive:
+\texttt{results-reversal/}.}\label{tab:s11-lifecycle}
+\footnotesize
+\begin{tabular}{@{}lccc@{}}
+\toprule
+Constant policy & $\alpha = 0.0$ & $\alpha = 0.8$ & $\alpha = 1.0$ \\
+\midrule
+Chamber formed (seeds) & 20/20 & 20/20 & 20/20 \\
+Formation tick & $22 \pm 2$ & $27 \pm 2$ & $67 \pm 7$ \\
+Peak depth (SECI) & $-0.38 \pm 0.08$ & $-0.50 \pm 0.05$ & $-0.44 \pm 0.07$ \\
+Dissolved by tick 200 (seeds) & 17/20 & 7/20 & 2/20 \\
+Dissolved by tick 300 (seeds) & 17/20 & 12/20 & 3/20 \\
+Capture onset (tick) & $59 \pm 2$ & $3 \pm 1$ & $2 \pm 1$ \\
+\midrule
+Reversal condition & $1.0 \to 0.0$ & $0.8 \to 0.0$ & $0.0 \to 1.0$ \\
+\midrule
+Chamber standing at switch (seeds) & 19/20 & 20/20 & 5/20 \\
+Dissolved after switch (seeds)$^{a}$ & 18/19 & 20/20 & 1/5 \\
+Endpoint MAE (accuracy-seekers)$^{b}$ & $0.49 \pm 0.03$ & $0.47 \pm 0.02$ & $0.57 \pm 0.09$ \\
+Endpoint L1+ pool$^{b}$ & $102 \pm 6$ & $109 \pm 6$ & $107 \pm 8$ \\
+Endpoint SECI (accuracy-seekers) & $-0.01 \pm 0.01$ & $-0.01 \pm 0.01$ & $-0.02 \pm 0.01$ \\
+\bottomrule
+\end{tabular}
+
+\smallskip
+\raggedright\footnotesize
+$^{a}$ Denominators: seeds whose chamber episode contained the switch
+tick. $^{b}$ Constant-anchor references: MAE $0.41 \pm 0.03$
+($\alpha = 0.0$) vs.\ $1.59 \pm 0.10$ ($\alpha = 1.0$); L1+ pool $120
+\pm 6$ vs.\ $30 \pm 5$.
 \end{table}
 
 \clearpage
