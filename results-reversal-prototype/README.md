@@ -1,5 +1,10 @@
 # M9 alpha-reversal (hysteresis) experiment — LOCAL PROTOTYPE (N=6)
 
+> **SUPERSEDED (2026-08-27):** the canonical N=20 × 300-tick run is
+> archived in [`results-reversal/`](../results-reversal/) (run
+> 33047514582). Cite from there; this directory remains only as the
+> prototype provenance.
+
 Reduced local prototype of the M9 experiment
 ([`experiments/alpha_reversal.py`](../experiments/alpha_reversal.py)):
 **α = 1.0 → 0.0 switched at tick 100** versus the constant α=1.0 and

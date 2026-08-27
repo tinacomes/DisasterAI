@@ -22,6 +22,8 @@ Companion documents: [`RESULTS_OVERVIEW.md`](RESULTS_OVERVIEW.md)
 | [`results-ablation-ownref/`](results-ablation-ownref/README.md) | 32839355312 | `2b2ffd7` | Ablation A: legacy own-prior confirmation (network-reference effect) |
 | [`results-ablation-detround/`](results-ablation-detround/README.md) | 32839367900 | `2b2ffd7` | Ablation B: legacy deterministic rounding (dose-linearisation effect) |
 | [`results-salience/`](results-salience/README.md) | 32852587340 | `bbfb5ec` | M7 salience counterfactual (C12 + exploiter trap), **decided** |
+| [`results-reversal/`](results-reversal/README.md) | 33047514582 | `46204f7` | M9 alpha-reversal (hysteresis): switch vs constant anchors, N=20, 300 ticks |
+| [`results-mechfix/lifecycle/`](results-mechfix/lifecycle/README.md) | (derived) | `8381dde` | Lifecycle dynamics layer — PROTOTYPE (mean-trajectory basis, no CIs) |
 | [`results-final/`](results-final/README.md) | 32412891328 | `36891da` | Pre-revision record (superseded; step-function dose) |
 | [`results-ablation-consensus/`](results-ablation-consensus/README.md) | 32338797843 | `55d4b2b` | AI-side confirmation-target ablation (inert — SI transparency) |
 | [`results-verification/`](results-verification/README.md) | 32298278561 | `55d4b2b` | Type-agnostic-fix verification (historical) |
@@ -143,6 +145,23 @@ immobile control (structural null holds under the revised model).
   unmet-needs panel of `goldilocks_alignment_sweep.png`
 - Table: paired deltas (Unmet, Precision, MAE) in
   [`comparison.txt`](results-mechfix/config-comparison/comparison.txt)
+
+### H9 — Hysteresis (M9): repairing the policy dissolves the chamber; the starvation outlives it; a healthy history protects
+
+Switching α → 0 at tick 100 dissolves the explorers' chamber in 18/19
+(from α=1.0; median lag 50 ticks) and 20/20 (from 0.8) seeds — under the
+constant α=1.0 anchor only 4/19 dissolve within 300 ticks (13/20 at 0.8:
+horizon-sensitive there, locked at 1.0). Capture reverses too. But 200
+truthful ticks after the 1.0→0.0 repair the explorer belief pool is
+still at 102 vs the truthful anchor's 120 and MAE 0.49 vs 0.41
+(CI-separated) — the epistemic damage outlives the policy by more than
+the exposure. Late-onset probe (0.0→1.0): an informed population is
+buffered (MAE 0.57 vs 1.59; pool 107 vs 30; no explorer chamber
+re-forms) — the harm is front-loaded into the belief-formation phase.
+
+- Figure: [`results-reversal/reversal-tables/reversal_trajectories.png`](results-reversal/reversal-tables/reversal_trajectories.png)
+- Table: [`results-reversal/reversal-tables/reversal_summary.md`](results-reversal/reversal-tables/reversal_summary.md);
+  verdict in [`results-reversal/README.md`](results-reversal/README.md)
 
 ## 3. Metric guide (what to cite for what)
 
