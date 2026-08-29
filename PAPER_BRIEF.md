@@ -41,34 +41,36 @@ starts from this brief.
 The paper is theory- and model-based with no empirical data of its own;
 its external-validity anchor is the docking reproduction of a published
 dyadic experiment (H-docking, compendium §4 M6). The emphasis is
-AI–human interaction at population scale. PNAS/PNAS Nexus are dropped
-(general-science venues price a pure-simulation paper badly against the
-6-page format); JASSS and J. Computational Social Science are excluded by
-the author (social-simulation audience, not the AI + behaviour audience).
+AI–human interaction at population scale, and the author's goals are
+**readership and discussion**. Excluded: PNAS/PNAS Nexus (author
+decision); JASSS and J. Computational Social Science
+(social-simulation audience, not the AI + behaviour audience);
+Collective Intelligence and other young non-indexed venues (author
+decision after a prior submission experience). All three options below
+are established, indexed, high-visibility journals.
 
 | Priority | Journal | Fit | Main risk |
 |---|---|---|---|
-| 1 | **Collective Intelligence** (SAGE / ACM / Nesta) | Scope names *hybrid AI–human teams* and collective performance across scales; explicitly welcomes theoretical work; the collective-behaviour crowd downstream of Lorenz/Becker and Glickman–Sharot reads it | Young journal (2022), citation metrics still forming; OA APC |
-| 2 | **npj Complexity** (Nature Portfolio) | Scope names agent-based modeling, network science, emergent phenomena in socio-technical systems; Nature-brand visibility beyond the modeling community | Complexity-science-first audience: the AI–human message must be framed as emergent socio-technical dynamics; also young (2023/24) |
-| 3 | **Computers in Human Behavior: Artificial Humans** (Elsevier) | The most precise audience match: the psychology-of-AI community that produced the sycophancy / AI-trust / reliance literature the paper builds on; scope covers psychological and societal aspects of human–AI interaction "using a wide range of models" | The CHB family's centre of gravity is empirical human-subjects work; a simulation-only paper must be positioned as formal theory and merits a presubmission inquiry — highest desk-reject risk of the three |
+| 1 | **Science Advances** | Direct precedent for pure-simulation studies of AI social dynamics (e.g. *Emergent social conventions and collective bias in LLM populations*, 2025) and for opinion-dynamics ABMs; the Lorenz/Becker/Glickman lineage argument carries; broad interdisciplinary readership; roomy format (no 6-page squeeze, generous SI) | High bar; the cover letter must make the machine-behaviour framing and the docking anchor do real work |
+| 2 | **Nature Communications** | Publishes computational social science ABMs on algorithmic/AI amplification; enormous reach and indexing; the "human–machine social systems" framing is at home in the Nature portfolio | High APC; slower reviews; its computational-social-science bar for simulation-only papers is high |
+| 3 | **Nature Machine Intelligence** | The journal route to the AI community proper; sycophancy/alignment framing is timely there; Nature-portfolio transfer (e.g. to Nat Comms) softens rejection cost | Leans ML-methods for primary research; an ABM of *human* behaviour is a scope stretch — send a presubmission inquiry first |
 
-**Recommendation: Collective Intelligence** — it is the one venue where
-"theory of collective human–AI epistemics, validated by docking and
-ablation rather than field data" is the home genre, and where reviewers
-will treat the two-configuration structural design as the contribution it
-is. Choose npj Complexity if Nature-portfolio visibility matters more
-than audience precision; choose CHB:AH only if reaching the
-psychology/HCI community is the priority and a presubmission inquiry
-comes back positive.
+**Recommendation: Science Advances**, framed as machine behaviour /
+collective human–AI epistemics with the dyadic docking as the empirical
+anchor. **And independent of venue: post the preprint to arXiv (cs.CY +
+cs.MA, cross-list physics.soc-ph) at submission** — the AI community
+discovers work through arXiv, not journal tables of contents; this is
+how the paper reaches that audience whichever journal carries it.
 
-**What the venue change buys the redraft (all three options):** the PNAS
+**What the venue change buys the redraft:** at Science Advances the PNAS
 corset is gone — no 6-page limit, no 4-display-item cap, no Significance
 Statement. Write ~5,000–7,000 words of main text with 5–6 main figures,
 and pull the credibility chain (dose-linearisation ablation, docking,
-salience counterfactual) *into the main text* instead of burying it in the
-SI — that compression was the standing weakness of the PNAS draft. Keep
-Results before Methods (all three venues allow it; npj requires
-Nature-style Methods-last). Keep American English.
+salience counterfactual) *into the main text* instead of burying it in
+the SI — that compression was the standing weakness of the PNAS draft.
+(Nature Comms/NMI would re-impose a ~5,000/3,500-word ceiling with
+Methods after Discussion — the skeleton below compresses back if the
+author picks those.) Keep American English.
 
 ## The paper in one paragraph (abstract seed)
 
@@ -357,10 +359,10 @@ its source tables) one final time.
 
 ## Suggested skeleton
 
-Written for the recommended venue (Collective Intelligence; identical
-structure works for npj Complexity and CHB:AH — npj moves Methods after
-Discussion). Target ~5,000–7,000 words main text, 5–6 main figures, no
-main-text tables.
+Written for the recommended venue (Science Advances; the same structure
+compresses to Nature Communications / NMI length, which also move Methods
+after Discussion). Target ~5,000–7,000 words main text, 5–6 main
+figures, no main-text tables.
 
 1. **Introduction** (~1,200–1,500 words — the NHB eight-paragraph arc,
    uncompressed): echo chambers → AI arrives, promise vs
