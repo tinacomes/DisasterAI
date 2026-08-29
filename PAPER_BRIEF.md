@@ -62,6 +62,15 @@ cs.MA, cross-list physics.soc-ph) at submission** — the AI community
 discovers work through arXiv, not journal tables of contents; this is
 how the paper reaches that audience whichever journal carries it.
 
+**Contingency — if E2 is implemented** (the α-measurement of deployed
+assistants; see *Empirical foundations* below): the paper gains primary
+empirical content on real AI systems. The recommendation stays Science
+Advances, but NMI upgrades from scope-stretch to a credible co-equal
+first choice for AI-community reach — measured sycophancy of deployed
+systems plus its population-scale consequences is squarely NMI's genre.
+Resolve by presubmission inquiry to NMI while preparing the Science
+Advances package.
+
 **What the venue change buys the redraft:** at Science Advances the PNAS
 corset is gone — no 6-page limit, no 4-display-item cap, no Significance
 Statement. Write ~5,000–7,000 words of main text with 5–6 main figures,
@@ -208,6 +217,77 @@ and the redraft should state them **in the main text**, not the SI:
    verification probability); the interior optimum appears in every cell
    of the 132-cell cognitive-profile sweep; and a full transparency chain
    (legacy → type-agnostic fix → mechanism revision) is tabled in the SI.
+
+## Empirical foundations — current state and upgrade path
+
+**Current state.** The model's empirical touchpoints are: (i) the
+qualitative docking against Glickman & Sharot — explicitly pattern
+reproduction, *not* parameter-matched calibration (SI §M6); (ii) two
+empirically sourced entries in the calibration table (returner–explorer
+mobility, Pappalardo et al.; weak-tie structure, Granovetter); (iii)
+design-rationale justifications for everything else. The steps below are
+ordered by cost. E1–E4 are pre-submission work for THIS paper; E5–E6
+strengthen it if time allows; E7–E8 are the follow-up programme and enter
+the paper only as the stated research agenda in the Discussion — the
+paper is not held for them.
+
+**Tier 1 — pre-submission (weeks, no new human data):**
+
+- **E1 — Parameter-matched docking** (highest leverage). Upgrade M6 from
+  qualitative to fitted: use Glickman & Sharot's published effect sizes
+  to estimate the acceptance/trust parameters (D, δ, learning rates) in
+  the dyad (`experiments/dyadic_docking.py` is the harness; wrap it in a
+  fitting loop), then show the population runs under fitted vs. default
+  parameters. Buys: "micro-parameters empirically estimated," turning
+  the docking section from consistency check into indirect calibration.
+- **E2 — Locate deployed systems on the α scale.** Measure the
+  confirmation weight of current AI assistants with the model's own
+  estimand (the mixing weight in r = (1−α)t + αb) under a severity-
+  estimation protocol, and place them as bands on the paper's α axis.
+  **Full protocol: `docs/ALPHA_MEASUREMENT_PROTOCOL.md`.** Buys: the
+  paper's single biggest empirical upgrade — α stops being a free
+  abstraction; the dose–response curves acquire a "you are here" marker.
+- **E3 — Calibration table upgrade.** For each behavioural parameter in
+  Table S7, cite the empirical literature that estimates it (bounded-
+  confidence window estimates; human–automation trust-updating rates;
+  verification lags from situation-report cycle times in the crisis
+  coordination literature). Changes no result; changes reviewer priors.
+- **E4 — Predictions table.** One Discussion table of falsifiable,
+  measurable signatures: accuracy costs concentrated on accuracy-
+  seekers; reliance rising while trust is flat (visible in usage logs);
+  query-diversity narrowing (visible in chat logs); repair lag and
+  front-loaded harm. Converts "just a simulation" into a hypothesis
+  generator.
+
+**Tier 2 — if time allows (months, existing data):**
+
+- **E5 — Stylised-fact validation** against crisis-informatics corpora
+  (CrisisLex-type datasets): community belief homogeneity, correction
+  dynamics, periphery information gaps — pattern-oriented validation,
+  not calibration.
+- **E6 — Empirically embedded structure.** Re-run the main configuration
+  on an observed disaster-communication network and CDR-fitted mobility
+  (the Pappalardo split comes with fitted parameters). Likely a
+  confirmation (M5 already passes a topology swap), but "holds on an
+  empirical network" reads differently.
+
+**Tier 3 — follow-up programme (6–18 months; separate papers / grant
+work packages, cited in the Discussion as the agenda):**
+
+- **E7 — Networked human experiment** in the Lorenz/Becker tradition:
+  participants estimate severity in a map task on Empirica/oTree
+  networks (bounded vs. global visibility), querying a system-prompted
+  LLM whose confirmation level is the manipulated treatment. Directly
+  tests starvation, capture, and the structural precondition. Ethics
+  approval + ~€10–20k participant costs.
+- **E8 — LLM-agent replication**: re-run the sweep with LLM-driven
+  agents (or the AI side played by real LLMs at their E2-measured α) to
+  show the mechanisms are not artifacts of hand-coded rules; direct
+  Science Advances precedent for the genre.
+
+**Venue coupling:** implementing E2 changes the paper's genre from
+simulation-only to simulation + measurement of deployed systems — see
+the contingency note in the venue section.
 
 ## Framing rules (binding)
 
