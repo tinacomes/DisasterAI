@@ -1,0 +1,101 @@
+{
+  "provenance": {
+    "source_repo": "https://github.com/affective-brain-lab/BiasedHumanAI",
+    "source_commit": "ed7b66035135c39c910a3ba4ddcce4b5dafc3b78",
+    "paper": "Glickman & Sharot (2025) Nat. Hum. Behav. 9, 345-359, doi:10.1038/s41562-024-02077-2",
+    "conventions": "Mirrors analysisExp1.m (450 trials/subject: 150 solo baseline + 6x50 collaboration blocks; bias = P(more sad); induced bias = collaboration - own baseline) and analysisExp2.m (condition 0/1/2/3 = baseline/accurate/biased/noisy AI; bias = response - evidence).",
+    "note": "Derived summary statistics only; raw data not redistributed."
+  },
+  "exp1": {
+    "human_ai": {
+      "file": "Exp1-Level3-H-AI-H.csv",
+      "n_subjects": 50,
+      "baseline_sad_rate": 0.4988,
+      "collaboration_sad_rate": 0.5643,
+      "partner_sad_rate": 0.6533,
+      "induced_bias_mean": 0.0655,
+      "induced_bias_per_block": [
+        0.0084,
+        0.0284,
+        0.0624,
+        0.0928,
+        0.0852,
+        0.1156
+      ],
+      "induced_bias_block_slope": 0.02105,
+      "kappa_endpoint": 0.748,
+      "kappa_endpoint_ci95": [
+        0.523,
+        0.982
+      ],
+      "kappa_mean_blocks": 0.424,
+      "kappa_mean_blocks_ci95": [
+        0.29,
+        0.562
+      ]
+    },
+    "human_human": {
+      "file": "Exp1-Level3-H-H-H.csv",
+      "n_subjects": 50,
+      "baseline_sad_rate": 0.506,
+      "collaboration_sad_rate": 0.5145,
+      "partner_sad_rate": 0.55,
+      "induced_bias_mean": 0.0085,
+      "induced_bias_per_block": [
+        -0.0112,
+        0.0212,
+        -0.0032,
+        0.012,
+        0.0184,
+        0.0136
+      ],
+      "induced_bias_block_slope": 0.00374,
+      "kappa_endpoint": 0.309,
+      "kappa_endpoint_ci95": [
+        -0.593,
+        1.343
+      ],
+      "kappa_mean_blocks": 0.192,
+      "kappa_mean_blocks_ci95": [
+        -0.487,
+        0.717
+      ]
+    }
+  },
+  "exp2": {
+    "file": "Exp2.csv",
+    "n_subjects": 120,
+    "bias_baseline": 0.62,
+    "bias_biased_ai": 2.655,
+    "bias_accurate_ai": 1.268,
+    "error_baseline": 15.03,
+    "error_accurate_ai": 13.483,
+    "error_biased_ai": 14.736,
+    "accurate_ai_error_ratio": 0.897,
+    "accurate_ai_error_ratio_ci95": [
+      0.845,
+      0.953
+    ],
+    "biased_ai_induced_bias": 2.035,
+    "biased_ai_induced_bias_ci95": [
+      0.761,
+      3.364
+    ]
+  },
+  "fit_targets": {
+    "T1_kappa_ai": 0.748,
+    "T1_ci95": [
+      0.523,
+      0.982
+    ],
+    "T2_kappa_human": 0.309,
+    "T2_ci95": [
+      -0.593,
+      1.343
+    ],
+    "A_asymmetry_ai_over_human": 2.42,
+    "C1_ordering_ai_gt_human": true,
+    "C2_accurate_ai_error_ratio_lt_1": 0.897,
+    "C3_biased_ai_induced_bias_gt_0": 2.035
+  }
+}

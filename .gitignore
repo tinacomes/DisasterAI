@@ -6,4 +6,6 @@ test_results/
 spatial_results/
 *.json
 !results/**/*.json
+!results-docking-fit/*.json
+!experiments/docking_fit/targets.json
 .DS_Store

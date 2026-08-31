@@ -1,0 +1,240 @@
+{
+  "targets": {
+    "T1": 0.748,
+    "se1": 0.11709183673469387,
+    "T2": 0.309,
+    "se2": 0.49387755102040815
+  },
+  "fitted_params": {
+    "d_exploit": 2.699375065377059,
+    "delta_exploit": 4.202515161878817,
+    "d_explor": 5.371069317823389,
+    "delta_explor": 1.871466159566007,
+    "initial_trust": 0.26340919149720887,
+    "initial_ai_trust": 0.4796415412500066,
+    "rounds": 60
+  },
+  "fitted_point_id": "lhs021",
+  "fitted_stats": {
+    "kappa_ai": 0.2679166666666667,
+    "kappa_hh": 0.28166666666666673,
+    "retention_a1": 1.0,
+    "retention_hh": 0.7183333333333333,
+    "mono_rho": 0.9472135954999579
+  },
+  "fitted_loss": 16.85930630895953,
+  "default_params": {
+    "d_exploit": 2.0,
+    "delta_exploit": 3.5,
+    "d_explor": 4.0,
+    "delta_explor": 1.2,
+    "initial_trust": 0.3,
+    "initial_ai_trust": 0.25,
+    "rounds": 40
+  },
+  "default_stats": {
+    "kappa_ai": 0.1616666666666667,
+    "kappa_hh": 0.2645833333333334,
+    "retention_a1": 1.0,
+    "retention_hh": 0.7354166666666666,
+    "mono_rho": 0.9345533127404061
+  },
+  "default_loss": 25.159657386587565,
+  "search": {
+    "n_lhs": 96,
+    "coarse_seeds": 8,
+    "refine_seeds": 20,
+    "box": {
+      "d_exploit": [
+        1.0,
+        3.0
+      ],
+      "delta_exploit": [
+        2.0,
+        5.0
+      ],
+      "d_explor": [
+        3.0,
+        5.5
+      ],
+      "delta_explor": [
+        0.6,
+        2.35
+      ],
+      "initial_trust": [
+        0.15,
+        0.6
+      ],
+      "initial_ai_trust": [
+        0.15,
+        0.6
+      ],
+      "rounds": [
+        20,
+        60
+      ]
+    }
+  },
+  "top10_coarse": [
+    {
+      "point_id": "lhs090",
+      "d_exploit": 1.6760400303000553,
+      "delta_exploit": 3.911043074562978,
+      "d_explor": 4.820718788752226,
+      "delta_explor": 1.9257296977715264,
+      "initial_trust": 0.5917280012653465,
+      "initial_ai_trust": 0.5924620391275441,
+      "rounds": 50,
+      "kappa_ai": 0.27083333333333337,
+      "kappa_hh": 0.41979166666666673,
+      "retention_a1": 1.0,
+      "retention_hh": 0.5802083333333333,
+      "mono_rho": NaN,
+      "loss": 16.657162402192927
+    },
+    {
+      "point_id": "lhs019",
+      "d_exploit": 2.4735099037539836,
+      "delta_exploit": 3.53274876591539,
+      "d_explor": 5.306133379957107,
+      "delta_explor": 1.5665032206870726,
+      "initial_trust": 0.5225834874885643,
+      "initial_ai_trust": 0.5834945337701896,
+      "rounds": 40,
+      "kappa_ai": 0.26875000000000004,
+      "kappa_hh": 0.4281250000000001,
+      "retention_a1": 1.0,
+      "retention_hh": 0.5718749999999999,
+      "mono_rho": NaN,
+      "loss": 16.810346608440945
+    },
+    {
+      "point_id": "lhs071",
+      "d_exploit": 2.1601465591121474,
+      "delta_exploit": 4.453296032584767,
+      "d_explor": 5.104218200995847,
+      "delta_explor": 1.8136934938565537,
+      "initial_trust": 0.5398685207001713,
+      "initial_ai_trust": 0.535183222275592,
+      "rounds": 50,
+      "kappa_ai": 0.25520833333333337,
+      "kappa_hh": 0.4364583333333334,
+      "retention_a1": 1.0,
+      "retention_hh": 0.5635416666666666,
+      "mono_rho": NaN,
+      "loss": 17.778843014895035
+    },
+    {
+      "point_id": "lhs021",
+      "d_exploit": 2.699375065377059,
+      "delta_exploit": 4.202515161878817,
+      "d_explor": 5.371069317823389,
+      "delta_explor": 1.871466159566007,
+      "initial_trust": 0.26340919149720887,
+      "initial_ai_trust": 0.4796415412500066,
+      "rounds": 60,
+      "kappa_ai": 0.2541666666666667,
+      "kappa_hh": 0.3364583333333334,
+      "retention_a1": 1.0,
+      "retention_hh": 0.6635416666666667,
+      "mono_rho": NaN,
+      "loss": 17.790290128186932
+    },
+    {
+      "point_id": "lhs068",
+      "d_exploit": 1.9442151743338698,
+      "delta_exploit": 3.9505125546547775,
+      "d_explor": 4.291129445038804,
+      "delta_explor": 1.7268635786007613,
+      "initial_trust": 0.5048782404603006,
+      "initial_ai_trust": 0.5892519272951506,
+      "rounds": 40,
+      "kappa_ai": 0.2520833333333334,
+      "kappa_hh": 0.4083333333333334,
+      "retention_a1": 1.0,
+      "retention_hh": 0.5916666666666667,
+      "mono_rho": NaN,
+      "loss": 17.978046299933702
+    },
+    {
+      "point_id": "lhs031",
+      "d_exploit": 2.8375598559823727,
+      "delta_exploit": 2.7772144393289273,
+      "d_explor": 4.594613042793277,
+      "delta_explor": 1.9328688931267881,
+      "initial_trust": 0.3037627379539137,
+      "initial_ai_trust": 0.4379360569711006,
+      "rounds": 60,
+      "kappa_ai": 0.24375000000000002,
+      "kappa_hh": 0.3447916666666667,
+      "retention_a1": 1.0,
+      "retention_hh": 0.6552083333333333,
+      "mono_rho": NaN,
+      "loss": 18.550753288743756
+    },
+    {
+      "point_id": "lhs058",
+      "d_exploit": 2.779679665378924,
+      "delta_exploit": 2.099885418818748,
+      "d_explor": 4.99786660368105,
+      "delta_explor": 1.7702797489930218,
+      "initial_trust": 0.596705428286301,
+      "initial_ai_trust": 0.5547952431103468,
+      "rounds": 30,
+      "kappa_ai": 0.24270833333333336,
+      "kappa_hh": 0.43229166666666674,
+      "retention_a1": 1.0,
+      "retention_hh": 0.5677083333333333,
+      "mono_rho": NaN,
+      "loss": 18.684522266869852
+    },
+    {
+      "point_id": "lhs044",
+      "d_exploit": 1.8743054326018491,
+      "delta_exploit": 2.6923649963621408,
+      "d_explor": 4.678584117772011,
+      "delta_explor": 1.6502275248098641,
+      "initial_trust": 0.391181115148753,
+      "initial_ai_trust": 0.47005481147568906,
+      "rounds": 50,
+      "kappa_ai": 0.24062500000000003,
+      "kappa_hh": 0.3500000000000001,
+      "retention_a1": 1.0,
+      "retention_hh": 0.6499999999999999,
+      "mono_rho": NaN,
+      "loss": 18.78297021389416
+    },
+    {
+      "point_id": "lhs063",
+      "d_exploit": 2.745370898224432,
+      "delta_exploit": 2.5251390881457234,
+      "d_explor": 4.357325758209696,
+      "delta_explor": 1.3620185032443284,
+      "initial_trust": 0.19474551209996965,
+      "initial_ai_trust": 0.4886705302395037,
+      "rounds": 50,
+      "kappa_ai": 0.23854166666666674,
+      "kappa_hh": 0.24895833333333336,
+      "retention_a1": 1.0,
+      "retention_hh": 0.7510416666666666,
+      "mono_rho": NaN,
+      "loss": 18.945367753861728
+    },
+    {
+      "point_id": "lhs040",
+      "d_exploit": 2.2151208126992668,
+      "delta_exploit": 4.082164600161679,
+      "d_explor": 3.7014528124956745,
+      "delta_explor": 0.9004389748999425,
+      "initial_trust": 0.5776994066888334,
+      "initial_ai_trust": 0.5803554459211421,
+      "rounds": 40,
+      "kappa_ai": 0.23645833333333335,
+      "kappa_hh": 0.3916666666666667,
+      "retention_a1": 1.0,
+      "retention_hh": 0.6083333333333333,
+      "mono_rho": NaN,
+      "loss": 19.11374772424524
+    }
+  ]
+}

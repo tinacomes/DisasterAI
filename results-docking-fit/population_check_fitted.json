@@ -1,0 +1,69 @@
+{
+  "param_set": "fitted",
+  "overrides": {
+    "d_exploit": 2.699375065377059,
+    "delta_exploit": 4.202515161878817,
+    "d_explor": 5.371069317823389,
+    "delta_explor": 1.871466159566007,
+    "initial_trust": 0.26340919149720887,
+    "initial_ai_trust": 0.4796415412500066
+  },
+  "alphas": [
+    0.0,
+    0.6,
+    1.0
+  ],
+  "n_runs": 5,
+  "note": "Reduced-grid qualitative structure check; canonical comparison requires the full N=20 sweep.",
+  "cells": {
+    "main|0.0": {
+      "seci_exploit_mean": -0.4020330413020983,
+      "seci_explor_mean": -0.009029373457546404,
+      "mae_exploit_mean": 1.8315550562137246,
+      "mae_explor_mean": 0.522264920299308,
+      "unmet_needs_mean": 1.7733333333333334
+    },
+    "main|0.6": {
+      "seci_exploit_mean": -0.23381352171378333,
+      "seci_explor_mean": -0.05315367556903425,
+      "mae_exploit_mean": 1.7991009985391935,
+      "mae_explor_mean": 0.856762423950545,
+      "unmet_needs_mean": 0.7066666666666668
+    },
+    "main|1.0": {
+      "seci_exploit_mean": -0.2602645758553238,
+      "seci_explor_mean": -0.3246118005402601,
+      "mae_exploit_mean": 1.9050270407983476,
+      "mae_explor_mean": 1.75713271424378,
+      "unmet_needs_mean": 1.8533333333333333
+    },
+    "control|0.0": {
+      "seci_exploit_mean": -0.4333308634930884,
+      "seci_explor_mean": -0.0005789796190436906,
+      "mae_exploit_mean": 1.8916711077524593,
+      "mae_explor_mean": 0.607068368137737,
+      "unmet_needs_mean": 2.506666666666667
+    },
+    "control|0.6": {
+      "seci_exploit_mean": -0.37635822028983396,
+      "seci_explor_mean": -0.005216496776881308,
+      "mae_exploit_mean": 1.9248471235558238,
+      "mae_explor_mean": 1.0633014319387037,
+      "unmet_needs_mean": 0.5333333333333333
+    },
+    "control|1.0": {
+      "seci_exploit_mean": 0.035495383057018375,
+      "seci_explor_mean": -0.27000388390740226,
+      "mae_exploit_mean": 1.9394520717841395,
+      "mae_explor_mean": 1.9304400896071947,
+      "unmet_needs_mean": 7.28
+    }
+  },
+  "checks": {
+    "S1_starvation_gradient": true,
+    "S2_interior_operational_optimum": true,
+    "S3a_bounded_chamber_persists": true,
+    "S3b_global_access_dissolves": true
+  },
+  "all_pass": true
+}
