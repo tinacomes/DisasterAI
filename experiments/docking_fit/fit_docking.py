@@ -100,11 +100,14 @@ def load_targets():
 
 def one_task(task):
     """(point_id, params, agent_type, partner, alpha, seed, rounds) -> row"""
+    import contextlib
+    import io
     point_id, params, agent_type, partner, alpha, seed, rounds = task
     overrides = {k: v for k, v in params.items() if k != 'rounds'}
-    r = run_dyad(seed, agent_type, partner,
-                 alpha if alpha is not None else 0.0, rounds,
-                 overrides=overrides)
+    with contextlib.redirect_stdout(io.StringIO()):
+        r = run_dyad(seed, agent_type, partner,
+                     alpha if alpha is not None else 0.0, rounds,
+                     overrides=overrides)
     return {'point_id': point_id, 'agent_type': agent_type,
             'partner': partner,
             'alpha': alpha if alpha is not None else np.nan,
@@ -190,7 +193,10 @@ def main():
           f'kappa_hh {tg["T2"]} (se {tg["se2"]:.3f})')
 
     points = lhs_points(args.n_lhs)
-    with Pool(args.workers) as pool:
+    # maxtasksperchild: DisasterModel construction leaks a little memory
+    # per run; recycling workers bounds it (a stalled 4GB-per-worker pool
+    # was observed without this).
+    with Pool(args.workers, maxtasksperchild=40) as pool:
         print(f'Coarse pass: {len(points)} points x 2 types x '
               f'{len(COARSE_CONDS)} conditions x {args.coarse_seeds} seeds')
         coarse = run_batch(points, COARSE_CONDS, args.coarse_seeds, pool)
