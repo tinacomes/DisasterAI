@@ -102,6 +102,25 @@ soon as the cheap steps clear.
 
 ## 2. E1 — Effect-size-targeted docking (implementation)
 
+**Status (2026-08-31): EXECUTED** — pipeline in
+`experiments/docking_fit/` (targets → fit → population check), results
+in `results-docking-fit/` (`fit_report.md` carries the SI-ready
+interpretation). Better than planned: Glickman & Sharot's per-trial
+data is public (affective-brain-lab/BiasedHumanAI), so the targets are
+*computed from the primary data* with the authors' own conventions,
+not transcribed from the paper. Headline results: the human–human
+transmission coefficient is matched (~0.28 vs measured 0.309); the
+identified parameter direction is the initial AI trust (≈2× the
+default); the accuracy-seeker's AI transmission reaches the edge of
+the measured CI (0.49 vs [0.52, 0.98]) while the confirmation-seeker
+stays near zero at every certified parameter set — the model's own
+D/δ acceptance mechanism (cf. C12) — so the model *under*-transmits AI
+influence relative to measurement: a conservative mismatch, stated as
+such. All orderings (AI retains bias > human partner; monotone in α)
+reproduce. Remaining: the canonical N=20 full-grid population sweep at
+fitted parameters on CI (the in-session check runs the reduced grid).
+The plan below is retained for provenance.
+
 Harness: `experiments/dyadic_docking.py` (exists, runs the dyad with
 the model's own acceptance/trust machinery; currently qualitative).
 

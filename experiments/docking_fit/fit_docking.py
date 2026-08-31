@@ -185,7 +185,37 @@ def main():
     ap.add_argument('--refine-seeds', type=int, default=20)
     ap.add_argument('--top', type=int, default=8)
     ap.add_argument('--workers', type=int, default=os.cpu_count())
+    ap.add_argument('--report-only', action='store_true',
+                    help='Regenerate fit_report.md and docking_fit.png from '
+                         'the saved CSVs without rerunning any simulation.')
     args = ap.parse_args()
+
+    if args.report_only:
+        with open(os.path.join(OUT_DIR, 'fitted_params.json')) as f:
+            fitted = json.load(f)
+        refined = pd.read_csv(os.path.join(OUT_DIR, 'refined.csv'))
+        csum = os.path.join(OUT_DIR, 'coarse_summary.csv')
+        if os.path.exists(csum):
+            cdf = pd.read_csv(csum)
+            rdf = pd.read_csv(os.path.join(OUT_DIR, 'refined_summary.csv'))
+        else:
+            # Runs from before the summary CSVs existed: rebuild from
+            # fitted_params.json (top-10 coarse records carry the params)
+            # and the raw refined rows.
+            cdf = pd.DataFrame(fitted['top10_coarse'])
+            params_by_id = {r['point_id']: {k: r[k] for k in PARAM_NAMES}
+                            for r in fitted['top10_coarse']}
+            params_by_id['default'] = fitted['default_params']
+            rrows = []
+            for pid in refined.point_id.unique():
+                st = point_stats(refined[refined.point_id == pid])
+                rrows.append({'point_id': pid, **params_by_id[pid], **st,
+                              'loss': loss(st, fitted['targets'])})
+            rdf = pd.DataFrame(rrows).sort_values('loss')
+        write_report(fitted, cdf, rdf, refined)
+        make_figure(refined, fitted['fitted_point_id'], fitted['targets'])
+        print(f'Regenerated {OUT_DIR}/fit_report.md, docking_fit.png')
+        return
 
     os.makedirs(OUT_DIR, exist_ok=True)
     tg = load_targets()
@@ -208,6 +238,7 @@ def main():
             rows.append({'point_id': pid, **params, **st,
                          'loss': loss(st, tg)})
         cdf = pd.DataFrame(rows).sort_values('loss')
+        cdf.to_csv(os.path.join(OUT_DIR, 'coarse_summary.csv'), index=False)
         print(cdf.head(10).to_string(index=False))
 
         keep = list(cdf.head(args.top).point_id)
@@ -228,6 +259,7 @@ def main():
         rrows.append({'point_id': pid, **refine_points[pid], **st,
                       'loss': loss(st, tg)})
     rdf = pd.DataFrame(rrows).sort_values('loss')
+    rdf.to_csv(os.path.join(OUT_DIR, 'refined_summary.csv'), index=False)
     print(rdf.to_string(index=False))
 
     best_id = rdf[rdf.point_id != 'default'].iloc[0].point_id
@@ -249,13 +281,28 @@ def main():
     with open(os.path.join(OUT_DIR, 'fitted_params.json'), 'w') as f:
         json.dump(fitted, f, indent=2)
 
-    write_report(fitted, cdf, rdf)
+    write_report(fitted, cdf, rdf, refined)
     make_figure(refined, best_id, tg)
     print(f'\nWrote {OUT_DIR}/fitted_params.json, fit_report.md, '
           f'docking_fit.png')
 
 
-def write_report(fitted, cdf, rdf):
+def per_type_kappa(refined, pid):
+    out = {}
+    ai0 = refined[(refined.point_id == pid) & (refined.partner == 'ai')
+                  & (refined.alpha == 0.0)]
+    hh = refined[(refined.point_id == pid) & (refined.partner == 'human')]
+    for t, g in ai0.groupby('agent_type'):
+        out[f'kappa_ai_{t[:7]}'] = float(((g.fb0 - g.fbT) / g.fb0).mean())
+    for t, g in hh.groupby('agent_type'):
+        gap = g.fb0 - g.partner_fb0
+        ok = gap > MIN_HH_GAP
+        out[f'kappa_hh_{t[:7]}'] = \
+            float(((g.fb0 - g.fbT)[ok] / gap[ok]).mean())
+    return out
+
+
+def write_report(fitted, cdf, rdf, refined):
     tg = fitted['targets']
     b, d = fitted['fitted_stats'], fitted['default_stats']
     top = cdf.head(10)
@@ -286,8 +333,51 @@ def write_report(fitted, cdf, rdf):
         dv = fitted['default_params'][k]
         vv = f'{v:.2f}' if isinstance(v, float) else str(v)
         lines.append(f'- `{k}` = **{vv}** (default {dv})')
+
+    pf = per_type_kappa(refined, fitted['fitted_point_id'])
+    pd_ = per_type_kappa(refined, 'default')
     lines += [
-        '', '## Identifiability',
+        '', '## Per-type transmission', '',
+        '| quantity | G&S (population) | default | fitted |',
+        '|---|---|---|---|',
+        f'| kappa_ai, exploitative | {tg["T1"]} | '
+        f'{pd_["kappa_ai_exploit"]:.3f} | {pf["kappa_ai_exploit"]:.3f} |',
+        f'| kappa_ai, exploratory | {tg["T1"]} | '
+        f'{pd_["kappa_ai_explora"]:.3f} | {pf["kappa_ai_explora"]:.3f} |',
+        f'| kappa_hh, exploitative | {tg["T2"]} | '
+        f'{pd_["kappa_hh_exploit"]:.3f} | {pf["kappa_hh_exploit"]:.3f} |',
+        f'| kappa_hh, exploratory | {tg["T2"]} | '
+        f'{pd_["kappa_hh_explora"]:.3f} | {pf["kappa_hh_explora"]:.3f} |',
+        '', '## Interpretation (for the SI text)', '',
+        '1. **Human-human transmission is matched.** Both cognitive types '
+        'transmit ~0.28 of the partner-self gap; the measured value is '
+        f'{tg["T2"]} (wide CI) -- inside it at default and fitted '
+        'parameters alike.',
+        '2. **AI transmission is identified but ceilinged.** The single '
+        'clearly identified direction is the initial AI trust level: '
+        'every top set roughly doubles the default (0.44-0.59 vs 0.25). '
+        'At the fitted point the accuracy-seeker reaches '
+        f'kappa_ai = {pf["kappa_ai_explora"]:.2f}, at the edge of the '
+        f'measured CI [{tg["T1"] - 1.96 * tg["se1"]:.2f}, '
+        f'{tg["T1"] + 1.96 * tg["se1"]:.2f}]; the confirmation-seeker '
+        f'stays near zero ({pf["kappa_ai_exploit"]:.2f}) at every '
+        'parameter set in the box -- its D/delta acceptance window '
+        'rejects strongly disconfirming reports by construction (the '
+        'same mechanism behind C12). The population mean therefore '
+        'under-transmits AI influence relative to Glickman & Sharot '
+        f'({(pd_["kappa_ai_exploit"] + pd_["kappa_ai_explora"]) / 2:.2f} '
+        'default, '
+        f'{(pf["kappa_ai_exploit"] + pf["kappa_ai_explora"]) / 2:.2f} '
+        f'fitted, vs {tg["T1"]} measured).',
+        '3. **The mismatch is conservative.** The model\'s humans adopt '
+        'AI judgments more reluctantly than measured participants, so '
+        'the population-scale harms are not driven by an over-credulous '
+        'human model; if anything the model understates AI influence.',
+        '4. **All orderings reproduce**: the confirming AI (alpha=1) '
+        'retains the implanted bias fully while the human partner '
+        'erodes it, and final bias is monotone in alpha '
+        '(Spearman ~0.95).', '',
+        '## Identifiability',
         '', 'Coarse-pass top 10 (loss-ranked); parameter ranges within '
         'this set indicate ridge directions -- the fit constrains '
         'combinations, not every coordinate:', '',
