@@ -79,11 +79,15 @@ FALSE_CONF = 0.6
 QUERY_RADIUS = 2                  # same radius seek_information uses
 
 
-def build_container(seed):
-    """Fresh model container with a fixed seed; never stepped."""
+def build_container(seed, base=None):
+    """Fresh model container with a fixed seed; never stepped.
+
+    base: full parameter dict (default: BASE). The docking-fit loop (E1)
+    passes BASE plus overrides; the M6 experiment always uses BASE.
+    """
     random.seed(seed)
     np.random.seed(seed)
-    return DisasterModel(**BASE)
+    return DisasterModel(**(base if base is not None else BASE))
 
 
 def implant_bias(agent):
@@ -139,10 +143,18 @@ def apply_report(agent, reports, source_trust, source_id):
                                          source_id)
 
 
-def run_dyad(seed, agent_type, partner, alpha, rounds):
-    """One dyadic run. partner: 'ai' or 'human'. Returns per-round series."""
+def run_dyad(seed, agent_type, partner, alpha, rounds, overrides=None):
+    """One dyadic run. partner: 'ai' or 'human'. Returns per-round series.
+
+    overrides: optional dict of DisasterModel kwargs merged over BASE
+    (used by the E1 docking fit to vary D/delta and initial trust);
+    None reproduces the M6 experiment exactly.
+    """
+    base = dict(BASE)
+    if overrides:
+        base.update(overrides)
     params_alpha = alpha if partner == 'ai' else 0.0
-    model = build_container(seed)
+    model = build_container(seed, base)
     model.ai_alignment_level = params_alpha
 
     humans = [a for a in model.agent_list if isinstance(a, HumanAgent)]
@@ -154,9 +166,10 @@ def run_dyad(seed, agent_type, partner, alpha, rounds):
     mate = next(a for a in humans
                 if a.agent_type == agent_type and a is not focal)
 
-    ai_trust = focal.trust.get(ai.unique_id, BASE['initial_ai_trust'])
-    hh_trust = focal.trust.get(mate.unique_id, BASE['initial_trust'])
+    ai_trust = focal.trust.get(ai.unique_id, base['initial_ai_trust'])
+    hh_trust = focal.trust.get(mate.unique_id, base['initial_trust'])
 
+    partner_fb0 = measure(mate, model, bias_cells)[0]
     fb0, mae0 = measure(focal, model, bias_cells)
     fb_series, mae_series = [fb0], [mae0]
     for _ in range(rounds):
@@ -172,12 +185,13 @@ def run_dyad(seed, agent_type, partner, alpha, rounds):
             ip2 = pick_interest_point(mate, model)
             back = focal.report_beliefs(ip2, QUERY_RADIUS)
             apply_report(mate, back, mate.trust.get(focal.unique_id,
-                                                    BASE['initial_trust']),
+                                                    base['initial_trust']),
                          focal.unique_id)
         fb, mae = measure(focal, model, bias_cells)
         fb_series.append(fb)
         mae_series.append(mae)
-    return {'false_belief': fb_series, 'mae': mae_series}
+    return {'false_belief': fb_series, 'mae': mae_series,
+            'partner_fb0': partner_fb0}
 
 
 def main():
