@@ -171,16 +171,19 @@ the response distribution matching the model's stochastic-report logic.
 
 ## 4. Systems
 
-4–6 assistants spanning providers and tiers — final list is a
-preregistration-time decision (§13), the frame is:
-
-- the current OpenAI GPT series (one flagship, one mass-market tier),
-- Anthropic Claude (one flagship, one mass-market tier),
-- Google Gemini (one tier),
-- one **open-weights model** (Llama or comparable family, pinned
-  checkpoint, fixed seed, temperature 0 arm as well) — the exact-
-  reproducibility anchor: the one system where anyone can rerun the
-  protocol bit-for-bit.
+Five providers, eight systems (author decision 2026-08-31; exact
+version strings recorded at collection — the §13 table carries the
+model picks and cost arithmetic): OpenAI (flagship + mass-market
+tier), Anthropic Claude (flagship + mass-market tier), Google Gemini
+(flagship), Mistral (flagship), and Moonshot Kimi — the **open-weights
+anchor** (weights published under a permissive license, so the
+protocol is rerunnable against the exact checkpoint; its API is used
+for collection, with fixed seed and a temperature-0 arm where
+supported). All measurements run against **first-party APIs** —
+never through a reseller/aggregator (e.g. OpenRouter): aggregators
+can route open-weight models to third-party hosts with different
+quantisation and serving stacks, which breaks the version-string
+claim.
 
 API first; the **consumer web surface** (hidden system prompts differ,
 and the consumer surface is what disaster-affected users actually
@@ -381,8 +384,15 @@ the systems list with access route (API/web), k, the analysis code
 (`estimator.py` + `analysis.py` at a tagged commit), the confirmatory
 quantities (per-system first-answer α̂ with CI; Δα̂ pushback; α̂_conf),
 and the pilot summary with any item changes. Everything else in §5 is
-declared exploratory. It upgrades the study from illustration to
-confirmatory measurement and is citable in review. At submission the
+declared exploratory. Why: a preregistration is a free, time-stamped,
+frozen public record (osf.io) of design + analysis *before* the data
+exist. It (i) makes the α̂ estimates confirmatory rather than
+possibly-tuned — the standing referee objection to any prompt-based
+measurement is "you iterated wording until you got the number you
+wanted", and the frozen stimuli hash answers it; (ii) time-stamps
+priority in a fast-moving field; (iii) yields a citable DOI for the
+Methods section. Registering does not forbid exploratory analyses —
+they are simply labeled as such. At submission the
 raw CSVs, stimuli, and code ship in the Zenodo archive alongside the
 simulation results (the brief's pre-submission checklist).
 
@@ -390,16 +400,58 @@ No human subjects → no IRB (confirm against the institutional AI-use
 policy in WP0); provider terms of service respected for automated
 evaluation (API arms); the web arm only as manual trials (§4).
 
-## 13. Decisions to freeze at WP0 (author input)
+## 13. WP0 decisions — FROZEN (author, 2026-08-31)
 
-| Decision | Options | Default if undecided |
-|---|---|---|
-| Systems list | §4 frame; exact 4–6 models + tiers | GPT flagship + mini, Claude flagship + mid, Gemini, one open-weights |
-| Web-surface arm | manual mini-replication / drop | manual mini-replication of C0, 2 surfaces |
-| Budget ceiling | € figure | €500 API + pilot |
-| Prereg platform | OSF / AsPredicted | OSF |
-| Convergent-validity anchors | which published scores | SycophancyEval + SYCON-Bench where systems overlap |
-| Collection window | calendar dates | first 2 weeks after freeze |
+| Decision | Frozen choice |
+|---|---|
+| Systems list | 8 systems / 5 providers, table below |
+| Web-surface arm | manual mini-replication of C0 on 2 surfaces: ChatGPT and Gemini consumer web apps (largest consumer reach) |
+| Budget ceiling | €500 API + pilot; estimate below leaves ample headroom |
+| Prereg platform | OSF (free; rationale §12) |
+| Convergent-validity anchors | SycophancyEval + SYCON-Bench, for the systems whose measured version overlaps published scores; descriptive Spearman ρ (§5.5) |
+| Collection window | relative, not calendar: pilot immediately after WP4; full collection starts within 14 days of stimuli freeze + prereg, each system inside a ≤7-day window; actual dates recorded per call and reported |
+
+Systems (model names per provider lineups checked 2026-08-31 via
+secondary pricing/lineup sources; **re-verify names and prices against
+each provider's official pricing page at WP4, and record the exact
+API version string at every call** — the table is a plan, not a
+citation):
+
+| # | System | Role | Indicative $/1M in–out | Est. cost (≈5.3M in + 1.3M out) |
+|---|---|---|---|---|
+| 1 | OpenAI GPT-5.6 flagship ("Sol") | flagship | 4–5 / 20–30 | ~$50 |
+| 2 | OpenAI GPT-5.6 mid tier ("Terra") | mass-market | 2 / 12 | ~$26 |
+| 3 | Anthropic Claude Opus 5 | flagship | 5 / 25 | ~$59 |
+| 4 | Anthropic Claude Sonnet 5 | mass-market | 2 / 10 | ~$24 |
+| 5 | Google Gemini 3.1 Pro | flagship | 2 / 12 (≤200K) | ~$26 |
+| 6 | Google Gemini 3.x Flash | mass-market | ~0.75 / 3.75 | ~$9 |
+| 7 | Mistral Large 3 | EU provider flagship | 2 / 6 | ~$18 |
+| 8 | Moonshot Kimi K2.x | open-weights anchor | ~0.6 / 2.5–4 | ~$8 |
+
+Sum ≈ $220 for the full grid. Reasoning-token billing can inflate
+output usage on thinking-enabled models — where a "reasoning effort"
+control exists, set it to the surface default and record it; even
+doubling all output estimates keeps the total under ~$350, inside the
+€500 ceiling with the pilot (~$10–20) and reruns. If a provider ships
+a new generation before collection starts, take the then-current
+model in the same role (flagship / mass-market) rather than holding
+to a superseded name — the role grid is the frozen design, the names
+are whatever is deployed at collection time.
+
+**Payment and reimbursement (logistics):** open a separate
+prepaid-credit account per provider console (OpenAI platform,
+Anthropic console, Google AI Studio/Cloud billing, Mistral console,
+Moonshot platform) with the institution's name, address, and VAT
+number in the billing profile, so every credit top-up produces a
+proper invoice PDF (EU reverse-charge VAT for the non-EU providers);
+Google bills through a Cloud Billing account (monthly invoice) —
+if the institution already has a GCP billing account, use a project
+under it. Keep all invoices; the per-call token log (§9 CSV) is the
+usage record that maps spend to the study. Confirm with the
+department's project controller whether prepaid top-ups on a personal
+card + expense claim, or a departmental payment card, is the preferred
+route — before buying credits. Do not route through an aggregator to
+simplify invoicing (§4 validity rule).
 
 ## 14. Risks and pre-committed responses
 
