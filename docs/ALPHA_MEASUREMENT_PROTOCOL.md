@@ -13,12 +13,22 @@ budget, preregistration, and paper integration. Tier-1 context and the
 ordering relative to E1/E3/E4 live in
 `docs/EMPIRICAL_FOUNDATIONS_PLAN.md`.
 
-**Status (2026-08-31): protocol frozen for piloting; nothing
-implemented yet.** `experiments/alpha_elicitation/` does not exist, and
-— important — the `effective_alpha` statistic this protocol reuses
-exists only as a column in the superseded `results-final/` tables; the
-current pipeline does not compute it. WP3 reimplements it as a shared,
-tested module (§10).
+**Status (2026-08-31): PARKED — standalone side project, not on the
+paper's pre-submission path** (author decision: this is a study in its
+own right and does not fit the paper's length budget; the in-paper
+replacement is E2-lite, see `docs/EMPIRICAL_FOUNDATIONS_PLAN.md` §2a).
+The protocol and WP0 decisions below stay frozen so the side project
+can start whenever the author chooses; its natural output is a short
+measurement paper of its own (NMI-genre), cross-cited with the
+DisasterAI paper. §6 ("outputs for the paper") then reads as outputs
+for *that* paper — the DisasterAI dose–response panel is still the
+natural money figure, reused with permission-to-self. Note the scoop
+risk (§14): the novelty window argues for preregistering early even
+while parked. Nothing is implemented yet:
+`experiments/alpha_elicitation/` does not exist, and the
+`effective_alpha` statistic this protocol reuses exists only as a
+column in the superseded `results-final/` tables — WP3 reimplements
+it as a shared, tested module (§10).
 
 ---
 

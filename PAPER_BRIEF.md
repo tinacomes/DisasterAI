@@ -62,14 +62,16 @@ cs.MA, cross-list physics.soc-ph) at submission** — the AI community
 discovers work through arXiv, not journal tables of contents; this is
 how the paper reaches that audience whichever journal carries it.
 
-**Contingency — if E2 is implemented** (the α-measurement of deployed
-assistants; see *Empirical foundations* below): the paper gains primary
-empirical content on real AI systems. The recommendation stays Science
-Advances, but NMI upgrades from scope-stretch to a credible co-equal
-first choice for AI-community reach — measured sycophancy of deployed
-systems plus its population-scale consequences is squarely NMI's genre.
-Resolve by presubmission inquiry to NMI while preparing the Science
-Advances package.
+**E2 status (author decision 2026-08-31): parked as a standalone side
+project** — a measurement study of its own, not part of this paper's
+pre-submission path (full plan preserved in
+`docs/ALPHA_MEASUREMENT_PROTOCOL.md`; rationale: it is a second study,
+and the paper's length budget cannot carry a Results + Methods +
+figure block for it). The venue recommendation is therefore Science
+Advances *without* contingency; NMI stays the scope-stretch third
+option. If the side project produces a citable preprint in time, the
+Discussion cites it as companion evidence — that strengthens the
+paper but does not change the venue call.
 
 **What the venue change buys the redraft:** at Science Advances the PNAS
 corset is gone — no 6-page limit, no 4-display-item cap, no Significance
@@ -242,13 +244,25 @@ re-confirmation): `docs/EMPIRICAL_FOUNDATIONS_PLAN.md`.**
   fitting loop), then show the population runs under fitted vs. default
   parameters. Buys: "micro-parameters empirically estimated," turning
   the docking section from consistency check into indirect calibration.
-- **E2 — Locate deployed systems on the α scale.** Measure the
-  confirmation weight of current AI assistants with the model's own
-  estimand (the mixing weight in r = (1−α)t + αb) under a severity-
-  estimation protocol, and place them as bands on the paper's α axis.
-  **Full protocol: `docs/ALPHA_MEASUREMENT_PROTOCOL.md`.** Buys: the
-  paper's single biggest empirical upgrade — α stops being a free
-  abstraction; the dose–response curves acquire a "you are here" marker.
+- **E2 — PARKED as a standalone side project** (author decision
+  2026-08-31): measuring the confirmation weight of deployed
+  assistants with the model's own estimand is a study in its own
+  right and does not fit this paper's length budget. Full plan:
+  `docs/ALPHA_MEASUREMENT_PROTOCOL.md`; it proceeds on its own track
+  toward its own paper. In THIS paper it appears only as one
+  Discussion sentence in the research agenda (alongside E7/E8), or as
+  a companion citation if a preprint exists by submission.
+- **E2-lite — literature-anchored α plausibility (replaces E2 in this
+  paper).** One Discussion paragraph anchoring the simulated α range
+  in published measurements of assistant sycophancy: deployed systems
+  demonstrably sit strictly between the truthful and fully confirming
+  endpoints, and published pushback/multi-turn results show the
+  confirmation weight rising under user pressure — so the interior of
+  the dose axis, where the paper's mechanisms live, is the
+  empirically relevant region. Strictly qualitative: no α̂ values
+  derived from others' benchmarks (their estimands differ); citations
+  verified into References.bib. Buys most of E2's rhetorical work for
+  ~120 words and zero new data.
 - **E3 — Calibration table upgrade.** For each behavioural parameter in
   Table S7, cite the empirical literature that estimates it (bounded-
   confidence window estimates; human–automation trust-updating rates;
@@ -287,9 +301,9 @@ work packages, cited in the Discussion as the agenda):**
   show the mechanisms are not artifacts of hand-coded rules; direct
   Science Advances precedent for the genre.
 
-**Venue coupling:** implementing E2 changes the paper's genre from
-simulation-only to simulation + measurement of deployed systems — see
-the contingency note in the venue section.
+**Venue coupling:** with E2 parked, the paper stays simulation-only
+(anchored by the docking chain) and the venue call is Science Advances
+without contingency — see the status note in the venue section.
 
 ## Framing rules (binding)
 

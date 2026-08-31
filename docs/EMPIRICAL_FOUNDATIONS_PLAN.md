@@ -10,27 +10,32 @@ full E2 protocol and implementation plan is
 
 ## 1. Verification: are E1–E4 the right steps? (checked 2026-08-31)
 
-Verdict: **yes, all four, with one rescope (E1) and a changed
-execution order.** The check was against (a) what the paper's referee
-model actually needs — the brief's four-layer robustness answer covers
-internal validity; Tier 1 exists to answer "your α is a cartoon" with
-external anchors — and (b) the 2025–26 literature.
+Verdict (revised 2026-08-31 after the author's scope decision):
+**E1/E3/E4 yes, with one rescope (E1); E2 is PARKED as a standalone
+side project and replaced in-paper by E2-lite (§2a).** The check was
+against (a) what the paper's referee model actually needs — the
+brief's four-layer robustness answer covers internal validity; Tier 1
+exists to answer "your α is a cartoon" with external anchors — and
+(b) the 2025–26 literature.
 
-- **E2 (α measurement of deployed systems) — confirmed, and now the
-  clear priority.** The sycophancy field has exploded (multi-turn
-  stance-flip benchmarks such as SYCON-Bench; agentic and domain
-  sycophancy studies; mainstream coverage of assistant sycophancy),
-  and the LLM-anchoring literature shows models weight in-prompt
-  numbers generically. As of the check date, **no published work
-  estimates a truth–belief mixing weight against controlled in-context
-  ground truth** — the stance-flip benchmarks measure *whether* a
-  model flips, not *how far between truth and the user's prior* its
-  numeric answer lands, which is exactly the model's estimand. That is
-  a real, closable novelty window: both the strongest argument for E2
-  and a scoop risk that argues for doing it first. Two design
-  consequences are now folded into the protocol: an anchoring-
-  attribution control (confirmation vs. generic anchoring must be
-  separable) and preregistration for the timestamp.
+- **E2 (α measurement of deployed systems) — scientifically
+  confirmed, editorially parked (author decision 2026-08-31).** The
+  science holds: as of the check date no published work estimates a
+  truth–belief mixing weight against controlled in-context ground
+  truth, and the field is hot enough that the novelty window is
+  closing. But it is a *second study* — its honest in-paper cost is a
+  Results subsection, a Methods block, figure real estate, and a
+  paragraph of validity caveats, which the paper's length budget
+  cannot carry at any of the three candidate venues without displacing
+  the credibility chain the redraft exists to foreground. Decision:
+  E2 proceeds on its own track as its own (short) paper — the full
+  plan stays frozen in `docs/ALPHA_MEASUREMENT_PROTOCOL.md`, executed
+  when the author chooses, with preregistration protecting priority.
+  The two papers then cross-cite: the measurement paper supplies the
+  "you are here"; this paper supplies the population-scale
+  consequences. In this paper, E2 survives as one sentence in the
+  Discussion research agenda — and as a companion-preprint citation
+  if the side project lands before submission.
 - **E4 (predictions table) — confirmed, trivially cheap.** The
   literature now contains dyadic and individual-level evidence of
   dependence and reliance effects; a table of the model's *networked*
@@ -59,19 +64,41 @@ external anchors — and (b) the 2025–26 literature.
   statistics only, which still supports the claim).
 
 Nothing in the check argues for promoting a Tier-2 step into Tier 1:
-E5/E6 remain confirmatory-flavoured and slow, and the docking + E2
-pair dominates them per unit effort.
+E5/E6 remain confirmatory-flavoured and slow (E6 — rerunning on an
+empirical network — is the natural next candidate *if* the author
+wants one more empirical layer, but it is weeks of compute and reads
+as confirmation, not as a new anchor).
 
-**Execution order (revised from the brief's cost ordering):**
+**What "empirically stronger" costs in paper length** — the decisive
+axis after the E2 decision. Every remaining step is length-cheap:
 
-    E4 (1 d) → E3 (2–4 d) → E2 (2–3 wks; the long pole — start its
-    pilot early) → E1 (1–2 wks; parallelises with E2's collection window)
+| Step | Main-text cost | Where the substance lives |
+|---|---|---|
+| E1 (fitted docking) | ~1 Methods sentence + 1 Results clause | SI section + SI figure |
+| E2-lite (literature anchor) | ~120 words, Discussion | References.bib |
+| E3 (calibration citations) | 0 | SI Table S7 |
+| E4 (predictions table) | 1 Discussion table + ~150 words | traces to existing H-claims |
+
+With E2 parked, **E1 is the paper's single biggest remaining
+empirical upgrade**: it converts the docking anchor from "reproduces
+the published pattern" to "micro-parameters estimated from the
+published experiment, population results intact" — indirect
+calibration — at near-zero length cost.
+
+**Execution order (revised 2026-08-31):**
+
+    E4 (1 d) → E3 (2–4 d) → E2-lite (0.5 d, folds into E3's
+    literature pass) → E1 (1–2 wks; the long pole)
+
+    E2 side project: independent track, scheduled by the author;
+    its only coupling to the paper is an optional companion citation.
 
 E4 and E3 first because they are self-contained, feed the Discussion
-and SI directly, and lose nothing by preceding the others. E2 before
-E1 because of the novelty window and because E1's headline ("fitted
-vs. default parameters leave the population results intact") is a
-robustness statement that lands the same whenever it is done.
+and SI directly, and lose nothing by preceding the others. E1's
+headline ("fitted vs. default parameters leave the population results
+intact") is a robustness statement that lands the same whenever it is
+done — but it must be finished before submission, so it starts as
+soon as the cheap steps clear.
 
 ## 2. E1 — Effect-size-targeted docking (implementation)
 
@@ -106,6 +133,34 @@ the model's own acceptance/trust machinery; currently qualitative).
    upgrading M6 from consistency check to indirect calibration.
 5. **Effort:** 1–2 weeks incl. the sweep; compute is the binding
    resource (reuse the CI parallel-run tooling used for mechfix).
+
+## 2a. E2-lite — literature-anchored α plausibility (implementation)
+
+The in-paper replacement for the parked E2: one Discussion paragraph
+(~120 words) arguing from *published* measurements that the interior
+of the α axis is the empirically relevant region. Structure of the
+argument, each clause carrying a verified citation:
+
+1. Deployed assistants are measurably sycophantic but not fully
+   confirming — benchmark studies find systematic but partial
+   agreement drift (Sharma et al.'s SycophancyEval line; the 2025–26
+   multi-turn benchmarks) → real systems sit strictly inside (0, 1),
+   not at either endpoint the paper's extremes represent.
+2. The confirmation weight is not fixed: it rises under user pushback
+   and sustained pressure (turn-of-flip / number-of-flips results) →
+   a *range* on the axis, moving in the direction the paper's
+   high-dose results describe.
+3. Therefore the dose–response interior — where starvation, capture,
+   and the operational optimum live — is where deployed systems
+   plausibly operate; precisely locating them is the stated agenda
+   (the parked E2, one sentence, alongside E7/E8).
+
+Binding phrasing rules: never convert a published benchmark score
+into an α̂ value (different estimands — stance flips are not mixing
+weights); never name a specific system as "α ≈ x"; the paragraph
+claims *region and direction*, not location. Deliverable: the
+paragraph + 3–5 verified References.bib entries (folds into E3's
+literature pass). Effort: ~0.5 day.
 
 ## 3. E3 — Calibration-table upgrade (implementation)
 
@@ -159,10 +214,12 @@ rather than deferred.
 
 ## 5. Venue re-confirmation (checked 2026-08-31)
 
-**The brief's recommendation stands: Science Advances primary, with
-the E2 contingency upgrading NMI to a credible co-equal, resolved by
-presubmission inquiry; arXiv (cs.CY + cs.MA, cross-list
-physics.soc-ph) at submission regardless.** Points re-verified:
+**The recommendation is Science Advances primary, now without
+contingency (E2 parked → the paper stays simulation-only, anchored by
+the docking chain); arXiv (cs.CY + cs.MA, cross-list physics.soc-ph)
+at submission regardless.** NMI reverts to the scope-stretch third
+option; the E2 side project itself is a natural NMI/AI-venue short
+paper later, and the two cross-cite. Points re-verified:
 
 - The Science Advances precedent is real and on point: *Emergent
   social conventions and collective bias in LLM populations*, Sci.
@@ -178,21 +235,20 @@ physics.soc-ph) at submission regardless.** Points re-verified:
   JASSS/JCSS, young non-indexed venues) stays excluded; Nature
   Communications remains the reach-plus-indexing backup with the
   known APC/speed costs.
-- Decision rule, unchanged but now dated: if E2 is in the package,
-  send the NMI presubmission inquiry **while** assembling the SciAdv
-  submission; a positive NMI response makes it an author's choice
-  between AI-community reach (NMI) and interdisciplinary breadth
-  (SciAdv) — both defensible; absent a positive NMI signal, submit
-  SciAdv without waiting.
+- Decision rule (updated 2026-08-31, E2 parked): submit Science
+  Advances; no NMI presubmission inquiry is needed for this paper.
+  The inquiry idea transfers to the E2 side project, for which
+  measured sycophancy of deployed systems *is* squarely the genre.
 
 ## 6. Summary of new artifacts this plan creates
 
 | Step | Files |
 |---|---|
-| E2 | `experiments/alpha_elicitation/*` (see protocol §9), OSF prereg, SI table, money-figure overlay |
 | E1 | `experiments/docking_fit/{targets.json, fit_docking.py}`, fitted-parameter sweep results dir, SI section |
+| E2-lite | Discussion paragraph + 3–5 References.bib entries |
 | E3 | Table S7 revision in `PNAS_Paper/SI_Appendix.tex`, References.bib entries |
 | E4 | Predictions table + framing text (Discussion; drafted in the redraft pack) |
+| E2 (side project, own track) | `experiments/alpha_elicitation/*` per protocol §9, OSF prereg, its own paper — nothing in this paper except the agenda sentence / optional companion citation |
 
 Each lands as its own PR; E2's stimuli/code freeze precedes its data
 collection (prereg discipline); none of them may alter any frozen
