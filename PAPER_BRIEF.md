@@ -229,7 +229,9 @@ design-rationale justifications for everything else. The steps below are
 ordered by cost. E1–E4 are pre-submission work for THIS paper; E5–E6
 strengthen it if time allows; E7–E8 are the follow-up programme and enter
 the paper only as the stated research agenda in the Discussion — the
-paper is not held for them.
+paper is not held for them. **Concrete Tier-1 implementation plan
+(verification, E1/E3/E4 work packages, execution order, dated venue
+re-confirmation): `docs/EMPIRICAL_FOUNDATIONS_PLAN.md`.**
 
 **Tier 1 — pre-submission (weeks, no new human data):**
 
