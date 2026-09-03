@@ -36,52 +36,84 @@ starts from this brief.
    `RESULTS_OVERVIEW.md` §§1–8 (the historical chain — superseded numbers,
    SI transparency material only).
 
-## Target venue (three options; author decision)
+## Target venue (APC-constrained; revised 2026-09-03)
 
 The paper is theory- and model-based with no empirical data of its own;
-its external-validity anchor is the docking reproduction of a published
-dyadic experiment (H-docking, compendium §4 M6). The emphasis is
-AI–human interaction at population scale, and the author's goals are
-**readership and discussion**. Excluded: PNAS/PNAS Nexus (author
-decision); JASSS and J. Computational Social Science
-(social-simulation audience, not the AI + behaviour audience);
-Collective Intelligence and other young non-indexed venues (author
-decision after a prior submission experience). All three options below
-are established, indexed, high-visibility journals.
+its external-validity anchor is the docking chain (M6 qualitative
+reproduction, compendium §4, plus the E1 effect-size fit in
+`results-docking-fit/`). The emphasis is AI–human interaction at
+population scale, and the author's goals are **readership and
+discussion**.
 
-| Priority | Journal | Fit | Main risk |
-|---|---|---|---|
-| 1 | **Science Advances** | Direct precedent for pure-simulation studies of AI social dynamics (e.g. *Emergent social conventions and collective bias in LLM populations*, 2025) and for opinion-dynamics ABMs; the Lorenz/Becker/Glickman lineage argument carries; broad interdisciplinary readership; roomy format (no 6-page squeeze, generous SI) | High bar; the cover letter must make the machine-behaviour framing and the docking anchor do real work |
-| 2 | **Nature Communications** | Publishes computational social science ABMs on algorithmic/AI amplification; enormous reach and indexing; the "human–machine social systems" framing is at home in the Nature portfolio | High APC; slower reviews; its computational-social-science bar for simulation-only papers is high |
-| 3 | **Nature Machine Intelligence** | The journal route to the AI community proper; sycophancy/alignment framing is timely there; Nature-portfolio transfer (e.g. to Nat Comms) softens rejection cost | Leans ML-methods for primary research; an ABM of *human* behaviour is a scope stretch — send a presubmission inquiry first |
+**Binding constraint (author, 2026-09-03):** library support at TU Delft
+and at DLR covers at most ≈ USD 2,000 per article and nothing beyond.
+That removes every gold-OA-only route: Science Advances (USD 5,450),
+Nature Communications (USD 7,350), the Nature Human Behaviour OA option
+(USD 12,850) and PNAS Nexus. The Dutch Springer Nature agreement and
+DEAL both exclude Nature-branded journals. The strategy is therefore
+zero-APC: subscription routes, journals covered by the Dutch Elsevier /
+Wiley agreements (TU Delft corresponding author; valid to 31 Dec 2026)
+or by DEAL (DLR corresponding author; 2024–2028), or Subscribe-to-Open
+journals — with the arXiv preprint at submission and, on the
+subscription route, the version of record in the TU Delft repository
+six months after publication under the Taverne amendment ("You share,
+we take care"). Cost table and verification notes:
+`docs/development/EMPIRICAL_REVIEW_2026-09-03.md` §4.
 
-**Recommendation: Science Advances**, framed as machine behaviour /
-collective human–AI epistemics with the dyadic docking as the empirical
-anchor. **And independent of venue: post the preprint to arXiv (cs.CY +
-cs.MA, cross-list physics.soc-ph) at submission** — the AI community
-discovers work through arXiv, not journal tables of contents; this is
-how the paper reaches that audience whichever journal carries it.
+Still excluded by author decision: PNAS/PNAS Nexus (PNAS's delayed-OA
+route would be affordable at ≈ USD 2,575, but the exclusion stands);
+JASSS and J. Computational Social Science (social-simulation audience,
+not the AI + behaviour audience); Collective Intelligence and other
+young non-indexed venues (prior submission experience). Nature Machine
+Intelligence is free on its subscription route but remains the scope
+stretch flagged before and is not recommended.
+
+| Priority | Journal | Cost route | Fit | Main risk |
+|---|---|---|---|---|
+| 1 | **Nature Human Behaviour** (subscription route) | No APC; arXiv + Taverne green OA at 6 months | The docking target is an NHB paper; NHB's own agenda pieces (*Machine culture*, 2023; *A new sociology of humans and machines*, 2024) ask for human–machine social systems studied with computational models; ABM and human–AI interaction both at home | Highest bar; simulation-only research articles are rare there — presubmission enquiry first; desk rejection is the modal outcome and costs weeks, not months |
+| 2 | **Computers in Human Behavior** (Elsevier, hybrid) | OA at no cost under the Dutch Elsevier agreement or DEAL | Scope is the psychological impact of computing on "individuals, groups and society", the computer "only as a medium through which human behaviours are shaped" — the brief's behaviour-first rule verbatim; ABM/simulation studies of echo chambers appear there; IF 12.2; no hard length cap | Psychology reviewers asking for human data — answered by the E1 fit, the E4 predictions table, and the Cheng et al. 2026 sycophancy→dependence anchor; long queues |
+| 3 | **Journal of the Royal Society Interface** | Subscribe-to-Open 2026: OA, CC-BY, no APC (2027 continuation to verify) | Modelling audience with behavioural reach: ABMs of opinion dynamics with social-identity bias, collective wisdom under incorrect social information, misinformation on networks are in its recent record; the Lorenz/Becker lineage argument lands | Narrower AI readership (arXiv carries it); the acceptance date must fall inside the S2O year |
+
+Fallbacks, all covered by the same agreements: International Journal of
+Human-Computer Studies (Elsevier), Technological Forecasting & Social
+Change (Elsevier), Royal Society Open Science (only if a Royal Society
+Read & Publish covers TU Delft — verify in the library's Journal
+Browser).
+
+**Recommendation and decision rule:** redraft once, framed as human–AI
+collective behaviour with the ABM as the instrument (framing rules
+below, plus two venue-neutral additions from the review §4: lead with
+people, never with alignment machinery; anchor the motivation in the
+measured dyadic and sycophancy evidence — Glickman & Sharot 2025, Cheng
+et al. 2026 — and state the population-scale gap in one sentence).
+Presubmission enquiry to NHB at the end of the redraft; on a decline or
+no reply within three weeks, submit to Computers in Human Behavior;
+Interface if CHB rejects on "no human data". **Independent of venue:
+post the preprint to arXiv (cs.CY + cs.MA, cross-list physics.soc-ph)
+at submission** — the AI community discovers work through arXiv, not
+journal tables of contents; this is how the paper reaches that audience
+whichever journal carries it.
 
 **E2 status (author decision 2026-08-31): parked as a standalone side
 project** — a measurement study of its own, not part of this paper's
 pre-submission path (full plan preserved in
 `docs/ALPHA_MEASUREMENT_PROTOCOL.md`; rationale: it is a second study,
 and the paper's length budget cannot carry a Results + Methods +
-figure block for it). The venue recommendation is therefore Science
-Advances *without* contingency; NMI stays the scope-stretch third
-option. If the side project produces a citable preprint in time, the
-Discussion cites it as companion evidence — that strengthens the
-paper but does not change the venue call.
+figure block for it). If the side project produces a citable preprint
+in time, the Discussion cites it as companion evidence — that
+strengthens the paper but does not change the venue call.
 
-**What the venue change buys the redraft:** at Science Advances the PNAS
-corset is gone — no 6-page limit, no 4-display-item cap, no Significance
-Statement. Write ~5,000–7,000 words of main text with 5–6 main figures,
-and pull the credibility chain (dose-linearisation ablation, docking,
-salience counterfactual) *into the main text* instead of burying it in
-the SI — that compression was the standing weakness of the PNAS draft.
-(Nature Comms/NMI would re-impose a ~5,000/3,500-word ceiling with
-Methods after Discussion — the skeleton below compresses back if the
-author picks those.) Keep American English.
+**What the venue change buys the redraft:** none of the three targets
+imposes the PNAS corset (6-page limit, 4-display-item cap, Significance
+Statement). CHB and Interface have no hard main-text cap: write
+~5,000–7,000 words with 5–6 main figures and pull the credibility chain
+(dose-linearisation ablation, docking + E1 fit, salience counterfactual)
+*into the main text* instead of burying it in the SI — that compression
+was the standing weakness of the PNAS draft. NHB compresses the same
+skeleton to its Article length with Methods after Discussion; CHB wants
+Introduction–Method–Results–Discussion, so Methods moves before Results
+without other changes. Keep American English (NHB house style; CHB and
+Interface accept either).
 
 ## The paper in one paragraph (abstract seed)
 
@@ -186,7 +218,7 @@ ticks; N = 20 seed-paired replications (N = 50 for boundary claims).
 | H8 | Operational buffering + spatial periphery | unmet needs 2.86 vs 10.18 at α=1; explorer precision 0.62 vs 0.20; MAE gap +0.12 → +0.33, aid gap −1.8 → −6.6 (≈0 in immobile control); betweenness/broker gaps small | `periphery_gap.png` (+ evolution); paired deltas in `comparison.txt` |
 | H9 | Hysteresis: repair works, starvation outlives it, history protects | dissolution 18/19 (from α=1, median lag 50 ticks) vs 4/19 constant; post-repair pool 102 vs 120, MAE 0.49 vs 0.41 (CI-separated); late-onset buffered (MAE 0.57 vs 1.59) | `results-reversal/` trajectories + summary + verdict |
 | H10 | Lifecycle grid: formation universal, dissolution dose-blocked, capture onset ~25× faster | formation 20/20 everywhere (tick 22±1 → 67±7); dissolution 17/20 → 3/20 (main); capture onset 59±3 → 2±1 | `results-lifecycle/lifecycle_perseed.md` (per-seed RNG-drift caveat; endpoints cite mechfix) |
-| — | Docking (external-validity anchor) | Glickman–Sharot dyadic amplification reproduced for both types; aligned AI retains more bias than a human partner | `results-docking/` (M6) |
+| — | Docking (external-validity anchor) | Glickman–Sharot dyadic amplification reproduced for both types; aligned AI retains more bias than a human partner | `results-docking/` (M6); effect-size fit `results-docking-fit/` (E1, population sweep pending) |
 | — | Robustness envelope | all criteria hold: population 100–500, small-world generator, AI supply 1–10, verification 0.1–0.5; 132-cell cognitive-profile sweep interior everywhere | `results-robustness/`, `docs/robustness_summary.md`, `results-gap-sweep-mechfix/` |
 
 ## The model's own robustness (the referee's first question)
@@ -210,7 +242,9 @@ and the redraft should state them **in the main text**, not the SI:
    this retirement story briefly is a credibility asset, not a confession.
 3. **The dyad docks to a published experiment.** One human × one AI, no
    network, no relief: the model qualitatively reproduces Glickman &
-   Sharot's human–AI bias amplification for both cognitive types. The
+   Sharot's human–AI bias amplification for both cognitive types, and
+   the E1 fit estimates the dyad's micro-parameters from their published
+   effect sizes (SI; stated with its conservative mismatch). The
    collective results are then the model's *addition* to a validated
    dyadic core, in the same move Lorenz/Becker made for social influence.
 4. **Nothing rests on a knife edge.** Every high-α boundary claim is
@@ -224,7 +258,9 @@ and the redraft should state them **in the main text**, not the SI:
 
 **Current state.** The model's empirical touchpoints are: (i) the
 qualitative docking against Glickman & Sharot — explicitly pattern
-reproduction, *not* parameter-matched calibration (SI §M6); (ii) two
+reproduction, *not* parameter-matched calibration (SI §M6 as archived;
+the E1 fit below upgrades it once its population sweep is run and the
+section is folded in); (ii) two
 empirically sourced entries in the calibration table (returner–explorer
 mobility, Pappalardo et al.; weak-tie structure, Granovetter); (iii)
 design-rationale justifications for everything else. The steps below are
@@ -237,18 +273,26 @@ re-confirmation): `docs/EMPIRICAL_FOUNDATIONS_PLAN.md`.**
 
 **Tier 1 — pre-submission (weeks, no new human data):**
 
-- **E1 — Effect-size-targeted docking — EXECUTED** (2026-08-31; was
+- **E1 — Effect-size-targeted docking — FIT EXECUTED, DELIVERABLE
+  PENDING** (fit 2026-08-31, reviewed 2026-09-03; was
   "parameter-matched", rescoped because G&S's tasks share no units with
   the severity grid). Dyadic acceptance/trust parameters fitted to
   transmission coefficients computed from Glickman & Sharot's published
-  primary data; population headline structure verified intact at the
-  fitted set (reduced grid; canonical N=20 sweep queued for CI).
-  Pipeline `experiments/docking_fit/`, results + SI-ready
-  interpretation `results-docking-fit/fit_report.md`. Delivered:
-  "micro-parameters empirically estimated," turning the docking
-  section from consistency check into indirect calibration — plus a
-  bonus mechanism note (confirmation-seekers adopt ~0 of AI
-  corrections at every certified parameter set; cf. C12).
+  primary data (pipeline `experiments/docking_fit/`, results and
+  provenance `results-docking-fit/`). Honest reading of the fit: the
+  human–human target is uninformative (its CI spans zero); the model
+  under-transmits AI influence for both types (below the measured CI,
+  ≈0 for confirmation-seekers by construction of the D/δ window, cf.
+  C12 — a limitation to state, not a finding); the fitted point sits on
+  the certified search-box boundary in two coordinates; the one
+  identified direction is the initial AI trust (≈2× default).
+  Population structure is verified intact on a reduced grid only.
+  Still to do before "micro-parameters empirically estimated;
+  population results unchanged" can be written: rerun the fit with the
+  Exp2 accurate-AI error ratio as a second target, then the canonical
+  N=20 sweep at the fitted set (workflow `run-docking-fit-sweep.yml`,
+  archive `results-docking-fit-sweep/`), then the SI §M6 fold-in. Open
+  items: `docs/development/EMPIRICAL_REVIEW_2026-09-03.md` §2.
 - **E2 — PARKED as a standalone side project** (author decision
   2026-08-31): measuring the confirmation weight of deployed
   assistants with the model's own estimand is a study in its own
@@ -303,12 +347,13 @@ work packages, cited in the Discussion as the agenda):**
   approval + ~€10–20k participant costs.
 - **E8 — LLM-agent replication**: re-run the sweep with LLM-driven
   agents (or the AI side played by real LLMs at their E2-measured α) to
-  show the mechanisms are not artifacts of hand-coded rules; direct
-  Science Advances precedent for the genre.
+  show the mechanisms are not artifacts of hand-coded rules; the
+  LLM-population studies (e.g. Sci. Adv. 2025) are the genre precedent.
 
 **Venue coupling:** with E2 parked, the paper stays simulation-only
-(anchored by the docking chain) and the venue call is Science Advances
-without contingency — see the status note in the venue section.
+(anchored by the docking chain); the venue call is the zero-APC tier
+list in the venue section (NHB subscription route → Computers in Human
+Behavior → J. R. Soc. Interface), with no contingency on E2.
 
 ## Framing rules (binding)
 
@@ -432,7 +477,11 @@ to a specific disaster — the docking experiment anchors the dyadic core,
 and transfer of the collective results is by extreme-case logic;
 cross-configuration contrasts are structural comparisons, not evaluations
 of any real platform's access policy; α\* transfers as "interior", not as
-0.6.
+0.6. The E1 fit adds one: the model's confirmation-seekers adopt almost
+none of an AI's disconfirming judgement at any certified parameter set,
+so the model cannot reproduce the measured magnitude of AI-to-human
+transmission for that type — it under-transmits AI influence, a
+conservative mismatch stated as such.
 
 ## Provenance (dataset map)
 
@@ -460,10 +509,13 @@ its source tables) one final time.
 
 ## Suggested skeleton
 
-Written for the recommended venue (Science Advances; the same structure
-compresses to Nature Communications / NMI length, which also move Methods
-after Discussion). Target ~5,000–7,000 words main text, 5–6 main
-figures, no main-text tables.
+Written at the roomy length the tier-2/3 venues allow (Computers in
+Human Behavior, J. R. Soc. Interface: no hard cap; for CHB, Methods
+moves before Results); the same structure compresses to Nature Human
+Behaviour Article length with Methods after Discussion. Target
+~5,000–7,000 words main text, 5–6 main figures, no main-text tables
+except the E4 predictions table in the Discussion (SI with a pointer
+where the venue disallows it).
 
 1. **Introduction** (~1,200–1,500 words — the NHB eight-paragraph arc,
    uncompressed): echo chambers → AI arrives, promise vs

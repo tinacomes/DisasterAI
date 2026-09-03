@@ -14,3 +14,5 @@ this automatically) rather than the git history itself.
 | `REVIEW_PROTOCOL.md` | Internal review findings C1–C12 with the fix log |
 | `FINAL_MECHANICS_REVIEW.md` | Pre-submission mechanism audit (limitations inventory) |
 | `DESIGN_PROPOSAL_NETWORK_MOBILITY.md` | Design document for the three mechanism switches (mobility, spatial-bridged network, network-gated queries) |
+| `PAPER_REVIEW_2026-08-17.md` | Overleaf draft vs repository results: number-by-number verification, figure and text edits |
+| `EMPIRICAL_REVIEW_2026-09-03.md` | Review of the empirical-foundations plan and E1 implementation (open items), and the APC-constrained venue re-decision |

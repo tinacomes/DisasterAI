@@ -349,30 +349,37 @@ def write_report(fitted, cdf, rdf, refined):
         f'| kappa_hh, exploratory | {tg["T2"]} | '
         f'{pd_["kappa_hh_explora"]:.3f} | {pf["kappa_hh_explora"]:.3f} |',
         '', '## Interpretation (for the SI text)', '',
-        '1. **Human-human transmission is matched.** Both cognitive types '
-        'transmit ~0.28 of the partner-self gap; the measured value is '
-        f'{tg["T2"]} (wide CI) -- inside it at default and fitted '
-        'parameters alike.',
-        '2. **AI transmission is identified but ceilinged.** The single '
-        'clearly identified direction is the initial AI trust level: '
-        'every top set roughly doubles the default (0.44-0.59 vs 0.25). '
-        'At the fitted point the accuracy-seeker reaches '
-        f'kappa_ai = {pf["kappa_ai_explora"]:.2f}, at the edge of the '
-        f'measured CI [{tg["T1"] - 1.96 * tg["se1"]:.2f}, '
+        '1. **Human-human transmission: consistent with an uninformative '
+        'measurement.** Both cognitive types transmit ~0.28 of the '
+        f'partner-self gap; the measured value is {tg["T2"]} with a 95% '
+        f'CI [{tg["T2"] - 1.96 * tg["se2"]:.2f}, '
+        f'{tg["T2"] + 1.96 * tg["se2"]:.2f}] that spans zero, so this '
+        'target constrains the fit only weakly (its loss weight is '
+        f'{(tg["se1"] / tg["se2"]) ** 2:.2f} of kappa_ai\'s).',
+        '2. **AI transmission is identified in one direction, and '
+        'under-transmitted.** The single clearly identified direction is '
+        'the initial AI trust level: every top set roughly doubles the '
+        'default (0.44-0.59 vs 0.25). At the fitted point the '
+        f'accuracy-seeker reaches kappa_ai = {pf["kappa_ai_explora"]:.2f}, '
+        f'below the measured 95% CI [{tg["T1"] - 1.96 * tg["se1"]:.2f}, '
         f'{tg["T1"] + 1.96 * tg["se1"]:.2f}]; the confirmation-seeker '
         f'stays near zero ({pf["kappa_ai_exploit"]:.2f}) at every '
         'parameter set in the box -- its D/delta acceptance window '
         'rejects strongly disconfirming reports by construction (the '
-        'same mechanism behind C12). The population mean therefore '
-        'under-transmits AI influence relative to Glickman & Sharot '
+        'same mechanism behind C12), a structural limitation of the '
+        'model rather than a fitting failure. The population mean '
+        'therefore under-transmits AI influence relative to Glickman & '
+        'Sharot '
         f'({(pd_["kappa_ai_exploit"] + pd_["kappa_ai_explora"]) / 2:.2f} '
         'default, '
         f'{(pf["kappa_ai_exploit"] + pf["kappa_ai_explora"]) / 2:.2f} '
-        f'fitted, vs {tg["T1"]} measured).',
+        f'fitted, vs {tg["T1"]} measured); no parameter set in the '
+        'certified box reaches the measured range.',
         '3. **The mismatch is conservative.** The model\'s humans adopt '
         'AI judgments more reluctantly than measured participants, so '
         'the population-scale harms are not driven by an over-credulous '
-        'human model; if anything the model understates AI influence.',
+        'human model; if anything the model understates AI influence. '
+        'The paper states this as a limitation, not a finding.',
         '4. **All orderings reproduce**: the confirming AI (alpha=1) '
         'retains the implanted bias fully while the human partner '
         'erodes it, and final bias is monotone in alpha '
@@ -382,6 +389,11 @@ def write_report(fitted, cdf, rdf, refined):
         'this set indicate ridge directions -- the fit constrains '
         'combinations, not every coordinate:', '',
         top[PARAM_NAMES + ['loss']].round(3).to_markdown(index=False), '',
+        boundary_note(fitted), '',
+        'With kappa_human uninformative and the orderings satisfied '
+        'everywhere in the box, identification rests on one number '
+        '(kappa_ai); the Exp2 accurate-AI error ratio in targets.json is '
+        'the natural second target for a rerun.', '',
         'Trust learning rates are not identified by the dyad (trust is '
         'held fixed there by design); the fitted trust-side quantities '
         'are the initial trust levels.', '',
@@ -392,6 +404,27 @@ def write_report(fitted, cdf, rdf, refined):
     ]
     with open(os.path.join(OUT_DIR, 'fit_report.md'), 'w') as f:
         f.write('\n'.join(lines))
+
+
+def boundary_note(fitted):
+    """Name the fitted coordinates that sit on or near the search box."""
+    box = fitted['search']['box']
+    hits = []
+    for k, v in fitted['fitted_params'].items():
+        lo, hi = box[k]
+        rel = (v - lo) / (hi - lo) if hi > lo else 0.0
+        if rel >= 0.9:
+            hits.append(f'`{k}` = {v:.2f} of [{lo}, {hi}] (upper)')
+        elif rel <= 0.1:
+            hits.append(f'`{k}` = {v:.2f} of [{lo}, {hi}] (lower)')
+    if not hits:
+        return ('The fitted point is interior to the search box in every '
+                'coordinate.')
+    return ('The fitted point lies on or near the search-box boundary in '
+            f'{len(hits)} coordinate(s): ' + '; '.join(hits) + '. The box '
+            'is the S9/M5-certified robustness envelope, so the fit '
+            'reports an envelope-constrained best point, not an interior '
+            'optimum; a wider box would leave the certified envelope.')
 
 
 def make_figure(refined, best_id, tg):

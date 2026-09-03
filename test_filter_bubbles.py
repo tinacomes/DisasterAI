@@ -2823,6 +2823,15 @@ if __name__ == '__main__':
              'compute metrics, and generate spatial_coverage.png + periphery_gap.png. '
              'Used after the parallel --single-alpha --epicenter CI jobs.',
     )
+    parser.add_argument(
+        '--param-overrides', default=None, metavar='JSON',
+        help='JSON file of DisasterModel keyword overrides merged over '
+             'base_params after every other CLI override. Accepts a flat '
+             '{name: value} object or an E1 docking-fit fitted_params.json '
+             '(its "fitted_params" block is used; the dyad-only "rounds" '
+             'entry is dropped). Used by the run-docking-fit-sweep workflow '
+             'to rerun the canonical sweep at the fitted dyadic parameters.',
+    )
     args = parser.parse_args()
 
     # Apply CLI overrides
@@ -2854,6 +2863,17 @@ if __name__ == '__main__':
         base_params['num_ai'] = args.num_ai
     if args.verification_probability is not None:
         base_params['verification_probability'] = args.verification_probability
+    PARAM_OVERRIDES = {}
+    if args.param_overrides is not None:
+        with open(args.param_overrides) as _f:
+            PARAM_OVERRIDES = json.load(_f)
+        if 'fitted_params' in PARAM_OVERRIDES:
+            PARAM_OVERRIDES = PARAM_OVERRIDES['fitted_params']
+        PARAM_OVERRIDES = {k: v for k, v in PARAM_OVERRIDES.items()
+                           if k != 'rounds'}
+        base_params.update(PARAM_OVERRIDES)
+        print(f'Parameter overrides from {args.param_overrides}: '
+              f'{PARAM_OVERRIDES}')
     if args.seed_base is not None:
         SEED_BASE = args.seed_base
     n_runs_primary = args.n_runs if args.n_runs is not None else N_RUNS
@@ -2902,7 +2922,8 @@ if __name__ == '__main__':
         params = {**base_params, 'ai_alignment_level': alpha}
         result = run_replicated(params, n_runs_primary, f'Alignment α={alpha:.1f}')
         with open(out, 'w') as f:
-            json.dump({'alpha': alpha, 'result': result, 'conventions': CONVENTIONS}, f)
+            json.dump({'alpha': alpha, 'result': result, 'conventions': CONVENTIONS,
+                       'param_overrides': PARAM_OVERRIDES}, f)
         print(f'Saved → {out}')
         import sys; sys.exit(0)
 

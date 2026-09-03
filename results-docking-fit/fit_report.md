@@ -34,9 +34,9 @@ Fitted parameters (defaults in brackets):
 
 ## Interpretation (for the SI text)
 
-1. **Human-human transmission is matched.** Both cognitive types transmit ~0.28 of the partner-self gap; the measured value is 0.309 (wide CI) -- inside it at default and fitted parameters alike.
-2. **AI transmission is identified but ceilinged.** The single clearly identified direction is the initial AI trust level: every top set roughly doubles the default (0.44-0.59 vs 0.25). At the fitted point the accuracy-seeker reaches kappa_ai = 0.49, at the edge of the measured CI [0.52, 0.98]; the confirmation-seeker stays near zero (0.05) at every parameter set in the box -- its D/delta acceptance window rejects strongly disconfirming reports by construction (the same mechanism behind C12). The population mean therefore under-transmits AI influence relative to Glickman & Sharot (0.16 default, 0.27 fitted, vs 0.748 measured).
-3. **The mismatch is conservative.** The model's humans adopt AI judgments more reluctantly than measured participants, so the population-scale harms are not driven by an over-credulous human model; if anything the model understates AI influence.
+1. **Human-human transmission: consistent with an uninformative measurement.** Both cognitive types transmit ~0.28 of the partner-self gap; the measured value is 0.309 with a 95% CI [-0.66, 1.28] that spans zero, so this target constrains the fit only weakly (its loss weight is 0.06 of kappa_ai's).
+2. **AI transmission is identified in one direction, and under-transmitted.** The single clearly identified direction is the initial AI trust level: every top set roughly doubles the default (0.44-0.59 vs 0.25). At the fitted point the accuracy-seeker reaches kappa_ai = 0.49, below the measured 95% CI [0.52, 0.98]; the confirmation-seeker stays near zero (0.05) at every parameter set in the box -- its D/delta acceptance window rejects strongly disconfirming reports by construction (the same mechanism behind C12), a structural limitation of the model rather than a fitting failure. The population mean therefore under-transmits AI influence relative to Glickman & Sharot (0.16 default, 0.27 fitted, vs 0.748 measured); no parameter set in the certified box reaches the measured range.
+3. **The mismatch is conservative.** The model's humans adopt AI judgments more reluctantly than measured participants, so the population-scale harms are not driven by an over-credulous human model; if anything the model understates AI influence. The paper states this as a limitation, not a finding.
 4. **All orderings reproduce**: the confirming AI (alpha=1) retains the implanted bias fully while the human partner erodes it, and final bias is monotone in alpha (Spearman ~0.95).
 
 ## Identifiability
@@ -55,6 +55,10 @@ Coarse-pass top 10 (loss-ranked); parameter ranges within this set indicate ridg
 |       1.874 |           2.692 |      4.679 |          1.65  |           0.391 |              0.47  |       50 | 18.783 |
 |       2.745 |           2.525 |      4.357 |          1.362 |           0.195 |              0.489 |       50 | 18.945 |
 |       2.215 |           4.082 |      3.701 |          0.9   |           0.578 |              0.58  |       40 | 19.114 |
+
+The fitted point lies on or near the search-box boundary in 2 coordinate(s): `d_explor` = 5.37 of [3.0, 5.5] (upper); `rounds` = 60.00 of [20, 60] (upper). The box is the S9/M5-certified robustness envelope, so the fit reports an envelope-constrained best point, not an interior optimum; a wider box would leave the certified envelope.
+
+With kappa_human uninformative and the orderings satisfied everywhere in the box, identification rests on one number (kappa_ai); the Exp2 accurate-AI error ratio in targets.json is the natural second target for a rerun.
 
 Trust learning rates are not identified by the dyad (trust is held fixed there by design); the fitted trust-side quantities are the initial trust levels.
 

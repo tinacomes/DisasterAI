@@ -6,7 +6,10 @@ re-verifies, as of **2026-08-31**, that the Tier-1 steps E1–E4 are the
 right pre-submission investments, (ii) makes E1, E3, and E4 concrete
 enough to execute, and (iii) records the venue re-confirmation. The
 full E2 protocol and implementation plan is
-`docs/ALPHA_MEASUREMENT_PROTOCOL.md`.
+`docs/ALPHA_MEASUREMENT_PROTOCOL.md`. **Reviewed 2026-09-03**
+(`docs/development/EMPIRICAL_REVIEW_2026-09-03.md`): E1 status
+corrected to "fit executed, deliverable pending" (§2), venue re-decided
+under the APC constraint (§5).
 
 ## 1. Verification: are E1–E4 the right steps? (checked 2026-08-31)
 
@@ -61,7 +64,9 @@ exists to answer "your α is a cartoon" with external anchors — and
   survives with that qualifier. Feasibility gate: their data/code
   availability (the NHB paper carries availability statements —
   verify at kickoff; fallback is fitting to reported summary
-  statistics only, which still supports the claim).
+  statistics only, which still supports the claim). *Status
+  2026-09-03:* fit executed on the primary data; deliverable (canonical
+  population sweep at the fitted set) pending — §2.
 
 Nothing in the check argues for promoting a Tier-2 step into Tier 1:
 E5/E6 remain confirmatory-flavoured and slow (E6 — rerunning on an
@@ -85,12 +90,15 @@ the published pattern" to "micro-parameters estimated from the
 published experiment, population results intact" — indirect
 calibration — at near-zero length cost.
 
-**Execution order (revised 2026-08-31; E1 pulled forward and DONE):**
+**Execution order (revised 2026-09-03; E1 pulled forward — fit done,
+deliverable open):**
 
-    E1 — EXECUTED (see §2 status; remaining: N=20 fitted-parameter
-    sweep on CI, and folding fit_report.md into SI §M6 at redraft)
+    E1 — fit executed; deliverable pending (see §2: rerun the fit with
+    the Exp2 second target → canonical N=20 sweep on CI via
+    run-docking-fit-sweep.yml → archive results-docking-fit-sweep/ →
+    SI §M6 fold-in at redraft)
     → E4 (1 d) → E3 (2–4 d) → E2-lite (0.5 d, folds into E3's
-    literature pass)
+    literature pass; first-rank anchor: Cheng et al. 2026, Science)
 
     E2 side project: independent track, scheduled by the author;
     its only coupling to the paper is an optional companion citation.
@@ -104,24 +112,51 @@ soon as the cheap steps clear.
 
 ## 2. E1 — Effect-size-targeted docking (implementation)
 
-**Status (2026-08-31): EXECUTED** — pipeline in
-`experiments/docking_fit/` (targets → fit → population check), results
-in `results-docking-fit/` (`fit_report.md` carries the SI-ready
-interpretation). Better than planned: Glickman & Sharot's per-trial
-data is public (affective-brain-lab/BiasedHumanAI), so the targets are
-*computed from the primary data* with the authors' own conventions,
-not transcribed from the paper. Headline results: the human–human
-transmission coefficient is matched (~0.28 vs measured 0.309); the
-identified parameter direction is the initial AI trust (≈2× the
-default); the accuracy-seeker's AI transmission reaches the edge of
-the measured CI (0.49 vs [0.52, 0.98]) while the confirmation-seeker
-stays near zero at every certified parameter set — the model's own
-D/δ acceptance mechanism (cf. C12) — so the model *under*-transmits AI
-influence relative to measurement: a conservative mismatch, stated as
-such. All orderings (AI retains bias > human partner; monotone in α)
-reproduce. Remaining: the canonical N=20 full-grid population sweep at
-fitted parameters on CI (the in-session check runs the reduced grid).
-The plan below is retained for provenance.
+**Status (2026-08-31, reviewed 2026-09-03): FIT EXECUTED — DELIVERABLE
+PENDING.** Pipeline in `experiments/docking_fit/` (targets → fit →
+population check), results and provenance in `results-docking-fit/`
+(`fit_report.md`, `README.md`). Better than planned: Glickman &
+Sharot's per-trial data is public (affective-brain-lab/BiasedHumanAI),
+so the targets are *computed from the primary data* with the authors'
+own conventions, not transcribed from the paper. What the fit shows,
+read without overclaiming (review §2, F2–F4):
+
+- The human–human transmission target is uninformative (measured 0.31,
+  95% CI [−0.59, 1.34]); the model's ≈0.28 is consistent with it but
+  the target contributes almost nothing to the loss.
+- AI transmission is identified in one direction — the initial AI
+  trust, ≈2× the default at every top set — but the model
+  *under*-transmits AI influence for both types: the accuracy-seeker
+  reaches κ_AI = 0.49, below the measured CI [0.52, 0.98]; the
+  confirmation-seeker stays ≈0.05 at every certified parameter set
+  because its D/δ acceptance window rejects strongly disconfirming
+  reports by construction (cf. C12). This is a structural limitation to
+  list in the paper, and a conservative mismatch: if anything the
+  population-scale harms are understated.
+- The fitted point sits on the S9-certified search-box boundary in two
+  coordinates (`rounds` = 60 of [20, 60]; `d_explor` = 5.37 of
+  [3.0, 5.5]) — an envelope-constrained best point, not an interior
+  optimum. `initial_trust` is not identified (coarse top-10 spans its
+  whole range).
+- All orderings reproduce (confirming AI retains bias > human partner;
+  final bias monotone in α, Spearman ≈0.95).
+
+Remaining before the SI can carry "micro-parameters estimated from the
+published experiment; population results intact": (1) rerun the fit
+with the Exp2 accurate-AI error ratio (already computed in
+`targets.json`, C2) as a second target so the fit is not effectively
+one-target with seven free parameters, and report the boundary
+statement (review A4–A6); (2) the canonical N=20 × 11-α ×
+two-configuration sweep at the fitted set — `--param-overrides` in
+`test_filter_bubbles.py` and the workflow
+`.github/workflows/run-docking-fit-sweep.yml` exist (added
+2026-09-03); trigger, archive as `results-docking-fit-sweep/` with a
+README, tabulate fitted vs `results-mechfix/` defaults (independent
+samples with CIs; do not present as per-seed pairs unless bit-pairing
+is verified); (3) `population_check.py --param-set default` for the
+like-for-like reduced grid; (4) fold `fit_report.md` and
+`docking_fit.png` into SI §M6 at redraft. The plan below is retained
+for provenance.
 
 Harness: `experiments/dyadic_docking.py` (exists, runs the dyad with
 the model's own acceptance/trust machinery; currently qualitative).
@@ -233,39 +268,70 @@ E7 (the networked experiment) is then cited as the designed test of
 rows 1–4 — the table is what makes the Tier-3 agenda look planned
 rather than deferred.
 
-## 5. Venue re-confirmation (checked 2026-08-31)
+## 5. Venue re-decision under the APC constraint (2026-09-03)
 
-**The recommendation is Science Advances primary, now without
-contingency (E2 parked → the paper stays simulation-only, anchored by
-the docking chain); arXiv (cs.CY + cs.MA, cross-list physics.soc-ph)
-at submission regardless.** NMI reverts to the scope-stretch third
-option; the E2 side project itself is a natural NMI/AI-venue short
-paper later, and the two cross-cite. Points re-verified:
+**Supersedes the 2026-08-31 re-confirmation.** The author established
+on 2026-09-03 that library support at TU Delft and at DLR covers at
+most ≈ USD 2,000 per article and nothing beyond. Science Advances
+(USD 5,450, gold OA only), Nature Communications (USD 7,350) and every
+Nature-portfolio gold-OA option are therefore out; the Dutch Springer
+Nature agreement and DEAL both exclude Nature-branded journals. Full
+cost table, agreement details and verification flags:
+`docs/development/EMPIRICAL_REVIEW_2026-09-03.md` §4.
 
-- The Science Advances precedent is real and on point: *Emergent
-  social conventions and collective bias in LLM populations*, Sci.
-  Adv. 11, eadu9368 (2025) — pure-simulation, AI-population social
-  dynamics, same genre shelf the paper argues from.
-- The topic has, if anything, risen in salience since the brief was
-  written: assistant sycophancy is now a mainstream research and
-  policy concern (dedicated benchmarks, dependence studies, prominent
-  coverage), which strengthens the machine-behaviour cover-letter
-  framing at both SciAdv and NMI — and shortens the novelty window
-  for E2 (§1).
-- No new venue changes the calculus. The excluded list (PNAS/Nexus,
-  JASSS/JCSS, young non-indexed venues) stays excluded; Nature
-  Communications remains the reach-plus-indexing backup with the
-  known APC/speed costs.
-- Decision rule (updated 2026-08-31, E2 parked): submit Science
-  Advances; no NMI presubmission inquiry is needed for this paper.
-  The inquiry idea transfers to the E2 side project, for which
-  measured sycophancy of deployed systems *is* squarely the genre.
+**Recommendation: a zero-APC three-tier strategy, every tier covering
+agent-based modelling and human–AI interaction, none a computer-science
+venue.**
+
+1. **Nature Human Behaviour, subscription route (reach; no APC).** The
+   docking target is an NHB paper and NHB's agenda pieces (*Machine
+   culture*, 2023; *A new sociology of humans and machines*, 2024) call
+   for exactly this genre. Simulation-only research articles are rare
+   there, so: presubmission enquiry first; a decline costs weeks.
+   Green OA via arXiv at submission and the Taverne route (version of
+   record in the TU Delft repository after six months).
+2. **Computers in Human Behavior (safe; OA at no cost under the Dutch
+   Elsevier agreement with a TU Delft corresponding author, valid to
+   31 Dec 2026, or under DEAL with a DLR corresponding author).** Scope
+   is the psychological impact of computing on "individuals, groups and
+   society", with the computer "only as a medium through which human
+   behaviours are shaped" — the brief's behaviour-first rule; ABM and
+   simulation studies of echo chambers are in its record; IF 12.2. The
+   predictable objection ("no human data") is answered by the E1 fit,
+   the E4 predictions table and the Cheng et al. 2026 anchor.
+3. **Journal of the Royal Society Interface (modelling audience; OA
+   with no APC for 2026 acceptances under Subscribe-to-Open).** ABMs of
+   opinion dynamics with social-identity bias, collective wisdom under
+   incorrect social information, and misinformation on networks are in
+   its recent record. Verify the 2027 S2O status if the timeline slips.
+
+Fallbacks (same agreements): Int. J. Human-Computer Studies,
+Technological Forecasting & Social Change, Royal Society Open Science
+(only if a Royal Society Read & Publish covers TU Delft — verify).
+Still excluded by author decision: PNAS/Nexus (PNAS delayed OA would be
+affordable), JASSS/JCSS, Collective Intelligence. NMI is free on its
+subscription route but stays the scope stretch and is not recommended.
+
+**Framing (venue-neutral, in addition to the brief's rules):** lead
+with people — who relies on what, who learns what from whom — never
+with alignment machinery; anchor the motivation in the measured dyadic
+(Glickman & Sharot 2025) and sycophancy→dependence (Cheng et al. 2026)
+evidence, and state the population-scale gap in one sentence; the ABM
+is the instrument. For CHB add one sentence naming
+reliance-without-trust as the psychological construct the model
+operationalises.
+
+**Decision rule:** presubmission enquiry to NHB at the end of the
+redraft; on a decline or no reply within three weeks, submit to CHB;
+Interface if CHB rejects on "no human data". arXiv (cs.CY + cs.MA,
+cross-list physics.soc-ph) at first submission regardless. The E2 side
+project keeps its own NMI/AI-venue track and cross-cites.
 
 ## 6. Summary of new artifacts this plan creates
 
 | Step | Files |
 |---|---|
-| E1 | `experiments/docking_fit/{targets.json, fit_docking.py}`, fitted-parameter sweep results dir, SI section |
+| E1 | `experiments/docking_fit/{compute_targets.py, targets.json, fit_docking.py, population_check.py}`, `results-docking-fit/` (fit, done), `.github/workflows/run-docking-fit-sweep.yml` → `results-docking-fit-sweep/` (canonical sweep, pending), SI section |
 | E2-lite | Discussion paragraph + 3–5 References.bib entries |
 | E3 | Table S7 revision in `PNAS_Paper/SI_Appendix.tex`, References.bib entries |
 | E4 | Predictions table + framing text (Discussion; drafted in the redraft pack) |

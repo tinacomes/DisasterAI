@@ -1,0 +1,140 @@
+name: Run Docking-Fit Sweep (E1)
+
+# E1 step 4 (docs/EMPIRICAL_FOUNDATIONS_PLAN.md §2): rerun the canonical
+# primary alignment sweep — both configurations, 11 alpha levels, N seed-
+# paired replications — at the dyadic micro-parameters fitted to Glickman &
+# Sharot's published effect sizes (results-docking-fit/fitted_params.json),
+# so the SI can show the headline structure (interior alpha*, starvation
+# gradient, structural precondition) intact at fitted vs default parameters.
+#
+# Identical structure and seeding to compare-network-mobility.yml (the
+# results-mechfix/ workflow): the only difference is --param-overrides,
+# which merges the fitted acceptance windows (D/delta, both types) and
+# initial trust levels over base_params; the dyad-only 'rounds' entry is
+# dropped by the runner. Compare the resulting summary_table / comparison
+# tables against results-mechfix/ (default parameters) for the SI section.
+#
+# Trigger: GitHub → Actions → "Run Docking-Fit Sweep (E1)" → Run workflow
+
+on:
+  workflow_dispatch:
+    inputs:
+      n_runs:
+        description: "Replications per alpha level"
+        required: false
+        default: "20"
+      ticks:
+        description: "Simulation ticks per run"
+        required: false
+        default: "200"
+      overrides_file:
+        description: "JSON with the parameter overrides (flat dict or an E1 fitted_params.json)"
+        required: false
+        default: "results-docking-fit/fitted_params.json"
+
+env:
+  MPLBACKEND: Agg
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  # ── Step 1: one worker per (config × alpha level) ─────────────────────────
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        config: [baseline, switches]
+        alpha: ["0.0", "0.1", "0.2", "0.3", "0.4", "0.5", "0.6", "0.7", "0.8", "0.9", "1.0"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11", cache: "pip"}
+      - run: pip install -r requirements.txt
+      - run: |
+          if [ "${{ matrix.config }}" = "switches" ]; then
+            FLAGS="--mobility 1 --network-type spatial_bridged --query-scope network"
+          else
+            FLAGS="--mobility 0 --network-type components --query-scope global"
+          fi
+          mkdir -p out
+          python3 test_filter_bubbles.py \
+            --single-alpha ${{ matrix.alpha }} \
+            --out-file out/bubble_alpha_${{ matrix.alpha }}.json \
+            --ticks ${{ inputs.ticks }} \
+            --n-runs ${{ inputs.n_runs }} \
+            --param-overrides ${{ inputs.overrides_file }} \
+            $FLAGS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dockfit-${{ matrix.config }}-${{ matrix.alpha }}
+          path: out/bubble_alpha_${{ matrix.alpha }}.json
+          retention-days: 7
+
+  # ── Step 2: collect + plot, once per config ───────────────────────────────
+  collect:
+    needs: sweep
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        config: [baseline, switches]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11", cache: "pip"}
+      - run: pip install -r requirements.txt
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: dockfit-${{ matrix.config }}-*
+          merge-multiple: true
+          path: results/
+      - run: ls -lh results/
+      - run: |
+          python3 test_filter_bubbles.py \
+            --collect-and-plot \
+            --results-dir results/ \
+            --save-dir results/ \
+            --ticks ${{ inputs.ticks }} \
+            --n-runs ${{ inputs.n_runs }}
+      - run: cp ${{ inputs.overrides_file }} results/param_overrides_used.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: plots-config-${{ matrix.config }}
+          path: |
+            results/*.png
+            results/summary_table.csv
+            results/summary_table.md
+            results/experiment_results.json
+            results/param_overrides_used.json
+          retention-days: 30
+
+  # ── Step 3: cross-config tables + overlay figure ──────────────────────────
+  compare:
+    needs: collect
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11", cache: "pip"}
+      - run: pip install -r requirements.txt
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: plots-config-*
+          path: compare/
+      - run: |
+          python3 tools/compare_configs.py compare/ . | tee comparison.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: docking-fit-sweep-comparison
+          path: |
+            comparison.txt
+            comparison_table.csv
+            comparison_table.md
+            comparison_configs.png
+          retention-days: 30
