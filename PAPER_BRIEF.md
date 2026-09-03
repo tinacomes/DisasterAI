@@ -237,13 +237,18 @@ re-confirmation): `docs/EMPIRICAL_FOUNDATIONS_PLAN.md`.**
 
 **Tier 1 — pre-submission (weeks, no new human data):**
 
-- **E1 — Parameter-matched docking** (highest leverage). Upgrade M6 from
-  qualitative to fitted: use Glickman & Sharot's published effect sizes
-  to estimate the acceptance/trust parameters (D, δ, learning rates) in
-  the dyad (`experiments/dyadic_docking.py` is the harness; wrap it in a
-  fitting loop), then show the population runs under fitted vs. default
-  parameters. Buys: "micro-parameters empirically estimated," turning
-  the docking section from consistency check into indirect calibration.
+- **E1 — Effect-size-targeted docking — EXECUTED** (2026-08-31; was
+  "parameter-matched", rescoped because G&S's tasks share no units with
+  the severity grid). Dyadic acceptance/trust parameters fitted to
+  transmission coefficients computed from Glickman & Sharot's published
+  primary data; population headline structure verified intact at the
+  fitted set (reduced grid; canonical N=20 sweep queued for CI).
+  Pipeline `experiments/docking_fit/`, results + SI-ready
+  interpretation `results-docking-fit/fit_report.md`. Delivered:
+  "micro-parameters empirically estimated," turning the docking
+  section from consistency check into indirect calibration — plus a
+  bonus mechanism note (confirmation-seekers adopt ~0 of AI
+  corrections at every certified parameter set; cf. C12).
 - **E2 — PARKED as a standalone side project** (author decision
   2026-08-31): measuring the confirmation weight of deployed
   assistants with the model's own estimand is a study in its own

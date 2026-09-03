@@ -85,10 +85,12 @@ the published pattern" to "micro-parameters estimated from the
 published experiment, population results intact" — indirect
 calibration — at near-zero length cost.
 
-**Execution order (revised 2026-08-31):**
+**Execution order (revised 2026-08-31; E1 pulled forward and DONE):**
 
-    E4 (1 d) → E3 (2–4 d) → E2-lite (0.5 d, folds into E3's
-    literature pass) → E1 (1–2 wks; the long pole)
+    E1 — EXECUTED (see §2 status; remaining: N=20 fitted-parameter
+    sweep on CI, and folding fit_report.md into SI §M6 at redraft)
+    → E4 (1 d) → E3 (2–4 d) → E2-lite (0.5 d, folds into E3's
+    literature pass)
 
     E2 side project: independent track, scheduled by the author;
     its only coupling to the paper is an optional companion citation.
